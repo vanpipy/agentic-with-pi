@@ -67,25 +67,10 @@ func (f FinishReason) String() string {
 	}
 }
 
-type Choice struct {
-	Index        int          `json:"index"`
-	Message      Message      `json:"message"`
-	FinishReason FinishReason `json:"finish_reason"`
-}
-
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
-}
-
-type ChatResponse struct {
-	ID      string   `json:"id"`
-	Model   string   `json:"model"`
-	Object  string   `json:"object"`
-	Created int64    `json:"created"`
-	Choices []Choice `json:"choices"`
-	Usage   Usage    `json:"usage"`
 }
 
 type StreamChoice struct {

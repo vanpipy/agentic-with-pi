@@ -36,16 +36,6 @@ func NewRetryCore(inner Core, config RetryConfig) *RetryCore {
 	return &RetryCore{inner: inner, config: config}
 }
 
-func (r *RetryCore) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	var resp *ChatResponse
-	err := r.withRetry(ctx, func(ctx context.Context) error {
-		var err error
-		resp, err = r.inner.Chat(ctx, req)
-		return err
-	})
-	return resp, err
-}
-
 func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	return r.inner.StreamChat(ctx, req)
 }

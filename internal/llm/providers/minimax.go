@@ -2,6 +2,7 @@ package providers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -85,6 +86,11 @@ type anthropicToolChoice struct {
 	Name string `json:"name,omitzero"`
 }
 
+type anthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
+}
+
 type anthropicRequest struct {
 	Model         string               `json:"model"`
 	MaxTokens     int                  `json:"max_tokens"`
@@ -95,6 +101,7 @@ type anthropicRequest struct {
 	StopSequences []string             `json:"stop_sequences,omitzero"`
 	Temperature   *float32             `json:"temperature,omitzero"`
 	Stream        bool                 `json:"stream,omitzero"`
+	Thinking      *anthropicThinking   `json:"thinking,omitempty"`
 }
 
 func (p *MiniMaxProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error) {
@@ -148,6 +155,19 @@ func (p *MiniMaxProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error) {
 			Name: req.ToolChoice.Name,
 		}
 	}
+	for _, m := range p.Models() {
+		if m.ID == req.Model && m.SupportsReasoning {
+			budget := out.MaxTokens / 2
+			if budget > 8192 {
+				budget = 8192
+			}
+			if budget < 1 {
+				budget = 1024
+			}
+			out.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+			break
+		}
+	}
 
 	for _, tool := range req.Tools {
 		out.Tools = append(out.Tools, anthropicTool{
@@ -157,7 +177,13 @@ func (p *MiniMaxProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error) {
 		})
 	}
 
-	return json.Marshal(out)
+	body, err := json.Marshal(out)
+	if err != nil {
+		slog.Debug("provider: marshal request failed", "model", req.Model, "err", err)
+		return nil, err
+	}
+	slog.Debug("provider: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(messages))
+	return body, nil
 }
 
 func convertOutboundContent(msg llm.Message) any {
@@ -217,90 +243,6 @@ type anthropicResponseContent struct {
 	Input map[string]any `json:"input,omitzero"`
 }
 
-type anthropicResponse struct {
-	ID         string                     `json:"id"`
-	Model      string                     `json:"model"`
-	StopReason string                     `json:"stop_reason"`
-	Content    []anthropicResponseContent `json:"content"`
-	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage"`
-	Error *struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
-	} `json:"error,omitzero"`
-}
-
-func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.ChatResponse, error) {
-	var raw anthropicResponse
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, &llm.Error{
-			Kind:    llm.ErrorKindClient,
-			Message: "failed to parse response",
-			Cause:   err,
-		}
-	}
-	if raw.Error != nil {
-		return nil, &llm.Error{
-			Kind:    llm.ErrorKindVendor,
-			Message: raw.Error.Message,
-		}
-	}
-
-	var contentText, reasoning strings.Builder
-	var reasoningSig string
-	var toolCalls []llm.ToolCall
-	for _, block := range raw.Content {
-		switch block.Type {
-		case "thinking":
-			reasoning.WriteString(block.Thinking)
-			if block.Signature != "" {
-				reasoningSig = block.Signature
-			}
-		case "redacted_thinking":
-			reasoning.WriteString("[Reasoning redacted]")
-			if block.Data != "" {
-				reasoningSig = block.Data
-			}
-		case "text":
-			contentText.WriteString(block.Text)
-		case "tool_use":
-			argsJSON, _ := json.Marshal(block.Input)
-			toolCalls = append(toolCalls, llm.ToolCall{
-				ID:   block.ID,
-				Type: "function",
-				Function: llm.FunctionCall{
-					Name:      block.Name,
-					Arguments: string(argsJSON),
-				},
-			})
-		}
-	}
-
-	return &llm.ChatResponse{
-		ID:      raw.ID,
-		Model:   raw.Model,
-		Object:  "message",
-		Choices: []llm.Choice{{
-			Index: 0,
-			Message: llm.Message{
-				Role:         "assistant",
-				Content:      contentText.String(),
-				Reasoning:    reasoning.String(),
-				ReasoningSig: reasoningSig,
-				ToolCalls:    toolCalls,
-			},
-			FinishReason: parseAnthropicStopReason(raw.StopReason),
-		}},
-		Usage: llm.Usage{
-			PromptTokens:     raw.Usage.InputTokens,
-			CompletionTokens: raw.Usage.OutputTokens,
-			TotalTokens:      raw.Usage.InputTokens + raw.Usage.OutputTokens,
-		},
-	}, nil
-}
-
 func parseAnthropicStopReason(s string) llm.FinishReason {
 	switch s {
 	case "end_turn", "stop_sequence":
@@ -347,9 +289,10 @@ type anthropicStreamEvent struct {
 	} `json:"usage,omitzero"`
 }
 
-func (p *MiniMaxProvider) ConvertStreamChunk(data []byte) (*llm.StreamChunk, bool, error) {
+func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, error) {
 	var ev anthropicStreamEvent
 	if err := json.Unmarshal(data, &ev); err != nil {
+		slog.Debug("provider: parse stream event failed", "bytes", len(data), "err", err)
 		return nil, false, &llm.Error{
 			Kind:    llm.ErrorKindClient,
 			Message: "failed to parse stream event",

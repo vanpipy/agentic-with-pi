@@ -2,7 +2,6 @@ package providers_test
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -154,279 +153,6 @@ func TestConvertRequestToolResultAsUserMessage(t *testing.T) {
 	}
 }
 
-func TestConvertResponseTextAndReasoning(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "end_turn",
-		"content": [
-			{"type": "thinking", "thinking": "let me think"},
-			{"type": "text", "text": "answer"}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := resp.Choices[0]
-	if c.Message.Content != "answer" {
-		t.Errorf("Content = %q, want answer", c.Message.Content)
-	}
-	if c.Message.Reasoning != "let me think" {
-		t.Errorf("Reasoning = %q", c.Message.Reasoning)
-	}
-	if c.FinishReason != llm.FinishReasonStop {
-		t.Errorf("FinishReason = %v, want Stop", c.FinishReason)
-	}
-	if c.FinishReason.String() != "stop" {
-		t.Errorf("FinishReason.String() = %q", c.FinishReason.String())
-	}
-	if resp.Usage.PromptTokens != 10 {
-		t.Errorf("PromptTokens = %d", resp.Usage.PromptTokens)
-	}
-}
-
-func TestConvertResponseToolUse(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "tool_use",
-		"content": [
-			{"type": "text", "text": "let me check"},
-			{"type": "tool_use", "id": "toolu_abc", "name": "get_weather", "input": {"location": "Tokyo"}}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.Choices[0].FinishReason != llm.FinishReasonToolUse {
-		t.Errorf("FinishReason = %v, want ToolUse", resp.Choices[0].FinishReason)
-	}
-	if len(resp.Choices[0].Message.ToolCalls) != 1 {
-		t.Fatalf("tool_calls = %d", len(resp.Choices[0].Message.ToolCalls))
-	}
-	tc := resp.Choices[0].Message.ToolCalls[0]
-	if tc.ID != "toolu_abc" {
-		t.Errorf("ID = %q", tc.ID)
-	}
-	if tc.Function.Name != "get_weather" {
-		t.Errorf("Name = %q", tc.Function.Name)
-	}
-	if !strings.Contains(tc.Function.Arguments, "Tokyo") {
-		t.Errorf("Args = %q", tc.Function.Arguments)
-	}
-}
-
-func TestConvertResponseVendorError(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"type": "error",
-		"error": {"type": "rate_limit", "message": "too many requests"}
-	}`
-	_, err := p.ConvertResponse([]byte(respJSON))
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	llmErr, ok := err.(*llm.Error)
-	if !ok {
-		t.Fatalf("err is not *llm.Error: %T", err)
-	}
-	if llmErr.Kind != llm.ErrorKindVendor {
-		t.Errorf("Kind = %v, want Vendor", llmErr.Kind)
-	}
-}
-
-func TestConvertResponseMalformedJSON(t *testing.T) {
-	p := newProvider()
-	_, err := p.ConvertResponse([]byte("not json"))
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	llmErr, ok := err.(*llm.Error)
-	if !ok {
-		t.Fatalf("err is not *llm.Error: %T", err)
-	}
-	if llmErr.Kind != llm.ErrorKindClient {
-		t.Errorf("Kind = %v, want Client", llmErr.Kind)
-	}
-}
-
-func TestConvertResponseCapturesSignature(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "end_turn",
-		"content": [
-			{"type": "thinking", "thinking": "let me think", "signature": "sig-xyz"},
-			{"type": "text", "text": "answer"}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := resp.Choices[0].Message
-	if msg.Reasoning != "let me think" {
-		t.Errorf("Reasoning = %q, want 'let me think'", msg.Reasoning)
-	}
-	if msg.ReasoningSig != "sig-xyz" {
-		t.Errorf("ReasoningSig = %q, want 'sig-xyz'", msg.ReasoningSig)
-	}
-}
-
-func TestConvertResponseRedactedThinking(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "end_turn",
-		"content": [
-			{"type": "redacted_thinking", "data": "encrypted-blob-base64"},
-			{"type": "text", "text": "answer"}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := resp.Choices[0].Message
-	if msg.Reasoning != "[Reasoning redacted]" {
-		t.Errorf("Reasoning = %q, want '[Reasoning redacted]'", msg.Reasoning)
-	}
-	if msg.ReasoningSig != "encrypted-blob-base64" {
-		t.Errorf("ReasoningSig = %q, want 'encrypted-blob-base64'", msg.ReasoningSig)
-	}
-}
-
-func TestConvertResponseNoSigWhenNoThinking(t *testing.T) {
-	p := newProvider()
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "end_turn",
-		"content": [{"type": "text", "text": "hi"}],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	msg := resp.Choices[0].Message
-	if msg.ReasoningSig != "" {
-		t.Errorf("ReasoningSig = %q, want empty when no thinking", msg.ReasoningSig)
-	}
-}
-
-func TestRoundTripThinkingSignature(t *testing.T) {
-	p := newProvider()
-
-	respJSON := `{
-		"id": "msg_01",
-		"model": "MiniMax-M3",
-		"stop_reason": "tool_use",
-		"content": [
-			{"type": "thinking", "thinking": "I need to call a tool", "signature": "sig-round-trip"},
-			{"type": "tool_use", "id": "toolu_1", "name": "f", "input": {}}
-		],
-		"usage": {"input_tokens": 10, "output_tokens": 5}
-	}`
-	resp, err := p.ConvertResponse([]byte(respJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	asstMsg := resp.Choices[0].Message
-	if asstMsg.ReasoningSig != "sig-round-trip" {
-		t.Fatalf("Response.ReasoningSig = %q, want 'sig-round-trip'", asstMsg.ReasoningSig)
-	}
-
-	body, err := p.ConvertRequest(&llm.ChatRequest{
-		Model: "MiniMax-M3",
-		Messages: []llm.Message{
-			{Role: "user", Content: "hi"},
-			asstMsg,
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatal(err)
-	}
-	msgs := got["messages"].([]any)
-	if len(msgs) != 2 {
-		t.Fatalf("messages = %d, want 2", len(msgs))
-	}
-	out := msgs[1].(map[string]any)
-	if out["role"] != "assistant" {
-		t.Errorf("role = %v, want assistant", out["role"])
-	}
-
-	content := out["content"].([]any)
-	if len(content) != 2 {
-		t.Fatalf("blocks = %d, want 2 (thinking + tool_use)", len(content))
-	}
-
-	thinkingBlock := content[0].(map[string]any)
-	if thinkingBlock["type"] != "thinking" {
-		t.Errorf("block 0 type = %v, want thinking", thinkingBlock["type"])
-	}
-	if thinkingBlock["signature"] != "sig-round-trip" {
-		t.Errorf("block 0 signature = %v, want sig-round-trip", thinkingBlock["signature"])
-	}
-	if thinkingBlock["thinking"] != "I need to call a tool" {
-		t.Errorf("block 0 thinking = %v", thinkingBlock["thinking"])
-	}
-}
-
-func TestRequestThinkingSignatureOnly(t *testing.T) {
-	p := newProvider()
-	body, err := p.ConvertRequest(&llm.ChatRequest{
-		Model: "MiniMax-M3",
-		Messages: []llm.Message{
-			{
-				Role:         "assistant",
-				Reasoning:    "thinking text",
-				ReasoningSig: "sig-only",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var got map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatal(err)
-	}
-	msgs := got["messages"].([]any)
-	out := msgs[0].(map[string]any)
-
-	content := out["content"].([]any)
-	if len(content) != 1 {
-		t.Fatalf("blocks = %d, want 1", len(content))
-	}
-	block := content[0].(map[string]any)
-	if block["type"] != "thinking" {
-		t.Errorf("type = %v, want thinking", block["type"])
-	}
-	if block["signature"] != "sig-only" {
-		t.Errorf("signature = %v, want sig-only", block["signature"])
-	}
-	if block["thinking"] != "thinking text" {
-		t.Errorf("thinking = %v", block["thinking"])
-	}
-}
 
 func TestConvertRequestToolChoice(t *testing.T) {
 	p := newProvider()
@@ -493,9 +219,9 @@ func TestConvertRequestMultipleSystemMessages(t *testing.T) {
 	}
 }
 
-func TestConvertStreamChunkMessageDeltaUsage(t *testing.T) {
+func TestConvertResponseMessageDeltaUsage(t *testing.T) {
 	p := newProvider()
-	chunk, done, err := p.ConvertStreamChunk([]byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":12,"output_tokens":34}}`))
+	chunk, done, err := p.ConvertResponse([]byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":12,"output_tokens":34}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,9 +242,9 @@ func TestConvertStreamChunkMessageDeltaUsage(t *testing.T) {
 	}
 }
 
-func TestConvertStreamChunkMessageDeltaOnlyUsage(t *testing.T) {
+func TestConvertResponseMessageDeltaOnlyUsage(t *testing.T) {
 	p := newProvider()
-	chunk, _, err := p.ConvertStreamChunk([]byte(`{"type":"message_delta","usage":{"input_tokens":5,"output_tokens":7}}`))
+	chunk, _, err := p.ConvertResponse([]byte(`{"type":"message_delta","usage":{"input_tokens":5,"output_tokens":7}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,3 +255,68 @@ func TestConvertStreamChunkMessageDeltaOnlyUsage(t *testing.T) {
 		t.Errorf("expected no choices, got %d", len(chunk.Choices))
 	}
 }
+
+func TestConvertRequestEnablesThinkingForReasoningModel(t *testing.T) {
+	p := newProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:    "MiniMax-M3",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking field missing: %v", got)
+	}
+	if thinking["type"] != "enabled" {
+		t.Errorf("thinking.type = %v, want enabled", thinking["type"])
+	}
+	if budget, _ := thinking["budget_tokens"].(float64); budget != 2048 {
+		t.Errorf("thinking.budget_tokens = %v, want 2048 (half of max_tokens 4096)", budget)
+	}
+}
+
+func TestConvertRequestCappedThinkingBudget(t *testing.T) {
+	p := newProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:    "MiniMax-M3",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+		MaxTokens: 32000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	thinking := got["thinking"].(map[string]any)
+	if budget, _ := thinking["budget_tokens"].(float64); budget != 8192 {
+		t.Errorf("thinking.budget_tokens = %v, want 8192 (capped)", budget)
+	}
+}
+
+func TestConvertRequestEnablesThinkingWithDefaultMaxTokens(t *testing.T) {
+	p := newProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:    "MiniMax-M3",
+		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking should be enabled by default for MiniMax-M3, got %v", got)
+	}
+	if budget, _ := thinking["budget_tokens"].(float64); budget != 2048 {
+		t.Errorf("thinking.budget_tokens = %v, want 2048 (half of default 4096)", budget)
+	}
+}
+

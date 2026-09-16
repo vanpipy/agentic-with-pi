@@ -15,7 +15,6 @@ import (
 type fakeProvider struct {
 	models       []llm.Model
 	convertReq   func(*llm.ChatRequest) ([]byte, error)
-	convertResp  func([]byte) (*llm.ChatResponse, error)
 	convertChunk func([]byte) (*llm.StreamChunk, bool, error)
 	mu           sync.Mutex
 }
@@ -30,19 +29,16 @@ func (f *fakeProvider) ConvertRequest(r *llm.ChatRequest) ([]byte, error) {
 	}
 	return f.convertReq(r)
 }
-func (f *fakeProvider) ConvertResponse(d []byte) (*llm.ChatResponse, error)       { return f.convertResp(d) }
-func (f *fakeProvider) ConvertStreamChunk(d []byte) (*llm.StreamChunk, bool, error) { return f.convertChunk(d) }
+func (f *fakeProvider) ConvertResponse(d []byte) (*llm.StreamChunk, bool, error) { return f.convertChunk(d) }
 func (f *fakeProvider) Models() []llm.Model                                       { return f.models }
 
 type fakeProtocol struct {
 	streamItems []protocol.StreamItem
 	streamErr   error
-	sendData    []byte
-	sendErr     error
 }
 
 func (f *fakeProtocol) Send(ctx context.Context, req *protocol.Request) ([]byte, error) {
-	return f.sendData, f.sendErr
+	return nil, nil
 }
 func (f *fakeProtocol) Stream(ctx context.Context, req *protocol.Request) (<-chan protocol.StreamItem, error) {
 	if f.streamErr != nil {
@@ -67,7 +63,7 @@ func mustEncode(t *testing.T, v any) []byte {
 
 func TestChatRejectsEmptyModel(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{})
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{})
 	if err == nil {
 		t.Error("expected error for empty model, got nil")
 	}
@@ -77,7 +73,7 @@ func TestChatRejectsToolsForUnsupportedModel(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "no-tools", Vendor: "fake", SupportsTool: false}},
 	}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{
 		Model:    "no-tools",
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 		Tools:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "x"}}},
@@ -92,22 +88,30 @@ func TestChatRejectsToolsForUnsupportedModel(t *testing.T) {
 func TestChatAllowsToolsForSupportedModel(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake", SupportsTool: true}},
-		convertReq: func(r *llm.ChatRequest) ([]byte, error) { return []byte("{}"), nil },
-		convertResp: func(d []byte) (*llm.ChatResponse, error) {
-			return &llm.ChatResponse{Choices: []llm.Choice{{Message: llm.Message{Content: "ok"}}}}, nil
+		convertChunk: func(d []byte) (*llm.StreamChunk, bool, error) {
+			return &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "ok"}}}}, false, nil
 		},
-	}, &fakeProtocol{sendData: []byte(`{}`)})
+	}, &fakeProtocol{streamItems: []protocol.StreamItem{
+		{Data: []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}`)},
+	}})
 
-	resp, err := core.Chat(context.Background(), &llm.ChatRequest{
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
 		Model:    "x",
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 		Tools:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "f"}}},
 	})
 	if err != nil {
-		t.Fatalf("Chat failed: %v", err)
+		t.Fatalf("StreamChat failed: %v", err)
 	}
-	if resp.Choices[0].Message.Content != "ok" {
-		t.Errorf("content = %q, want ok", resp.Choices[0].Message.Content)
+	content := ""
+	for ev := range events {
+		if ev.Err != nil { t.Fatal(ev.Err) }
+		for _, c := range ev.Chunk.Choices {
+			content += c.Delta.Content
+		}
+	}
+	if content != "ok" {
+		t.Errorf("content = %q, want ok", content)
 	}
 }
 
@@ -115,10 +119,9 @@ func TestChatSurfacesProtocolError(t *testing.T) {
 	want := errors.New("network down")
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake"}},
-		convertReq: func(r *llm.ChatRequest) ([]byte, error) { return []byte("{}"), nil },
-	}, &fakeProtocol{sendErr: want})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{Model: "x", Messages: []llm.Message{{Role: "user", Content: "hi"}}})
-	if err != want {
+	}, &fakeProtocol{streamErr: want})
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{Model: "x", Messages: []llm.Message{{Role: "user", Content: "hi"}}})
+	if !errors.Is(err, want) {
 		t.Errorf("err = %v, want %v", err, want)
 	}
 }
@@ -241,7 +244,7 @@ func TestChatRejectsEmptyMessages(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake"}},
 	}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{Model: "x"})
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{Model: "x"})
 	if err == nil {
 		t.Fatal("expected error for empty messages")
 	}
@@ -254,7 +257,7 @@ func TestChatRejectsInvalidRole(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake"}},
 	}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{
 		Model:    "x",
 		Messages: []llm.Message{{Role: "bogus", Content: "x"}},
 	})
@@ -270,7 +273,7 @@ func TestChatRejectsBadToolDefinition(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake", SupportsTool: true}},
 	}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{
 		Model:    "x",
 		Messages: []llm.Message{{Role: "user", Content: "hi"}},
 		Tools:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{}}}, // missing Name
@@ -284,7 +287,7 @@ func TestChatRejectsInvalidToolChoice(t *testing.T) {
 	core := llm.NewCore(&fakeProvider{
 		models: []llm.Model{{ID: "x", Vendor: "fake"}},
 	}, &fakeProtocol{})
-	_, err := core.Chat(context.Background(), &llm.ChatRequest{
+	_, err := core.StreamChat(context.Background(), &llm.ChatRequest{
 		Model:      "x",
 		Messages:   []llm.Message{{Role: "user", Content: "hi"}},
 		ToolChoice: &llm.ToolChoice{Mode: "bogus"},

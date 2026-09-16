@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm/protocol"
@@ -19,9 +20,7 @@ type Provider interface {
 
 	ConvertRequest(req *ChatRequest) ([]byte, error)
 
-	ConvertResponse(data []byte) (*ChatResponse, error)
-
-	ConvertStreamChunk(data []byte) (*StreamChunk, bool, error)
+	ConvertResponse(data []byte) (*StreamChunk, bool, error)
 
 	Models() []Model
 }
@@ -32,7 +31,6 @@ type core struct {
 }
 
 type Core interface {
-	Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error)
 	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
 }
 
@@ -43,40 +41,11 @@ func NewCore(provider Provider, proto protocol.Protocol) Core {
 	}
 }
 
-func (c *core) Chat(ctx context.Context, req *ChatRequest) (*ChatResponse, error) {
-	if err := c.validateRequest(req); err != nil {
-		return nil, err
-	}
-
-	body, err := c.provider.ConvertRequest(req)
-	if err != nil {
-		return nil, err
-	}
-
-	protoReq := &protocol.Request{
-		URL:     c.provider.BaseURL() + c.provider.Path(),
-		Method:  "POST",
-		Headers: c.provider.Headers(),
-		Body:    body,
-	}
-
-	data, err := c.protocol.Send(ctx, protoReq)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := c.provider.ConvertResponse(data)
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
-}
-
 func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, err
 	}
+	slog.Debug("llm: stream start", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
 
 	streamReq := *req
 	streamReq.Stream = true
@@ -117,7 +86,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 					}
 					return
 				}
-				chunk, done, err := c.provider.ConvertStreamChunk(item.Data)
+				chunk, done, err := c.provider.ConvertResponse(item.Data)
 				if err != nil {
 					select {
 					case events <- StreamEvent{Err: err}:

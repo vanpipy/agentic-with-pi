@@ -16,8 +16,7 @@ func (s *stubProvider) BaseURL() string                                         
 func (s *stubProvider) Path() string                                              { return "" }
 func (s *stubProvider) Headers() map[string]string                                 { return nil }
 func (s *stubProvider) ConvertRequest(*llm.ChatRequest) ([]byte, error)           { return nil, nil }
-func (s *stubProvider) ConvertResponse([]byte) (*llm.ChatResponse, error)         { return nil, nil }
-func (s *stubProvider) ConvertStreamChunk([]byte) (*llm.StreamChunk, bool, error)  { return nil, false, nil }
+func (s *stubProvider) ConvertResponse([]byte) (*llm.StreamChunk, bool, error)  { return nil, false, nil }
 func (s *stubProvider) Models() []llm.Model                                       { return s.models }
 
 func TestRegisterAndGet(t *testing.T) {

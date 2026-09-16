@@ -1,39 +1,43 @@
-# AWP — Makefile for releases
-#
-# Common targets:
-#   make build         — local debug build
-#   make release       — tagged build with ldflags
-#   make test          — run all tests
-#   make lint          — go vet + race detector
-#   make clean         — remove binaries
+# awp — Makefile
 
-VERSION ?= 0.0.0-dev
-COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
-DATE    := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+VERSION  ?= 0.0.0-dev
+COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
+DATE     := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BINARY   := awp
+PKG      := ./cmd/awp
+LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
-LDFLAGS := -s -w \
-  -X github.com/vanpiy/awp/internal/buildinfo.Version=$(VERSION) \
-  -X github.com/vanpiy/awp/internal/buildinfo.Commit=$(COMMIT) \
-  -X github.com/vanpiy/awp/internal/buildinfo.BuildDate=$(DATE)
+.PHONY: all build release test test-race lint fmt tidy clean install run
 
-.PHONY: build release test lint install clean
+all: build
 
 build:
-	go build -o awp .
+	go build -o $(BINARY) $(PKG)
 
 release:
-	go build -ldflags="$(LDFLAGS)" -o awp .
+	go build -ldflags="$(LDFLAGS)" -o $(BINARY) $(PKG)
 
 test:
-	go test ./...
+	go test -count=1 -timeout=90s ./test/...
+
+test-race:
+	go test -count=1 -race -timeout=120s ./test/...
 
 lint:
 	go vet ./...
-	go test -race ./test/...
+	go test -count=1 -race -timeout=120s ./test/...
 
-install: build
-	install -m 0755 awp $(GOPATH)/bin/awp
+fmt:
+	gofmt -w .
+
+tidy:
+	go mod tidy
 
 clean:
-	rm -f awp
-	rm -f *.test
+	rm -f $(BINARY)
+
+install: build
+	install -m 0755 $(BINARY) $(GOPATH)/bin/$(BINARY)
+
+run: build
+	./$(BINARY)
