@@ -125,7 +125,12 @@ func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
-		a.loop(ctx, userMsg, ch)
+		if a.Model.ID == "" {
+			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
+			return
+		}
+		msgs := preSizedHistory(a, userMsg)
+		a.loopWithMsgs(ctx, msgs, ch)
 	}()
 	return ch
 }
@@ -135,19 +140,18 @@ func (a *Agent) RunStreamResumed(ctx context.Context, userMsg string, history []
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
-		a.loopResumed(ctx, userMsg, history, ch)
+		if a.Model.ID == "" {
+			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
+			return
+		}
+		msgs := append([]llm.Message{}, history...)
+		msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
+		a.loopWithMsgs(ctx, msgs, ch)
 	}()
 	return ch
 }
 
-func (a *Agent) loopResumed(ctx context.Context, userMsg string, history []llm.Message, ch chan<- Event) {
-	if a.Model.ID == "" {
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
-		return
-	}
-	msgs := append([]llm.Message{}, history...)
-	msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
-
+func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
 	const maxConsecutiveRepeats = 3
 	const maxToolsPerTurn = 6
 	recentCalls := []string{}
@@ -271,91 +275,6 @@ type turnResult struct {
 
 func (r turnResult) toAssistantMessage() llm.Message {
 	return llm.Message{Role: "assistant", Content: r.content, Reasoning: r.reasoning, ReasoningSig: r.reasoningSig, ToolCalls: r.toolCalls}
-}
-
-func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
-	if a.Model.ID == "" {
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
-		return
-	}
-	msgs := preSizedHistory(a, userMsg)
-	const maxConsecutiveRepeats = 3
-	const maxToolsPerTurn = 6
-	recentCalls := []string{}
-	recentToolErrors := []string{}
-	for turn := 0; turn < a.MaxTurns; turn++ {
-		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
-			previousSummary := ExtractPreviousSummary(msgs)
-			compacted, err := a.compact(ctx, msgs, previousSummary)
-			if err != nil {
-				a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
-				return
-			}
-			msgs = compacted
-		}
-		result, ok := a.runTurn(ctx, msgs, ch)
-		if !ok {
-			return
-		}
-		if len(result.toolCalls) == 0 {
-			msgs = append(msgs, result.toAssistantMessage())
-			return
-		}
-
-		toolCalls := result.toolCalls
-		if len(toolCalls) > maxToolsPerTurn {
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
-			toolCalls = toolCalls[:maxToolsPerTurn]
-			result.toolCalls = toolCalls
-		}
-		msgs = append(msgs, result.toAssistantMessage())
-
-		signature := toolCallSignature(toolCalls)
-		remaining := a.MaxTurns - turn - 1
-		if remaining > maxConsecutiveRepeats*2 && len(recentCalls) >= maxConsecutiveRepeats &&
-			allEqual(append(recentCalls, signature)) {
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("tool calls repeated %d times, aborting", maxConsecutiveRepeats+1)})
-			return
-		}
-		_ = maxConsecutiveRepeats
-		recentCalls = append(recentCalls, signature)
-		if len(recentCalls) > maxConsecutiveRepeats {
-			recentCalls = recentCalls[1:]
-		}
-
-		msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
-		if !ok {
-			return
-		}
-
-		lastFailed := ""
-		for _, m := range msgs {
-			if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
-				lastFailed = m.Content
-				break
-			}
-		}
-		if lastFailed != "" {
-			recentToolErrors = append(recentToolErrors, lastFailed)
-			if len(recentToolErrors) > a.repeatedToolErrorLimit {
-				recentToolErrors = recentToolErrors[len(recentToolErrors)-a.repeatedToolErrorLimit:]
-			}
-			if len(recentToolErrors) >= a.repeatedToolErrorLimit {
-				allSame := true
-				for _, s := range recentToolErrors[1:] {
-					if s != recentToolErrors[0] {
-						allSame = false
-						break
-					}
-				}
-				if allSame {
-					a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", a.repeatedToolErrorLimit, lastFailed)})
-					return
-				}
-			}
-		}
-	}
-	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("max turns exceeded (%d)", a.MaxTurns)})
 }
 
 func toolCallSignature(calls []llm.ToolCall) string {
