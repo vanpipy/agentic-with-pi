@@ -57,6 +57,8 @@ type Model struct {
 	lastKind     string
 	spinner      spinner.Model
 	help         help.Model
+	keys         keyBindings
+	showHelp     bool
 }
 
 type errMsg struct{ err error }
@@ -113,6 +115,8 @@ func Run() error {
 		autocomplete: newAutocompleteModel(),
 		spinner:      newSpinner(),
 		help:         help.New(),
+		keys:         defaultKeys(),
+		showHelp:     false,
 	}
 
 	p := tea.NewProgram(m)
@@ -161,6 +165,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.input.Value() == "" {
 				m.shutdown()
 				return m, tea.Quit
+			}
+			cmds = append(cmds, m.input.Update(msg))
+		case "?":
+			m.showHelp = !m.showHelp
+		case "esc":
+			if m.showHelp {
+				m.showHelp = false
+				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
 		case "tab":
@@ -278,11 +290,15 @@ func (m *Model) View() tea.View {
 
 	inputBox := m.input.View()
 
-	footer := m.help.ShortHelpView(shortHelpBindings())
+	m.help.ShowAll = m.showHelp
+	footer := m.help.View(m.keys)
 
 	lines := []string{header, "", body, "", inputBox, "", footer}
 	if m.autocomplete.visible {
 		lines = append(lines, "", m.autocomplete.View())
+	}
+	if m.showHelp {
+		lines = append(lines, "", m.help.FullHelpView(m.keys.FullHelp()))
 	}
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
@@ -359,28 +375,7 @@ var program *tea.Program
 
 
 func shortHelpBindings() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("ctrl+c", "quit"),
-		),
-		key.NewBinding(
-			key.WithKeys("ctrl+d"),
-			key.WithHelp("ctrl+d", "quit"),
-		),
-		key.NewBinding(
-			key.WithKeys("tab"),
-			key.WithHelp("tab", "complete"),
-		),
-		key.NewBinding(
-			key.WithKeys("up", "down"),
-			key.WithHelp("↑↓", "scroll"),
-		),
-		key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "help"),
-		),
-	}
+	return defaultKeys().ShortHelp()
 }
 
 func sessionLabel(id string) string {

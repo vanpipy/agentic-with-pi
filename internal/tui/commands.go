@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -105,18 +104,7 @@ func (m *Model) executeCommand(text string) bool {
 }
 
 func (m *Model) cmdHelp() {
-	var lines []string
-	lines = append(lines, systemPrefix.Render(" available slash commands:"))
-	lines = append(lines, "")
-	for _, c := range builtinCommands() {
-		usage := "/" + c.name
-		if c.usage != "" {
-			usage = c.usage
-		}
-		lines = append(lines, fmt.Sprintf("  %s   %s", userPromptArrow.Render(usage), helpFooter.Render(c.description)))
-	}
-	lines = append(lines, "")
-	m.chat.appendSystem(strings.Join(lines, "\n"))
+	m.showHelp = true
 }
 
 func (m *Model) cmdTools() {

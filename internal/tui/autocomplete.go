@@ -2,25 +2,82 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
+	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
 )
+
+type commandItem struct {
+	title       string
+	description string
+}
+
+func (c commandItem) FilterValue() string { return c.title }
+func (c commandItem) Title() string       { return "/" + c.title }
+func (c commandItem) Description() string { return c.description }
+
+type commandDelegate struct{}
+
+func (d commandDelegate) Height() int                         { return 1 }
+func (d commandDelegate) Spacing() int                        { return 0 }
+func (d commandDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
+func (d commandDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	c, ok := item.(commandItem)
+	if !ok {
+		return
+	}
+	marker := "  "
+	if index == m.Index() {
+		marker = autocompleteCursor.Render("▶ ")
+	}
+	name := autocompleteHeader.Render("/" + c.title)
+	desc := helpFooter.Render(c.description)
+	fmt.Fprintf(w, "%s%s   %s", marker, name, desc)
+}
 
 type autocompleteModel struct {
 	visible bool
 	query   string
-	cursor  int
-	items   []string
-	width   int
+	list    list.Model
+	all     []commandItem
 }
 
 func newAutocompleteModel() *autocompleteModel {
-	return &autocompleteModel{}
+	all := []commandItem{
+		{title: "quit", description: "exit the TUI"},
+		{title: "help", description: "show available slash commands"},
+		{title: "new", description: "clear chat history, start fresh turn"},
+		{title: "tools", description: "list available tools"},
+		{title: "resume", description: "resume a previous session by id"},
+		{title: "clear", description: "clear chat history"},
+	}
+	const maxWidth = 80
+	const maxHeight = 6
+	delegate := commandDelegate{}
+	l := list.New(toCommandItems(all), delegate, maxWidth, maxHeight)
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetShowPagination(false)
+	l.SetShowHelp(false)
+	l.SetShowFilter(false)
+	l.SetFilteringEnabled(true)
+	return &autocompleteModel{list: l, all: all}
+}
+
+func toCommandItems(items []commandItem) []list.Item {
+	out := make([]list.Item, len(items))
+	for i, item := range items {
+		out[i] = item
+	}
+	return out
 }
 
 func (a *autocompleteModel) Update(msg tea.Msg) tea.Cmd {
-	return nil
+	updated, cmd := a.list.Update(msg)
+	a.list = updated
+	return cmd
 }
 
 func (a *autocompleteModel) setQuery(text string) {
@@ -31,64 +88,52 @@ func (a *autocompleteModel) setQuery(text string) {
 	body := strings.TrimPrefix(text, "/")
 	parts := strings.SplitN(body, " ", 2)
 	query := parts[0]
-	if query == "" {
-		a.items = allCommands()
-		a.cursor = 0
-		a.visible = len(a.items) > 0
-		return
-	}
-	matches := []string{}
-	for _, cmd := range allCommands() {
-		if strings.HasPrefix(cmd, query) {
-			matches = append(matches, cmd)
-		}
-	}
-	a.items = matches
-	a.cursor = 0
-	a.visible = len(matches) > 0 && len(parts) == 1
 	a.query = query
+	if query == "" {
+		a.list.SetItems(toCommandItems(a.all))
+	} else {
+		matched := []commandItem{}
+		for _, c := range a.all {
+			if strings.HasPrefix(c.title, query) {
+				matched = append(matched, c)
+			}
+		}
+		a.list.SetItems(toCommandItems(matched))
+	}
+	a.visible = len(a.list.Items()) > 0 && len(parts) == 1
+	if a.visible && a.list.Index() >= len(a.list.Items()) {
+		a.list.Select(0)
+	}
 }
 
 func (a *autocompleteModel) next() {
-	if !a.visible || len(a.items) == 0 {
+	if !a.visible {
 		return
 	}
-	a.cursor = (a.cursor + 1) % len(a.items)
+	a.list.CursorDown()
 }
 
 func (a *autocompleteModel) prev() {
-	if !a.visible || len(a.items) == 0 {
+	if !a.visible {
 		return
 	}
-	a.cursor--
-	if a.cursor < 0 {
-		a.cursor = len(a.items) - 1
-	}
+	a.list.CursorUp()
 }
 
 func (a *autocompleteModel) current() string {
-	if !a.visible || a.cursor >= len(a.items) {
+	item, ok := a.list.SelectedItem().(commandItem)
+	if !ok {
 		return ""
 	}
-	return a.items[a.cursor]
+	return item.title
 }
 
 func (a *autocompleteModel) View() string {
-	if !a.visible || len(a.items) == 0 {
+	if !a.visible {
 		return ""
 	}
-	var lines []string
-	lines = append(lines, autocompleteHeader.Render(" commands:"))
-	for i, cmd := range a.items {
-		cursor := "  "
-		if i == a.cursor {
-			cursor = autocompleteCursor.Render("▶ ")
-		}
-		def, _ := findCommand(cmd)
-		line := fmt.Sprintf("%s%s   %s", cursor, autocompleteHeader.Render("/"+cmd), helpFooter.Render(def.description))
-		lines = append(lines, line)
-	}
-	return strings.Join(lines, "\n")
+	header := autocompleteHeader.Render(" commands:") + "\n"
+	return header + a.list.View()
 }
 
 func allCommands() []string {
@@ -105,7 +150,7 @@ func (m *Model) acceptAutocomplete() {
 		return
 	}
 	m.input.Reset()
-	m.input.ti.SetValue("/" + cmd + " ")
+	m.input.SetValue("/" + cmd + " ")
 	m.autocomplete.visible = false
 }
 
