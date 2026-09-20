@@ -119,33 +119,34 @@ func newTestAgent(core *fakeCore, modelID string) *agent.Agent {
 	return agent.NewAgent(core).WithModel(llm.Model{ID: modelID, SupportsTool: true})
 }
 
-func TestNewAgentContextWindowTriggersCompaction(t *testing.T) {
-	core := &fakeCore{}
-	ag := agent.NewAgent(core)
-	if ag.ContextWindow() != 0 {
-		t.Errorf("NewAgent must default contextWindow to 0; let WithModel populate from model.MaxContextTokens (got %d)", ag.ContextWindow())
-	}
-	settings := ag.CompactionSettingsForTest()
-	if settings.ReserveTokens >= 1_000_000 {
-		t.Errorf("ReserveTokens (%d) looks too large for a default (cap below 1M)", settings.ReserveTokens)
-	}
-}
-
-func TestWithModelPopulatesContextWindow(t *testing.T) {
+func TestAgentContextWindowLivesOnModelNotAgent(t *testing.T) {
 	core := &fakeCore{}
 	ag := agent.NewAgent(core).WithModel(llm.Model{ID: "m", MaxContextTokens: 128000})
-	if got := ag.ContextWindow(); got != 128000 {
-		t.Errorf("ContextWindow = %d, want 128000 (from model.MaxContextTokens)", got)
+	if ag.Model.MaxContextTokens != 128000 {
+		t.Errorf("model.MaxContextTokens = %d, want 128000 (pi pattern: contextWindow lives on model, not on agent)", ag.Model.MaxContextTokens)
 	}
 }
 
-func TestWithContextWindowOverridesModel(t *testing.T) {
-	core := &fakeCore{}
-	ag := agent.NewAgent(core).
-		WithModel(llm.Model{ID: "m", MaxContextTokens: 128000}).
-		WithContextWindow(50000)
-	if got := ag.ContextWindow(); got != 50000 {
-		t.Errorf("ContextWindow = %d, want 50000 (explicit WithContextWindow should win over model.MaxContextTokens)", got)
+func TestShouldCompactUsesModelContextWindow(t *testing.T) {
+	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 1024}
+	msgs := []llm.Message{
+		{Role: "user", Content: string(make([]byte, 40000))},
+		{Role: "assistant", Content: string(make([]byte, 40000))},
+	}
+	model := llm.Model{ID: "m", MaxContextTokens: 10000}
+	if !agent.ShouldCompactWithModel(msgs, model, settings) {
+		t.Errorf("expected compact: 20000 tokens > 10000 - 1024")
+	}
+	if agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 100000}, settings) {
+		t.Errorf("did not expect compact: 20000 < 100000 - 1024")
+	}
+}
+
+func TestShouldCompactFallsBackWhenModelZero(t *testing.T) {
+	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 1024}
+	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 600000))}}
+	if !agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 0}, settings) {
+		t.Errorf("expected compact: fallback 128000, 150000 tokens > 128000-1024")
 	}
 }
 

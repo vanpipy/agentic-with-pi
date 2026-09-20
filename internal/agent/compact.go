@@ -229,15 +229,18 @@ func FindCutPoint(msgs []llm.Message, keepRecentTurns int) int {
 	return 0
 }
 
-func ShouldCompact(msgs []llm.Message, contextWindow int, settings CompactionSettings) bool {
+const DefaultContextWindow = 128000
+
+func ShouldCompactWithModel(msgs []llm.Message, model llm.Model, settings CompactionSettings) bool {
 	if !settings.Enabled {
 		return false
 	}
-	if contextWindow <= 0 {
-		return false
+	window := model.MaxContextTokens
+	if window <= 0 {
+		window = DefaultContextWindow
 	}
 	used := estimateTotalTokens(msgs)
-	return used > contextWindow-settings.ReserveTokens
+	return used > window-settings.ReserveTokens
 }
 
 func SerializeForSummary(msgs []llm.Message) string {

@@ -8,6 +8,7 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
+
 func TestSummarizationPromptSections(t *testing.T) {
 	prompt := agent.SummarizationPrompt
 	requiredSections := []string{
@@ -234,7 +235,7 @@ func TestShouldCompactTriggersAboveReserve(t *testing.T) {
 		{Role: "assistant", Content: string(make([]byte, 40000))},
 	}
 	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 1024}
-	if got := agent.ShouldCompact(msgs, 10000, settings); !got {
+	if got := agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 10000}, settings); !got {
 		t.Errorf("expected shouldCompact=true (20000 tokens > 10000-1024=8976)")
 	}
 }
@@ -242,7 +243,7 @@ func TestShouldCompactTriggersAboveReserve(t *testing.T) {
 func TestShouldCompactDisabledAlwaysFalse(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 100000))}}
 	settings := agent.CompactionSettings{Enabled: false, ReserveTokens: 0}
-	if got := agent.ShouldCompact(msgs, 1000, settings); got {
+	if got := agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 1000}, settings); got {
 		t.Errorf("disabled should never compact")
 	}
 }
@@ -250,16 +251,16 @@ func TestShouldCompactDisabledAlwaysFalse(t *testing.T) {
 func TestShouldCompactBelowReserveStays(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 1000))}}
 	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 5000}
-	if got := agent.ShouldCompact(msgs, 10000, settings); got {
+	if got := agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 10000}, settings); got {
 		t.Errorf("expected shouldCompact=false (250 tokens < 10000-5000=5000)")
 	}
 }
 
-func TestShouldCompactZeroWindowStays(t *testing.T) {
-	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 100000))}}
+func TestShouldCompactFallsBackToDefaultWhenModelZero(t *testing.T) {
+	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 600000))}}
 	settings := agent.CompactionSettings{Enabled: true, ReserveTokens: 100}
-	if got := agent.ShouldCompact(msgs, 0, settings); got {
-		t.Errorf("zero context window should never trigger")
+	if got := agent.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 0}, settings); !got {
+		t.Errorf("expected compact: model has no window, fallback 128000, 150000 tokens > 128000-100")
 	}
 }
 

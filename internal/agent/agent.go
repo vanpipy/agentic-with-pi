@@ -56,7 +56,6 @@ type Agent struct {
 	logBuf        *bufio.Writer
 	logSeq        int
 	compaction    CompactionSettings
-	contextWindow int
 }
 
 func NewAgent(llmCore llm.Core) *Agent {
@@ -82,9 +81,6 @@ func (a *Agent) WithMaxTurns(n int) *Agent {
 
 func (a *Agent) WithModel(model llm.Model) *Agent {
 	a.Model = model
-	if model.MaxContextTokens > 0 {
-		a.contextWindow = model.MaxContextTokens
-	}
 	return a
 }
 func (a *Agent) WithTool(t Tool) *Agent           { a.Tools = append(a.Tools, t); return a }
@@ -97,12 +93,12 @@ func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 }
 
 func (a *Agent) WithContextWindow(tokens int) *Agent {
-	a.contextWindow = tokens
+	a.Model.MaxContextTokens = tokens
 	return a
 }
 
 func (a *Agent) ContextWindow() int {
-	return a.contextWindow
+	return a.Model.MaxContextTokens
 }
 
 func (a *Agent) CompactionSettingsForTest() CompactionSettings {
@@ -175,7 +171,7 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 	const maxToolsPerTurn = 6
 	recentCalls := []string{}
 	for turn := 0; turn < a.MaxTurns; turn++ {
-		if ShouldCompact(msgs, a.contextWindow, a.compaction) {
+		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
 			previousSummary := ExtractPreviousSummary(msgs)
 			compacted, err := a.compact(ctx, msgs, previousSummary)
 			if err != nil {
