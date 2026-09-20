@@ -87,7 +87,9 @@ func loadAgent() *agent.Agent {
 	registry := llm.NewRegistry()
 	registry.MustRegisterDefault(providers.NewMiniMaxProvider(apiKey))
 	provider, _ := registry.Default()
-	core := llm.NewRetryCore(llm.NewCore(provider, protocol.NewHTTPRest()), llm.DefaultRetryConfig())
+	base := llm.NewCore(provider, protocol.NewHTTPRest())
+	throttled := llm.NewRateLimitedCore(base, llm.RateLimitConfig{RatePerSec: 5, Burst: 2})
+	core := llm.NewRetryCore(throttled, llm.DefaultRetryConfig())
 
 	cwd, _ := os.Getwd()
 	ag := agent.NewAgent(core).
