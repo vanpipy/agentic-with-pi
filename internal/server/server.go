@@ -31,7 +31,7 @@ type Server struct {
 func New(ag *agent.Agent, socketPath string) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ln, err := transport.NewUnixListener(socketPath)
+	ln, err := transport.Listen(socketPath)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("listen: %w", err)

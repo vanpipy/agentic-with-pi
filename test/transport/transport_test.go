@@ -115,17 +115,39 @@ func TestListenEmptyPath(t *testing.T) {
 	}
 }
 
+func TestListenerCloseRemovesSocketFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.sock")
+
+	ln, err := transport.Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("socket file missing right after Listen: %v", err)
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("socket file still exists after Close; stat err = %v", err)
+	}
+}
+
 func TestDialEmptyPath(t *testing.T) {
 	if _, err := transport.Dial(""); err == nil {
 		t.Error("expected error for empty path")
 	}
 }
 
-func TestNewUnixListener(t *testing.T) {
+func TestListen(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.sock")
 
-	ln, err := transport.NewUnixListener(path)
+	ln, err := transport.Listen(path)
 	if err != nil {
 		t.Fatal(err)
 	}
