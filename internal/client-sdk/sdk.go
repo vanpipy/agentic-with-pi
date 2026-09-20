@@ -37,8 +37,13 @@ type Event struct {
 }
 
 func (c *Client) Prompt(ctx context.Context, prompt string) (<-chan Event, error) {
+	return c.PromptWithSessionID(ctx, prompt, "")
+}
+
+func (c *Client) PromptWithSessionID(ctx context.Context, prompt, sessionID string) (<-chan Event, error) {
 	req, err := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
-		Prompt: prompt,
+		SessionID: sessionID,
+		Prompt:    prompt,
 	})
 	if err != nil {
 		return nil, err

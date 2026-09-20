@@ -463,3 +463,104 @@ func TestServerPromptWritesSession(t *testing.T) {
 		t.Errorf("last event = %q, want session_resumed", events[len(events)-1])
 	}
 }
+
+func TestRunResumeUsesCompactionHistory(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "test.sock")
+	t.Setenv("AWP_HOME", dir)
+
+	ag := agent.NewAgent(&fakeCoreWithSummary{}).
+		WithModel(llm.Model{ID: "test", SupportsTool: false})
+	s, err := server.New(ag, socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	defer s.Shutdown(context.Background())
+
+	for i := 0; i < 50; i++ {
+		c, err := net.Dial("unix", socketPath)
+		if err == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	store := server.NewStore(filepath.Join(dir, "logs", "sessions", "sess-x.jsonl"))
+	if err := store.WriteHeader(server.SessionMeta{SessionID: "sess-x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteCompaction(server.CompactionRecord{
+		Summary: "## Goal\nfix the bug\n## Done\nlocated the cause",
+		At:      time.Now().UTC().Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	req, _ := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+		SessionID: "sess-x",
+		Prompt:    "continue",
+	})
+	if err := protocol.MarshalRequest(c, req); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := bufio.NewReader(c)
+	c.SetReadDeadline(time.Now().Add(3 * time.Second))
+
+	gotSummary := false
+	for {
+		resp, err := protocol.ReadEvent(reader)
+		if err != nil {
+			break
+		}
+		if resp.Event == "final_answer" {
+			var d struct {
+				Content string `json:"content"`
+			}
+			json.Unmarshal(resp.Data, &d)
+			if strings.Contains(d.Content, "saw the compaction") {
+				gotSummary = true
+			}
+			break
+		}
+	}
+	if !gotSummary {
+		t.Errorf("expected final_answer to confirm compaction summary was visible to LLM")
+	}
+}
+
+type fakeCoreWithSummary struct {
+	fakeCore
+}
+
+func (f *fakeCoreWithSummary) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	hasSummary := false
+	for _, m := range req.Messages {
+		if m.Role == "assistant" && strings.Contains(m.Content, "Previous conversation summary") {
+			hasSummary = true
+			break
+		}
+	}
+	reply := "continue without summary"
+	if hasSummary {
+		reply = "saw the compaction"
+	}
+	ch := make(chan llm.StreamEvent, 3)
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Delta: llm.Message{Content: reply},
+	}}}}
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		FinishReason: llm.FinishReasonStop,
+	}}}}
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{}}
+	close(ch)
+	return ch, nil
+}

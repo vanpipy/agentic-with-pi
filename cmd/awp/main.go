@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"os/exec"
 	"os/signal"
 	"syscall"
@@ -203,10 +204,14 @@ func runConnect(args []string) {
 
 func runResume(args []string) {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: awp resume <session_id>")
+		fmt.Fprintln(os.Stderr, "usage: awp resume <session_id> [new_prompt]")
 		os.Exit(1)
 	}
 	sessionID := args[0]
+	newPrompt := ""
+	if len(args) > 1 {
+		newPrompt = strings.Join(args[1:], " ")
+	}
 
 	setupLog()
 
@@ -232,12 +237,23 @@ func runResume(args []string) {
 
 	fmt.Printf("=== awp resume ===\nsocket: %s\nsession: %s\n\n", socket, sessionID)
 
-	events, err := c.Resume(context.Background(), sessionID)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "resume:", err)
-		os.Exit(1)
+	if newPrompt == "" {
+		events, err := c.Resume(context.Background(), sessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "resume:", err)
+			os.Exit(1)
+		}
+		for ev := range events {
+			printServerEvent(ev.Kind, ev.Data)
+		}
+		return
 	}
 
+	events, err := c.PromptWithSessionID(context.Background(), newPrompt, sessionID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "prompt:", err)
+		os.Exit(1)
+	}
 	for ev := range events {
 		printServerEvent(ev.Kind, ev.Data)
 	}
