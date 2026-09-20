@@ -6,60 +6,30 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 )
 
-type role int
-
-const (
-	roleUser role = iota
-	roleAssistant
-	roleTool
-	roleObserve
-	roleError
-	roleSystem
-	roleThinking
-)
-
-type chatMsg struct {
-	role      role
-	text      string
-	toolCalls []toolCallInline
-	duration  time.Duration
-	usage     *msgUsage
-	promptNum int
-}
-
-type toolCallInline struct {
-	name string
-	args string
-}
-
-type msgUsage struct {
-	prompt     int
-	completion int
-	total      int
-}
-
 type chatModel struct {
-	viewport  viewport.Model
-	messages   []chatMsg
-	streaming  strings.Builder
-	reasoning  strings.Builder
-	width      int
-	height     int
-	following  bool
-	promptNum  int
+	viewport viewport.Model
+	messages  []chatMsg
+	streaming strings.Builder
+	reasoning strings.Builder
+	width     int
+	height    int
+	following bool
+	promptNum int
 }
 
 func newChatModel() *chatModel {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
 	vp.SoftWrap = true
-	return &chatModel{
+	c := &chatModel{
 		viewport:  vp,
 		following: true,
 	}
+	return c
 }
 
 func (c *chatModel) SetSize(w, h int) {
@@ -93,7 +63,7 @@ func (c *chatModel) buildContent() string {
 		lines = append(lines, renderMsg(m, c.viewport.Width())...)
 	}
 	if c.reasoning.Len() > 0 {
-		lines = append(lines, renderThinking(c.reasoning.String(), c.viewport.Width())...)
+		lines = append(lines, renderThinking(c.reasoning.String(), c.viewport.Width(), false)...)
 	}
 	if c.streaming.Len() > 0 {
 		lines = append(lines, renderAssistant(c.streaming.String(), c.viewport.Width())...)
@@ -101,34 +71,113 @@ func (c *chatModel) buildContent() string {
 	return strings.Join(lines, "\n")
 }
 
-func renderMsg(g chatMsg, width int) []string {
-	body := bodyFor(g)
-	bodyWidth := width - glyphWidth(g)
-	if bodyWidth < 16 {
-		bodyWidth = 16
-	}
-	out := wrapLines(body, bodyWidth)
-	out = indentLines(out, glyphFor(g))
-	if g.duration > 0 {
-		out = append(out, "  ⏱ "+g.duration.Round(time.Millisecond).String())
-	}
-	if g.usage != nil && g.usage.total > 0 {
-		out = append(out, fmt.Sprintf("  ↻ %d → %d  (%d tokens)", g.usage.prompt, g.usage.completion, g.usage.total))
-	}
-	if g.toolCalls != nil {
-		out = append(append(renderToolInline(g.toolCalls), ""), out...)
-	}
-	return out
+// glyph + body style per role. Body is the lipgloss Style applied to the
+// wrapped text; glyph is the prefix rendered on the first line.
+type roleLayout struct {
+	body  lipgloss.Style
+	glyph string
 }
 
-func renderThinking(text string, width int) []string {
-	body := aiThinking.Render(text)
-	return wrapAndIndent(body, " ∵ ", width)
+func roleLayoutFor(r role) roleLayout {
+	switch r {
+	case roleUser:
+		return roleLayout{body: userPromptText, glyph: " › "}
+	case roleAssistant:
+		return roleLayout{body: aiText, glyph: " ✦ "}
+	case roleTool:
+		return roleLayout{body: lipgloss.NewStyle(), glyph: " ⚙ "}
+	case roleObserve:
+		return roleLayout{body: lipgloss.NewStyle(), glyph: " ← "}
+	case roleError:
+		return roleLayout{body: errorPrefix, glyph: " ✗ "}
+	case roleSystem:
+		return roleLayout{body: systemPrefix, glyph: " ⋯ "}
+	case roleThinking:
+		return roleLayout{body: aiThinking, glyph: " ∵ "}
+	}
+	return roleLayout{}
+}
+
+// glyphPrefix adds an optional prompt number to a role's glyph.
+func glyphPrefix(layout roleLayout, role role, promptNum int) string {
+	if role == roleUser && promptNum > 0 {
+		return userPromptNum.Render(fmt.Sprintf("%d", promptNum)) + layout.glyph
+	}
+	return layout.glyph
+}
+
+// renderMsg formats a single chat message as a sequence of wrapped lines.
+// Width-n lipgloss Style does the word wrapping; the prefix lives outside
+// the style so we can still pad continuation lines manually.
+func renderMsg(g chatMsg, width int) []string {
+	layout := roleLayoutFor(g.role)
+	glyph := glyphPrefix(layout, g.role, g.promptNum)
+	if width <= 0 {
+		width = 80
+	}
+	glyphWidth := lipgloss.Width(glyph)
+	bodyWidth := width - glyphWidth
+	if bodyWidth < 8 {
+		bodyWidth = 8
+	}
+	body := g.body(layout, bodyWidth)
+	if len(body) == 0 {
+		return nil
+	}
+	indented := prependPrefixAndIndent(body, glyph)
+	if g.toolCalls != nil {
+		toolLine := renderToolInline(g.toolCalls)
+		indented = append(append(toolLine, ""), indented...)
+	}
+	hints := hintLines(g)
+	if len(hints) > 0 {
+		indented = append(indented, hints...)
+	}
+	return indented
+}
+
+// body returns the rendered body lines, with lipgloss.Style.Width(n) doing
+// the word wrap and styling.
+func (g chatMsg) body(layout roleLayout, width int) []string {
+	if g.role == roleAssistant {
+		return wrapRender(layout.body.Width(width), renderMarkdownBody(g.text, width))
+	}
+	if g.role == roleThinking && g.collapsed {
+		dur := g.duration.Round(time.Second)
+		if dur == 0 {
+			dur = g.duration.Round(time.Millisecond)
+		}
+		return []string{layout.body.Render(fmt.Sprintf("▸ thought for %s", dur))}
+	}
+	return wrapRender(layout.body.Width(width), g.text)
+}
+
+func wrapRender(style lipgloss.Style, text string) []string {
+	rendered := style.Render(text)
+	if rendered == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+}
+
+func renderThinking(text string, width int, collapsed bool) []string {
+	layout := roleLayoutFor(roleThinking)
+	if collapsed {
+		dur := time.Duration(0)
+		return wrapRender(layout.body.Width(width),
+			fmt.Sprintf("▸ thought for %s", dur.Round(time.Second)))
+	}
+	return wrapRender(layout.body.Width(width), text)
 }
 
 func renderAssistant(text string, width int) []string {
+	layout := roleLayoutFor(roleAssistant)
 	rendered := renderMarkdownBody(text, width)
-	return wrapAndIndent(rendered, " ✦ ", width)
+	bodyWidth := width - lipgloss.Width(" ✦ ")
+	if bodyWidth < 8 {
+		bodyWidth = 8
+	}
+	return wrapRender(layout.body.Width(bodyWidth), rendered)
 }
 
 func renderToolInline(calls []toolCallInline) []string {
@@ -150,108 +199,31 @@ func renderToolInline(calls []toolCallInline) []string {
 	return []string{toolPrefix.Render(label) + strings.Join(parts, toolSeparator.Render(" · "))}
 }
 
-func bodyFor(g chatMsg) string {
-	switch g.role {
-	case roleThinking:
-		return aiThinking.Render(g.text)
-	case roleAssistant:
-		return renderMarkdownBody(g.text, 0)
+func hintLines(g chatMsg) []string {
+	if g.duration > 0 {
+		return []string{durationHint.Render("  ⏱ " + g.duration.Round(time.Millisecond).String())}
 	}
-	return g.text
+	if g.usage != nil && g.usage.total > 0 {
+		return []string{tokenHint.Render(fmt.Sprintf("  ↻ %d → %d  (%d tokens)", g.usage.prompt, g.usage.completion, g.usage.total))}
+	}
+	return nil
 }
 
-func glyphFor(g chatMsg) string {
-	if g.role == roleUser && g.promptNum > 0 {
-		return fmt.Sprintf("%d› ", g.promptNum)
-	}
-	return glyphForRole(g.role)
-}
-
-func glyphForRole(r role) string {
-	switch r {
-	case roleUser:
-		return " › "
-	case roleAssistant:
-		return " ✦ "
-	case roleTool:
-		return " ⚙ "
-	case roleObserve:
-		return " ← "
-	case roleError:
-		return " ✗ "
-	case roleSystem:
-		return " ⋯ "
-	case roleThinking:
-		return " ∵ "
-	}
-	return "   "
-}
-
-func glyphWidth(g chatMsg) int {
-	return ansiWidth(glyphFor(g))
-}
-
-func wrapAndIndent(text, prefix string, width int) []string {
-	if width <= 0 {
-		return indentLines(strings.Split(text, "\n"), prefix)
-	}
-	out := wrapLines(text, width-ansiWidth(prefix))
-	return indentLines(out, prefix)
-}
-
-func wrapLines(text string, width int) []string {
-	if width <= 0 {
-		return strings.Split(text, "\n")
-	}
-	var out []string
-	for _, line := range strings.Split(text, "\n") {
-		for ansiWidth(line) > width {
-			cut := cutAtWidth(line, width)
-			out = append(out, cut)
-			line = line[ansiWidth(cut):]
-		}
-		out = append(out, line)
-	}
-	return out
-}
-
-func cutAtWidth(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	count := 0
-	for i := range s {
-		if count == w {
-			return s[:i]
-		}
-		count++
-	}
-	return s
-}
-
-func indentLines(lines []string, prefix string) []string {
-	width := ansiWidth(prefix)
-	if width == 0 {
+// prependPrefixAndIndent prefixes the first line and indents all
+// continuation lines with the same number of spaces (using the
+// rendered width of the prefix, which already counts ANSI glyphs).
+func prependPrefixAndIndent(lines []string, prefix string) []string {
+	if prefix == "" || len(lines) == 0 {
 		return lines
 	}
-	indent := strings.Repeat(" ", width)
+	prefixWidth := lipgloss.Width(prefix)
+	indent := strings.Repeat(" ", prefixWidth)
 	out := make([]string, len(lines))
-	for i, line := range lines {
-		if i == 0 {
-			out[i] = prefix + line
-		} else {
-			out[i] = indent + line
-		}
+	out[0] = prefix + lines[0]
+	for i := 1; i < len(lines); i++ {
+		out[i] = indent + lines[i]
 	}
 	return out
-}
-
-func ansiWidth(s string) int {
-	w := 0
-	for range s {
-		w++
-	}
-	return w
 }
 
 func (c *chatModel) ScrollUp(n int) {
@@ -294,33 +266,67 @@ func (c *chatModel) GotoBottom() {
 	c.following = true
 }
 
+// JumpToPrompt moves the viewport so the next user-prompt message in the
+// given direction is on the top row. direction > 0 jumps backwards, < 0
+// forwards. Reads the message list directly instead of counting viewport
+// lines, since prompt numbers are stable and we know where each prompt
+// starts in the message slice.
 func (c *chatModel) JumpToPrompt(direction int) {
-	if direction == 0 {
+	if direction == 0 || len(c.messages) == 0 {
 		return
 	}
+	currentPrompt := c.promptNumAtViewportTop()
 	target := -1
-	for i, m := range c.messages {
-		if m.role != roleUser {
-			continue
+	switch {
+	case direction > 0:
+		for i := len(c.messages) - 1; i >= 0; i-- {
+			m := c.messages[i]
+			if m.role != roleUser || m.promptNum == 0 {
+				continue
+			}
+			if m.promptNum < currentPrompt {
+				target = i
+				break
+			}
 		}
-		if direction > 0 && i < c.viewport.YOffset() {
-			target = i
-		} else if direction < 0 && i >= c.viewport.YOffset() {
-			target = i
-			break
+	case direction < 0:
+		for i, m := range c.messages {
+			if m.role != roleUser || m.promptNum == 0 {
+				continue
+			}
+			if m.promptNum > currentPrompt {
+				target = i
+				break
+			}
 		}
 	}
 	if target == -1 {
 		return
 	}
-	c.viewport.SetYOffset(c.lineOffsetForPrompt(target))
+	c.viewport.SetYOffset(c.lineOffsetFor(target))
 	c.following = c.viewport.AtBottom()
 }
 
-func (c *chatModel) lineOffsetForPrompt(idx int) int {
+// promptNumAtViewportTop scans the first visible line for a user-prompt
+// marker and returns that prompt's number. If none, returns the model's
+// current promptNum so the first JumpToPrompt below always finds a target.
+func (c *chatModel) promptNumAtViewportTop() int {
+	y := c.viewport.YOffset()
+	walked := 0
+	for _, m := range c.messages {
+		h := c.lineCount(m)
+		if y < walked+h {
+			return m.promptNum
+		}
+		walked += h
+	}
+	return c.promptNum
+}
+
+func (c *chatModel) lineOffsetFor(idx int) int {
 	offset := 0
 	for i := 0; i < idx; i++ {
-		offset += c.lineCount(c.messages[i]) + 1
+		offset += c.lineCount(c.messages[i])
 	}
 	total := c.viewport.TotalLineCount()
 	maxOffset := total - c.viewport.Height()
@@ -429,4 +435,103 @@ func (c *chatModel) reset() {
 	c.following = true
 	c.promptNum = 0
 	c.refresh()
+}
+
+// Role is the exported alias of the role enum for external tests.
+type Role = role
+
+// ChatMsg is the test-only constructor for chatMsg values. It mirrors the
+// shape of chatMsg with all fields exported so external tests can build
+// fixture messages without poking private internals.
+type ChatMsg struct {
+	Role      Role
+	Text      string
+	ToolCalls []toolCallInline
+	Duration  time.Duration
+	Usage     *msgUsage
+	PromptNum int
+	Collapsed bool
+}
+
+func toChatMsg(c ChatMsg) chatMsg {
+	return chatMsg{
+		role:      c.Role,
+		text:      c.Text,
+		toolCalls: c.ToolCalls,
+		duration:  c.Duration,
+		usage:     c.Usage,
+		promptNum: c.PromptNum,
+		collapsed: c.Collapsed,
+	}
+}
+
+// RoleLayout is the test-friendly exported view of roleLayout.
+type RoleLayout struct {
+	body  lipgloss.Style
+	glyph string
+}
+
+func roleLayoutFromInternal(l roleLayout) RoleLayout {
+	return RoleLayout{body: l.body, glyph: l.glyph}
+}
+
+// Glyph returns the prefix glyph for the role layout.
+func (l RoleLayout) Glyph() string {
+	return l.glyph
+}
+
+// RoleLayoutForTest exposes roleLayoutFor.
+func RoleLayoutForTest(r Role) RoleLayout {
+	return roleLayoutFromInternal(roleLayoutFor(r))
+}
+
+// RenderMsgForTest exposes renderMsg to external tests.
+func RenderMsgForTest(g ChatMsg, width int) []string {
+	return renderMsg(toChatMsg(g), width)
+}
+
+// GlyphPrefixForTest exposes glyphPrefix.
+func GlyphPrefixForTest(layout RoleLayout, role Role, promptNum int) string {
+	return glyphPrefix(roleLayout{body: layout.body, glyph: layout.glyph}, role, promptNum)
+}
+
+// IndentWrappedLinesForTest exposes the old indent helper for tests that
+// only want to verify alignment without the prefix.
+func IndentWrappedLinesForTest(lines []string, prefixWidth int) []string {
+	if prefixWidth <= 0 {
+		return lines
+	}
+	indent := strings.Repeat(" ", prefixWidth)
+	out := make([]string, len(lines))
+	out[0] = indent + lines[0]
+	for i := 1; i < len(lines); i++ {
+		out[i] = indent + lines[i]
+	}
+	return out
+}
+
+// NewChatModelForTest exposes newChatModel to external tests.
+func NewChatModelForTest() ChatModelT {
+	return ChatModelT{model: newChatModel()}
+}
+
+// ChatModelT is the test-friendly handle wrapping *chatModel.
+type ChatModelT struct {
+	model *chatModel
+}
+
+func (t ChatModelT) SubmitForTest(text string) {
+	t.model.submit(text)
+}
+
+func (t ChatModelT) PromptNumAtViewportTopForTest() int {
+	return t.model.promptNumAtViewportTop()
+}
+
+func (t ChatModelT) JumpToPromptForTest(direction int) {
+	t.model.JumpToPrompt(direction)
+}
+
+func (t ChatModelT) SetSizeForTest(w, h int) {
+	t.model.SetSize(w, h)
 }
