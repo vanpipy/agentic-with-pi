@@ -158,8 +158,7 @@ func TestNewAgentMaxTurnsMatchesPiDefault(t *testing.T) {
 	}
 }
 
-func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {
-	callIDs := make([]string, 7)
+func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {	callIDs := make([]string, 7)
 	for i := range callIDs {
 		callIDs[i] = fmt.Sprintf("call_%d", i)
 	}
@@ -283,6 +282,43 @@ func TestAgentToolExecutionError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "kaboom") {
 		t.Errorf("err = %q, want mentions kaboom", err.Error())
+	}
+}
+
+func TestAgentMidBatchToolFailureKeepsAssistantAndResultsAligned(t *testing.T) {
+	core := &fakeCore{}
+	ag := agent.NewAgent(core).WithModel(llm.Model{ID: "m", SupportsTool: true})
+	ag.WithTool(agent.Tool{Name: "ok", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "ok", nil }})
+	ag.WithTool(agent.Tool{Name: "boom", Execute: func(ctx context.Context, argsJSON string) (string, error) {
+		return "", errors.New("mid-batch kaboom")
+	}})
+
+	calls := []llm.ToolCall{
+		{ID: "c1", Function: llm.FunctionCall{Name: "ok", Arguments: "{}"}},
+		{ID: "c2", Function: llm.FunctionCall{Name: "boom", Arguments: "{}"}},
+		{ID: "c3", Function: llm.FunctionCall{Name: "ok", Arguments: "{}"}},
+		{ID: "c4", Function: llm.FunctionCall{Name: "ok", Arguments: "{}"}},
+	}
+	msgs := []llm.Message{
+		{Role: "assistant", ToolCalls: calls},
+	}
+	updated, ok := agent.AgentExecuteToolsForTest(ag, calls, msgs)
+	if !ok {
+		t.Fatal("executeTools returned not-ok")
+	}
+
+	toolCallCount := 0
+	toolResultCount := 0
+	for _, m := range updated {
+		if m.Role == "assistant" {
+			toolCallCount += len(m.ToolCalls)
+		}
+		if m.Role == "tool" {
+			toolResultCount++
+		}
+	}
+	if toolCallCount != toolResultCount {
+		t.Errorf("assistant.tool_calls (%d) != tool results (%d) after mid-batch failure; would cause API 400", toolCallCount, toolResultCount)
 	}
 }
 

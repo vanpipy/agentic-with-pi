@@ -373,10 +373,11 @@ func (a *Agent) processStreamEvent(ctx context.Context, ch chan<- Event, ev llm.
 }
 
 func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
-	for _, tc := range calls {
+	for i, tc := range calls {
 		tool, ok := a.findTool(tc.Function.Name)
 		if !ok {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("unknown tool: %s", tc.Function.Name)})
+			msgs = appendSkippedToolResults(msgs, calls, i, fmt.Sprintf("Tool %s not found", tc.Function.Name))
 			return msgs, false
 		}
 		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}) {
@@ -394,11 +395,28 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			content := fmt.Sprintf("Tool %s failed: %s", tc.Function.Name, err.Error())
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: err.Error()})
+			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed", tc.Function.Name, tc.Function.Name))
 			return msgs, true
 		}
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: result})
 	}
 	return msgs, true
+}
+
+func appendSkippedToolResults(msgs []llm.Message, calls []llm.ToolCall, startIndex int, reason string) []llm.Message {
+	for i := startIndex; i < len(calls); i++ {
+		tc := calls[i]
+		msgs = append(msgs, llm.Message{
+			Role:       "tool",
+			ToolCallID: tc.ID,
+			Content:    reason,
+		})
+	}
+	return msgs
+}
+
+func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {
+	return a.executeTools(context.Background(), calls, msgs, nil)
 }
 
 func (a *Agent) findTool(name string) (Tool, bool) {
@@ -414,6 +432,9 @@ func (a *Agent) emit(ctx context.Context, ch chan<- Event, ev Event) bool {
 	if a.LogWriter != nil {
 		a.logSeq++
 		a.writeEvent(a.logSeq, ev)
+	}
+	if ch == nil {
+		return ctx.Err() == nil
 	}
 	select {
 	case ch <- ev:
