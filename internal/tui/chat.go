@@ -346,6 +346,7 @@ func (c *chatModel) reset() {
 	c.streaming.Reset()
 	c.reasoning.Reset()
 	c.following = true
+	c.promptNum = 0
 	c.refresh()
 }
 

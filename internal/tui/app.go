@@ -188,8 +188,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 
 			if strings.HasPrefix(text, "/") {
-				shouldQuit := m.executeCommand(text)
+				shouldQuit, cmd := m.executeCommand(text)
 				m.layout()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				if shouldQuit {
 					return m, tea.Quit
 				}
@@ -346,23 +349,11 @@ func (m *Model) shutdown() {
 	}
 }
 
-func (m *Model) submit(text string) {
+func (m *Model) submit(text string) tea.Cmd {
 	m.state = stateStreaming
-	cmds := m.startStream(text)
-	_ = cmds
-}
-
-func (m *Model) resumeSession(sessionID string) {
-	events, err := m.conn.Resume(context.Background(), sessionID)
-	if err != nil {
-		m.chat.appendError("resume: " + err.Error())
-		return
-	}
-	m.session = sessionID
-	m.chat.reset()
-	for ev := range events {
-		handleServerEvent(m.chat, &m.session, ev)
-	}
+	m.chat.submit(text)
+	m.chat.GotoBottom()
+	return m.startStream(text)
 }
 
 type promptDoneMsg struct{}

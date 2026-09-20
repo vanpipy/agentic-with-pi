@@ -48,14 +48,7 @@ type autocompleteModel struct {
 }
 
 func newAutocompleteModel() *autocompleteModel {
-	all := []commandItem{
-		{title: "quit", description: "exit the TUI", category: "exit"},
-		{title: "help", description: "show available slash commands", category: "help"},
-		{title: "new", description: "clear chat history, start fresh turn", category: "session"},
-		{title: "tools", description: "list available tools", category: "help"},
-		{title: "resume", description: "resume a previous session by id", category: "session"},
-		{title: "clear", description: "clear chat history", category: "session"},
-	}
+	all := commandsToItems()
 	const maxWidth = 80
 	const maxHeight = 6
 	delegate := commandDelegate{}
@@ -140,11 +133,24 @@ func (a *autocompleteModel) View() string {
 }
 
 func allCommands() []string {
-	cmds := make([]string, 0, len(builtinCommands()))
-	for k := range builtinCommands() {
-		cmds = append(cmds, k)
+	cmds := make([]string, 0, len(allCommandSpecs()))
+	for _, c := range allCommandSpecs() {
+		cmds = append(cmds, c.Name)
 	}
 	return cmds
+}
+
+func commandsToItems() []commandItem {
+	specs := allCommandSpecs()
+	out := make([]commandItem, len(specs))
+	for i, s := range specs {
+		out[i] = commandItem{
+			title:       s.Name,
+			description: s.Description,
+			category:    s.Category,
+		}
+	}
+	return out
 }
 
 func (m *Model) acceptAutocomplete() {

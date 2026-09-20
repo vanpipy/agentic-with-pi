@@ -1,20 +1,113 @@
 package tui
 
 import (
+	"context"
 	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	client_sdk "github.com/vanpiyp/awp/internal/client-sdk"
 )
 
-type commandDef struct {
-	name        string
-	description string
-	usage       string
-	hasArg      bool
+type commandSpec struct {
+	Name        string
+	Description string
+	Category    string
+	HasArg      bool
+	Usage       string
+	Run         func(m *Model, arg string) (quit bool, cmd tea.Cmd)
 }
 
-type parsedCommand struct {
-	name string
-	arg  string
-	rest string
+var registry = []commandSpec{
+	{
+		Name:        "quit",
+		Description: "exit the TUI",
+		Category:    "exit",
+		Run: func(m *Model, _ string) (bool, tea.Cmd) {
+			return true, nil
+		},
+	},
+	{
+		Name:        "help",
+		Description: "show available slash commands",
+		Category:    "help",
+		Run: func(m *Model, _ string) (bool, tea.Cmd) {
+			m.showHelp = true
+			return false, nil
+		},
+	},
+	{
+		Name:        "new",
+		Description: "clear chat history, start fresh turn",
+		Category:    "session",
+		Run: func(m *Model, _ string) (bool, tea.Cmd) {
+			m.chat.reset()
+			return false, nil
+		},
+	},
+	{
+		Name:        "clear",
+		Description: "clear chat history",
+		Category:    "session",
+		Run: func(m *Model, _ string) (bool, tea.Cmd) {
+			m.chat.reset()
+			return false, nil
+		},
+	},
+	{
+		Name:        "tools",
+		Description: "list available tools",
+		Category:    "help",
+		Run: func(m *Model, _ string) (bool, tea.Cmd) {
+			m.cmdTools()
+			return false, nil
+		},
+	},
+	{
+		Name:        "resume",
+		Description: "resume a previous session by id",
+		Category:    "session",
+		HasArg:      true,
+		Usage:       "/resume <session_id>",
+		Run: func(m *Model, arg string) (bool, tea.Cmd) {
+			if strings.TrimSpace(arg) == "" {
+				m.chat.appendSystem(helpFooter.Render(" usage: /resume <session_id>"))
+				return false, nil
+			}
+			return false, m.startResume(arg)
+		},
+	},
+}
+
+func (m *Model) startResume(sessionID string) tea.Cmd {
+	events, err := m.conn.Resume(context.Background(), sessionID)
+	if err != nil {
+		m.chat.appendError("resume: " + err.Error())
+		return nil
+	}
+	m.session = sessionID
+	m.chat.reset()
+	m.state = stateStreaming
+	return func() tea.Msg {
+		ev, ok := <-events
+		if !ok {
+			return streamEventMsg{done: true}
+		}
+		return streamEventMsg{ev: ev}
+	}
+}
+
+func findCommand(name string) (commandSpec, bool) {
+	for _, c := range registry {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return commandSpec{}, false
+}
+
+func allCommandSpecs() []commandSpec {
+	return registry
 }
 
 func parseCommand(text string) (parsedCommand, bool) {
@@ -31,76 +124,25 @@ func parseCommand(text string) (parsedCommand, bool) {
 	return cmd, true
 }
 
-func findCommand(name string) (commandDef, bool) {
-	if c, ok := builtinCommands()[name]; ok {
-		return c, true
-	}
-	return commandDef{}, false
+type parsedCommand struct {
+	name string
+	arg  string
+	rest string
 }
 
-func builtinCommands() map[string]commandDef {
-	return map[string]commandDef{
-		"quit": {
-			name:        "quit",
-			description: "exit the TUI",
-		},
-		"help": {
-			name:        "help",
-			description: "show available slash commands",
-		},
-		"new": {
-			name:        "new",
-			description: "clear chat history, start fresh turn",
-		},
-		"tools": {
-			name:        "tools",
-			description: "list available tools",
-		},
-		"resume": {
-			name:        "resume",
-			description: "resume a previous session by id",
-			usage:       "/resume <session_id>",
-			hasArg:      true,
-		},
-		"clear": {
-			name:        "clear",
-			description: "clear chat history",
-		},
-	}
-}
-
-func (m *Model) executeCommand(text string) bool {
+func (m *Model) executeCommand(text string) (quit bool, cmd tea.Cmd) {
 	parsed, ok := parseCommand(text)
 	if !ok {
-		return false
+		return false, nil
 	}
 
-	cmd, found := findCommand(parsed.name)
+	spec, found := findCommand(parsed.name)
 	if !found {
 		m.chat.appendSystem(errorPrefix.Render(" unknown command: /" + parsed.name) +
 			helpFooter.Render("\n  type /help for available commands"))
-		return true
+		return false, nil
 	}
-
-	switch cmd.name {
-	case "quit":
-		m.shutdown()
-		return true
-	case "help":
-		m.cmdHelp()
-	case "new":
-		m.chat.reset()
-		if parsed.arg != "" {
-			m.submit(parsed.arg)
-		}
-	case "clear":
-		m.chat.reset()
-	case "tools":
-		m.cmdTools()
-	case "resume":
-		m.cmdResume(parsed.arg)
-	}
-	return true
+	return spec.Run(m, parsed.arg)
 }
 
 func (m *Model) cmdHelp() {
@@ -122,10 +164,36 @@ func (m *Model) cmdTools() {
 	m.chat.appendSystem(strings.Join(lines, "\n"))
 }
 
-func (m *Model) cmdResume(sessionID string) {
-	if sessionID == "" {
-		m.chat.appendSystem(helpFooter.Render(" usage: /resume <session_id>"))
-		return
-	}
-	m.resumeSession(sessionID)
+type ParsedCommand struct {
+	Name string
+	Arg  string
+	Rest string
 }
+
+func ParseCommandForTest(text string) (ParsedCommand, bool) {
+	p, ok := parseCommand(text)
+	return ParsedCommand{Name: p.name, Arg: p.arg, Rest: p.rest}, ok
+}
+
+type CommandSpec struct {
+	Name        string
+	Description string
+	Category    string
+	HasArg      bool
+}
+
+func AllCommandSpecsForTest() []CommandSpec {
+	out := make([]CommandSpec, len(registry))
+	for i, s := range registry {
+		out[i] = CommandSpec{
+			Name:        s.Name,
+			Description: s.Description,
+			Category:    s.Category,
+			HasArg:      s.HasArg,
+		}
+	}
+	return out
+}
+
+var _ tea.Cmd
+var _ client_sdk.Event
