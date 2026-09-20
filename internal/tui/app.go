@@ -15,12 +15,12 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
-	"golang.org/x/term"
 
 	"github.com/vanpiyp/awp/internal/client-sdk"
 	"github.com/vanpiyp/awp/internal/log"
 	"github.com/vanpiyp/awp/internal/storage"
 	"github.com/vanpiyp/awp/internal/transport"
+	"golang.org/x/term"
 )
 
 type State int

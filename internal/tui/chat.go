@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -22,28 +21,11 @@ const (
 	roleThinking
 )
 
-func (r role) String() string {
-	switch r {
-	case roleUser:
-		return "you"
-	case roleAssistant:
-		return "ai"
-	case roleTool:
-		return "tool"
-	case roleObserve:
-		return "obs"
-	case roleError:
-		return "err"
-	}
-	return "?"
-}
-
 type chatMsg struct {
 	role      role
 	text      string
 	toolCalls []toolCallInline
 	duration  time.Duration
-	collapsed bool
 	usage     *msgUsage
 	promptNum int
 }
@@ -60,7 +42,7 @@ type msgUsage struct {
 }
 
 type chatModel struct {
-	viewport   viewport.Model
+	viewport  viewport.Model
 	messages   []chatMsg
 	streaming  strings.Builder
 	reasoning  strings.Builder
@@ -73,6 +55,7 @@ type chatModel struct {
 func newChatModel() *chatModel {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
+	vp.SoftWrap = true
 	return &chatModel{
 		viewport:  vp,
 		following: true,
@@ -107,22 +90,168 @@ func (c *chatModel) refresh() {
 func (c *chatModel) buildContent() string {
 	var lines []string
 	for _, m := range c.messages {
-		lines = append(lines, renderChatMsg(m, c.viewport.Width()))
+		lines = append(lines, renderMsg(m, c.viewport.Width())...)
 	}
 	if c.reasoning.Len() > 0 {
-		lines = append(lines, renderChatMsg(chatMsg{
-			role:      roleThinking,
-			text:      c.reasoning.String(),
-			collapsed: false,
-		}, c.viewport.Width()))
+		lines = append(lines, renderThinking(c.reasoning.String(), c.viewport.Width())...)
 	}
 	if c.streaming.Len() > 0 {
-		lines = append(lines, renderChatMsg(chatMsg{
-			role: roleAssistant,
-			text: c.streaming.String(),
-		}, c.viewport.Width()))
+		lines = append(lines, renderAssistant(c.streaming.String(), c.viewport.Width())...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func renderMsg(g chatMsg, width int) []string {
+	body := bodyFor(g)
+	bodyWidth := width - glyphWidth(g)
+	if bodyWidth < 16 {
+		bodyWidth = 16
+	}
+	out := wrapLines(body, bodyWidth)
+	out = indentLines(out, glyphFor(g))
+	if g.duration > 0 {
+		out = append(out, "  ⏱ "+g.duration.Round(time.Millisecond).String())
+	}
+	if g.usage != nil && g.usage.total > 0 {
+		out = append(out, fmt.Sprintf("  ↻ %d → %d  (%d tokens)", g.usage.prompt, g.usage.completion, g.usage.total))
+	}
+	if g.toolCalls != nil {
+		out = append(append(renderToolInline(g.toolCalls), ""), out...)
+	}
+	return out
+}
+
+func renderThinking(text string, width int) []string {
+	body := aiThinking.Render(text)
+	return wrapAndIndent(body, " ∵ ", width)
+}
+
+func renderAssistant(text string, width int) []string {
+	rendered := renderMarkdownBody(text, width)
+	return wrapAndIndent(rendered, " ✦ ", width)
+}
+
+func renderToolInline(calls []toolCallInline) []string {
+	if len(calls) == 0 {
+		return nil
+	}
+	parts := make([]string, len(calls))
+	for i, c := range calls {
+		args := c.args
+		if len(args) > 40 {
+			args = args[:37] + "..."
+		}
+		parts[i] = toolName.Render(c.name) + "(" + args + ")"
+	}
+	label := "tool: "
+	if len(calls) > 1 {
+		label = "tools: "
+	}
+	return []string{toolPrefix.Render(label) + strings.Join(parts, toolSeparator.Render(" · "))}
+}
+
+func bodyFor(g chatMsg) string {
+	switch g.role {
+	case roleThinking:
+		return aiThinking.Render(g.text)
+	case roleAssistant:
+		return renderMarkdownBody(g.text, 0)
+	}
+	return g.text
+}
+
+func glyphFor(g chatMsg) string {
+	if g.role == roleUser && g.promptNum > 0 {
+		return fmt.Sprintf("%d› ", g.promptNum)
+	}
+	return glyphForRole(g.role)
+}
+
+func glyphForRole(r role) string {
+	switch r {
+	case roleUser:
+		return " › "
+	case roleAssistant:
+		return " ✦ "
+	case roleTool:
+		return " ⚙ "
+	case roleObserve:
+		return " ← "
+	case roleError:
+		return " ✗ "
+	case roleSystem:
+		return " ⋯ "
+	case roleThinking:
+		return " ∵ "
+	}
+	return "   "
+}
+
+func glyphWidth(g chatMsg) int {
+	return ansiWidth(glyphFor(g))
+}
+
+func wrapAndIndent(text, prefix string, width int) []string {
+	if width <= 0 {
+		return indentLines(strings.Split(text, "\n"), prefix)
+	}
+	out := wrapLines(text, width-ansiWidth(prefix))
+	return indentLines(out, prefix)
+}
+
+func wrapLines(text string, width int) []string {
+	if width <= 0 {
+		return strings.Split(text, "\n")
+	}
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		for ansiWidth(line) > width {
+			cut := cutAtWidth(line, width)
+			out = append(out, cut)
+			line = line[ansiWidth(cut):]
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func cutAtWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	count := 0
+	for i := range s {
+		if count == w {
+			return s[:i]
+		}
+		count++
+	}
+	return s
+}
+
+func indentLines(lines []string, prefix string) []string {
+	width := ansiWidth(prefix)
+	if width == 0 {
+		return lines
+	}
+	indent := strings.Repeat(" ", width)
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			out[i] = prefix + line
+		} else {
+			out[i] = indent + line
+		}
+	}
+	return out
+}
+
+func ansiWidth(s string) int {
+	w := 0
+	for range s {
+		w++
+	}
+	return w
 }
 
 func (c *chatModel) ScrollUp(n int) {
@@ -169,69 +298,29 @@ func (c *chatModel) JumpToPrompt(direction int) {
 	if direction == 0 {
 		return
 	}
-	var promptIdx int = -1
-	if direction > 0 {
-		currentVisible := c.firstVisibleMsgIndex()
-		for i, m := range c.messages {
-			if i >= currentVisible {
-				break
-			}
-			if m.role == roleUser {
-				promptIdx = i
-			}
+	target := -1
+	for i, m := range c.messages {
+		if m.role != roleUser {
+			continue
 		}
-	} else {
-		currentVisible := c.firstVisibleMsgIndex()
-		for i := currentVisible; i < len(c.messages); i++ {
-			if c.messages[i].role == roleUser {
-				promptIdx = i
-				break
-			}
+		if direction > 0 && i < c.viewport.YOffset() {
+			target = i
+		} else if direction < 0 && i >= c.viewport.YOffset() {
+			target = i
+			break
 		}
 	}
-	if promptIdx == -1 {
+	if target == -1 {
 		return
 	}
-	lineOffset := c.lineOffsetForMsg(promptIdx)
-	c.viewport.SetYOffset(lineOffset)
+	c.viewport.SetYOffset(c.lineOffsetForPrompt(target))
 	c.following = c.viewport.AtBottom()
 }
 
-func (c *chatModel) firstVisibleMsgIndex() int {
-	yOffset := c.viewport.YOffset()
-	totalLines := c.totalRenderedLines()
-	linesFromBottom := totalLines - c.viewport.Height() - yOffset
-	if linesFromBottom < 0 {
-		linesFromBottom = 0
-	}
-	return c.lineIndexToMsgIndex(linesFromBottom)
-}
-
-func (c *chatModel) totalRenderedLines() int {
-	return c.viewport.TotalLineCount()
-}
-
-func (c *chatModel) lineIndexToMsgIndex(lineIdx int) int {
-	idx := 0
-	cur := 0
-	for _, m := range c.messages {
-		lines := c.lineCountForMsg(m)
-		if lineIdx >= cur && lineIdx < cur+lines {
-			return idx
-		}
-		cur += lines + 1
-		idx++
-	}
-	if len(c.messages) > 0 {
-		return len(c.messages) - 1
-	}
-	return 0
-}
-
-func (c *chatModel) lineOffsetForMsg(msgIdx int) int {
+func (c *chatModel) lineOffsetForPrompt(idx int) int {
 	offset := 0
-	for i := 0; i < msgIdx && i < len(c.messages); i++ {
-		offset += c.lineCountForMsg(c.messages[i]) + 1
+	for i := 0; i < idx; i++ {
+		offset += c.lineCount(c.messages[i]) + 1
 	}
 	total := c.viewport.TotalLineCount()
 	maxOffset := total - c.viewport.Height()
@@ -244,16 +333,8 @@ func (c *chatModel) lineOffsetForMsg(msgIdx int) int {
 	return offset
 }
 
-func (c *chatModel) lineCountForMsg(m chatMsg) int {
-	w := c.viewport.Width()
-	if w <= 0 {
-		w = 80
-	}
-	rendered := renderChatMsg(m, w)
-	if rendered == "" {
-		return 0
-	}
-	return strings.Count(rendered, "\n") + 1
+func (c *chatModel) lineCount(g chatMsg) int {
+	return len(renderMsg(g, c.viewport.Width()))
 }
 
 func (c *chatModel) AtBottom() bool {
@@ -348,145 +429,4 @@ func (c *chatModel) reset() {
 	c.following = true
 	c.promptNum = 0
 	c.refresh()
-}
-
-func renderChatMsg(m chatMsg, width int) string {
-	bodyWidth := width - 4
-	if bodyWidth < 16 {
-		bodyWidth = 16
-	}
-
-	var prefix, indent string
-	switch m.role {
-	case roleUser:
-		num := ""
-		if m.promptNum > 0 {
-			num = fmt.Sprintf("%d", m.promptNum)
-		}
-		prefix = userPromptNum.Render(num) + userPromptArrow.Render(" › ")
-		indent = strings.Repeat(" ", lipgloss.Width(num)+2)
-	case roleAssistant:
-		prefix = aiPrefix.Render(" ✦ ")
-		indent = "   "
-	case roleTool:
-		prefix = toolPrefix.Render(" ⚙ ")
-		indent = "   "
-	case roleObserve:
-		prefix = observePrefix.Render(" ← ")
-		indent = "   "
-	case roleError:
-		prefix = errorPrefix.Render(" ✗ ")
-		indent = "   "
-	case roleSystem:
-		prefix = systemPrefix.Render(" ⋯ ")
-		indent = "   "
-	case roleThinking:
-		prefix = aiThinking.Render(" ∵ ")
-		indent = "   "
-	}
-
-	var body string
-	var bodyStyle *lipgloss.Style
-	switch m.role {
-	case roleThinking:
-		body = renderThinkingBody(m, bodyWidth)
-	case roleUser:
-		body = wrapText(m.text, bodyWidth)
-		bodyStyle = &userPromptText
-	case roleAssistant:
-		body = renderMarkdownBody(m.text, bodyWidth)
-		bodyStyle = &aiText
-	default:
-		body = wrapText(m.text, bodyWidth)
-	}
-
-	toolInline := renderToolInline(m.toolCalls, bodyWidth)
-	if toolInline != "" {
-		body = toolInline + "\n" + body
-	}
-
-	bodyIndented := indentLines(body, indent)
-
-	var styledBody string
-	if bodyStyle != nil {
-		styledBody = bodyStyle.Render(bodyIndented)
-	} else {
-		styledBody = bodyIndented
-	}
-
-	result := prefix + " " + styledBody
-
-	if m.duration > 0 {
-		dur := durationHint.Render(fmt.Sprintf("  ⏱ %s", m.duration.Round(time.Millisecond)))
-		result += "\n" + dur
-	}
-	if m.usage != nil && m.usage.total > 0 {
-		tok := tokenHint.Render(fmt.Sprintf("  ↻ %d → %d  (%d tokens)", m.usage.prompt, m.usage.completion, m.usage.total))
-		result += "\n" + tok
-	}
-	return result
-}
-
-func indentLines(s, indent string) string {
-	if indent == "" {
-		return s
-	}
-	var b strings.Builder
-	for i, line := range strings.Split(s, "\n") {
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(indent)
-		b.WriteString(line)
-	}
-	return b.String()
-}
-
-func renderThinkingBody(m chatMsg, width int) string {
-	if m.collapsed {
-		dur := m.duration.Round(time.Second)
-		if dur == 0 {
-			dur = m.duration.Round(time.Millisecond)
-		}
-		return thinkingCollapsed.Render(fmt.Sprintf("▸ thought for %s", dur))
-	}
-	return wrapText(m.text, width)
-}
-
-func renderToolInline(calls []toolCallInline, width int) string {
-	if len(calls) == 0 {
-		return ""
-	}
-	parts := make([]string, len(calls))
-	for i, c := range calls {
-		args := c.args
-		if len(args) > 40 {
-			args = args[:37] + "..."
-		}
-		parts[i] = toolName.Render(c.name) + "(" + args + ")"
-	}
-	label := "tool: "
-	if len(calls) > 1 {
-		label = "tools: "
-	}
-	return toolPrefix.Render(label) + strings.Join(parts, toolSeparator.Render(" · "))
-}
-
-func wrapText(text string, width int) string {
-	if width <= 0 {
-		return text
-	}
-	var out strings.Builder
-	for i, line := range strings.Split(text, "\n") {
-		if i > 0 {
-			out.WriteString("\n")
-		}
-		for len(line) > width {
-			out.WriteString(line[:width])
-			out.WriteString("\n")
-			line = line[width:]
-		}
-		out.WriteString(line)
-	}
-	return out.String()
 }

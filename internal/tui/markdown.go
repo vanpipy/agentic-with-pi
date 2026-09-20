@@ -36,34 +36,28 @@ func renderMarkdownBody(text string, width int) string {
 	}
 	r := getMdRenderer()
 	if r == nil {
-		return wrapText(text, width)
+		return softWrap(text, width)
 	}
 
 	out, err := r.Render(text)
 	if err != nil {
-		return wrapText(text, width)
+		return softWrap(text, width)
 	}
 
 	out = strings.TrimRight(out, "\n")
-
-	lines := strings.Split(out, "\n")
 	if width <= 0 {
-		return strings.Join(lines, "\n")
+		return out
 	}
-
-	var b strings.Builder
-	for _, line := range lines {
-		if ansi.StringWidth(line) > width {
-			b.WriteString(wrapText(line, width))
-		} else {
-			b.WriteString(line)
-		}
-		b.WriteString("\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
+	return softWrap(out, width)
 }
 
-// RenderMarkdownForTest exposes renderMarkdownBody to external tests.
+func softWrap(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	return ansi.Wordwrap(text, width, "")
+}
+
 func RenderMarkdownForTest(text string, width int) string {
 	return renderMarkdownBody(text, width)
 }
