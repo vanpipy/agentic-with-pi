@@ -11,6 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
@@ -52,7 +55,8 @@ type Model struct {
 	autocomplete *autocompleteModel
 	events       <-chan client_sdk.Event
 	lastKind     string
-	spinnerFrame int
+	spinner      spinner.Model
+	help         help.Model
 }
 
 type errMsg struct{ err error }
@@ -107,6 +111,8 @@ func Run() error {
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
+		spinner:      newSpinner(),
+		help:         help.New(),
 	}
 
 	p := tea.NewProgram(m)
@@ -119,21 +125,15 @@ func Run() error {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(
-		textinputBlinkCmd(),
-		m.spinnerTickCmd(),
-	)
+	m.spinner = newSpinner()
+	return func() tea.Msg { return m.spinner.Tick() }
 }
 
-var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
-func (m *Model) spinnerTickCmd() tea.Cmd {
-	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
-		return spinnerTickMsg{}
-	})
+func newSpinner() spinner.Model {
+	s := spinner.New(spinner.WithSpinner(spinner.MiniDot))
+	s.Style = statusSpin
+	return s
 }
-
-type spinnerTickMsg struct{}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -245,10 +245,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateError
 		m.chat.appendError(msg.err.Error())
 
-	case spinnerTickMsg:
-		m.spinnerFrame = (m.spinnerFrame + 1) % len(spinnerFrames)
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
 		if m.state == stateStreaming || m.lastKind != "" {
-			cmds = append(cmds, m.spinnerTickCmd())
+			cmds = append(cmds, func() tea.Msg { return m.spinner.Tick() })
+		}
+		if cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 
 	case promptDoneMsg:
@@ -274,7 +278,7 @@ func (m *Model) View() tea.View {
 
 	inputBox := m.input.View()
 
-	footer := helpFooter.Render(" ● ready  ctrl+c: quit  /quit: quit  ctrl+d: quit/eof  tab: complete  ↑↓: scroll")
+	footer := m.help.ShortHelpView(shortHelpBindings())
 
 	lines := []string{header, "", body, "", inputBox, "", footer}
 	if m.autocomplete.visible {
@@ -295,6 +299,7 @@ func (m *Model) layout() {
 		bodyHeight = 1
 	}
 	m.chat.SetSize(m.width-4, bodyHeight)
+	m.help.SetWidth(m.width)
 }
 
 func (m *Model) startStream(text string) tea.Cmd {
@@ -351,10 +356,31 @@ type promptDoneMsg struct{}
 
 var program *tea.Program
 
-func textinputBlinkCmd() tea.Cmd {
-	return tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
-		return nil
-	})
+
+
+func shortHelpBindings() []key.Binding {
+	return []key.Binding{
+		key.NewBinding(
+			key.WithKeys("ctrl+c"),
+			key.WithHelp("ctrl+c", "quit"),
+		),
+		key.NewBinding(
+			key.WithKeys("ctrl+d"),
+			key.WithHelp("ctrl+d", "quit"),
+		),
+		key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "complete"),
+		),
+		key.NewBinding(
+			key.WithKeys("up", "down"),
+			key.WithHelp("↑↓", "scroll"),
+		),
+		key.NewBinding(
+			key.WithKeys("?"),
+			key.WithHelp("?", "help"),
+		),
+	}
 }
 
 func sessionLabel(id string) string {
@@ -370,8 +396,7 @@ func sessionLabel(id string) string {
 func (m *Model) statusRender() string {
 	switch m.state {
 	case stateStreaming:
-		frame := spinnerFrames[m.spinnerFrame]
-		return frame + " " + m.state.String()
+		return m.spinner.View() + " " + m.state.String()
 	default:
 		return m.state.String()
 	}
