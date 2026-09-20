@@ -24,6 +24,8 @@ type Server struct {
 
 	connCancels   map[string]context.CancelFunc
 	connCancelsMu sync.Mutex
+
+	sessionStates *sessionStateStore
 }
 
 func New(ag *agent.Agent, socketPath string) (*Server, error) {
@@ -42,13 +44,14 @@ func New(ag *agent.Agent, socketPath string) (*Server, error) {
 	}
 
 	return &Server{
-		listener:    ln,
-		stores:      make(map[string]*Store),
-		agent:       ag,
-		sessionsDir: sessionsDir,
-		ctx:         ctx,
-		cancel:      cancel,
-		connCancels: make(map[string]context.CancelFunc),
+		listener:      ln,
+		stores:        make(map[string]*Store),
+		agent:         ag,
+		sessionsDir:   sessionsDir,
+		ctx:           ctx,
+		cancel:        cancel,
+		connCancels:   make(map[string]context.CancelFunc),
+		sessionStates: newSessionStateStore(),
 	}, nil
 }
 

@@ -136,10 +136,27 @@ func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 }
 
 func (a *Agent) RunStreamResumed(ctx context.Context, userMsg string, history []llm.Message) <-chan Event {
+	return a.runStreamResumedImpl(ctx, userMsg, history, nil)
+}
+
+// RunStreamResumedWithSnapshot behaves like RunStreamResumed but reports
+// the final messages snapshot (after compact + tool loops) on done.
+// The snapshot is delivered even if the loop terminated early with an
+// error, so callers can keep their session state in sync.
+func (a *Agent) RunStreamResumedWithSnapshot(ctx context.Context, userMsg string, history []llm.Message) (<-chan Event, <-chan []llm.Message) {
+	done := make(chan []llm.Message, 1)
+	ch := a.runStreamResumedImpl(ctx, userMsg, history, done)
+	return ch, done
+}
+
+func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, history []llm.Message, sink chan<- []llm.Message) <-chan Event {
 	ch := make(chan Event, 32)
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
+		if sink != nil {
+			defer close(sink)
+		}
 		if a.Model.ID == "" {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
 			return
@@ -147,6 +164,9 @@ func (a *Agent) RunStreamResumed(ctx context.Context, userMsg string, history []
 		msgs := append([]llm.Message{}, history...)
 		msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
 		a.loopWithMsgs(ctx, msgs, ch)
+		if sink != nil {
+			sink <- append([]llm.Message{}, msgs...)
+		}
 	}()
 	return ch
 }

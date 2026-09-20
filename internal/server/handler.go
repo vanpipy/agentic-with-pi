@@ -70,8 +70,16 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	defer runCancel()
 
 	var events <-chan agent.Event
+	var snapshotCh <-chan []llm.Message
+	var seed []llm.Message
 	if history, ok := s.loadResumeHistory(sessionID); ok && len(history) > 0 {
-		events = s.agent.RunStreamResumed(runCtx, params.Prompt, history)
+		seed = history
+	}
+	if msgs, ok := s.sessionStates.snapshot(sessionID); ok {
+		seed = append(seed, msgs...)
+	}
+	if len(seed) > 0 {
+		events, snapshotCh = s.agent.RunStreamResumedWithSnapshot(runCtx, params.Prompt, seed)
 	} else {
 		events = s.agent.RunStream(runCtx, params.Prompt)
 	}
@@ -106,6 +114,16 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 
 		if writeErr := store.WriteEvent(eventName, data); writeErr != nil {
 			slog.Debug("server: session write failed", "err", writeErr)
+		}
+	}
+
+	if snapshotCh != nil {
+		select {
+		case msgs, ok := <-snapshotCh:
+			if ok && len(msgs) > 0 {
+				s.sessionStates.update(sessionID, msgs)
+			}
+		default:
 		}
 	}
 }
