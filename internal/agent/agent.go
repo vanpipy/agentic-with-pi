@@ -47,7 +47,7 @@ type Tool struct {
 
 type Agent struct {
 	core                    llm.Core
-	MaxTurns                int
+	SafetyNet               int
 	Model                   llm.Model
 	SystemPrompts           string
 	Tools                   []Tool
@@ -62,7 +62,7 @@ type Agent struct {
 func NewAgent(llmCore llm.Core) *Agent {
 	return &Agent{
 		core:                   llmCore,
-		MaxTurns:               200,
+		SafetyNet:               200,
 		SystemPrompts:          "You are a helpful coding assistant",
 		compaction: CompactionSettings{
 			Enabled:         true,
@@ -73,12 +73,16 @@ func NewAgent(llmCore llm.Core) *Agent {
 	}
 }
 
-func (a *Agent) WithMaxTurns(n int) *Agent {
+func (a *Agent) WithSafetyNet(n int) *Agent {
 	if n <= 0 {
 		n = 200
 	}
-	a.MaxTurns = n
+	a.SafetyNet = n
 	return a
+}
+
+func (a *Agent) WithMaxTurns(n int) *Agent {
+	return a.WithSafetyNet(n)
 }
 
 func (a *Agent) WithModel(model llm.Model) *Agent {
@@ -113,6 +117,10 @@ func (a *Agent) WithContextWindow(tokens int) *Agent {
 
 func (a *Agent) ContextWindow() int {
 	return a.Model.MaxContextTokens
+}
+
+func (a *Agent) SafetyNetLimit() int {
+	return a.SafetyNet
 }
 
 func (a *Agent) CompactionSettingsForTest() CompactionSettings {
@@ -177,7 +185,7 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 	recentCalls := []string{}
 	recentToolErrors := []string{}
 
-	for turn := 0; turn < a.MaxTurns; turn++ {
+	for turn := 0; turn < a.SafetyNet; turn++ {
 		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
 			previousSummary := ExtractPreviousSummary(msgs)
 			compacted, err := a.compact(ctx, msgs, previousSummary)
@@ -205,7 +213,7 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 		msgs = append(msgs, result.toAssistantMessage())
 
 		signature := toolCallSignature(toolCalls)
-		remaining := a.MaxTurns - turn - 1
+		remaining := a.SafetyNet - turn - 1
 		if remaining > maxConsecutiveRepeats*2 && len(recentCalls) >= maxConsecutiveRepeats &&
 			allEqual(append(recentCalls, signature)) {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("tool calls repeated %d times, aborting", maxConsecutiveRepeats+1)})
@@ -249,7 +257,7 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 			}
 		}
 	}
-	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("max turns exceeded (%d)", a.MaxTurns)})
+	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet)})
 }
 
 func (a *Agent) openLogLocked() {
@@ -335,7 +343,7 @@ func allToolCallsEmpty(calls []llm.ToolCall) bool {
 }
 
 func preSizedHistory(a *Agent, userMsg string) []llm.Message {
-	msgs := make([]llm.Message, 2, 2+a.MaxTurns*4)
+	msgs := make([]llm.Message, 2, 2+a.SafetyNet*4)
 	msgs[0] = llm.Message{Role: "system", Content: a.SystemPrompts}
 	msgs[1] = llm.Message{Role: "user", Content: userMsg}
 	return msgs

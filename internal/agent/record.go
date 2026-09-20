@@ -50,7 +50,7 @@ func (a *Agent) writeHeaderLocked() {
 	for _, t := range a.Tools {
 		tools = append(tools, t.Name)
 	}
-	header := sessionHeader{Kind: "session", Version: 1, ID: id, Model: a.Model.ID, MaxTurns: a.MaxTurns, System: system, Tools: tools, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	header := sessionHeader{Kind: "session", Version: 1, ID: id, Model: a.Model.ID, MaxTurns: a.SafetyNet, System: system, Tools: tools, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if err := writeJSONLine(a.logBuf, header); err != nil {
 		slog.Debug("agent: header write failed", "err", err)
 	}

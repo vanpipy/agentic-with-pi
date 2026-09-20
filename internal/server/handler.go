@@ -95,7 +95,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 			meta := SessionMeta{
 				SessionID: sessionID,
 				Model:     s.agent.Model.ID,
-				MaxTurns:  s.agent.MaxTurns,
+				MaxTurns:  s.agent.SafetyNet,
 				System:    s.agent.SystemPrompts,
 				StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
 			}

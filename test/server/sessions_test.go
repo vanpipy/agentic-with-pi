@@ -40,7 +40,7 @@ func TestWriteHeader(t *testing.T) {
 	meta := server.SessionMeta{
 		SessionID: "abc-123",
 		Model:     "test-model",
-		MaxTurns:  10,
+		MaxTurns:  10, // persisted as "max_turns" (legacy field name)
 	}
 	if err := s.WriteHeader(meta); err != nil {
 		t.Fatal(err)

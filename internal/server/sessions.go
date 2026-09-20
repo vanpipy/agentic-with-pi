@@ -15,7 +15,7 @@ import (
 type SessionMeta struct {
 	SessionID string   `json:"session_id"`
 	Model     string   `json:"model"`
-	MaxTurns  int      `json:"max_turns"`
+	MaxTurns  int      `json:"max_turns"` // legacy field name; persisted as "max_turns" for backward compat
 	System    string   `json:"system,omitempty"`
 	Tools     []string `json:"tools,omitempty"`
 	StartedAt string   `json:"started_at"`

@@ -165,11 +165,11 @@ func TestShouldCompactFallsBackWhenModelZero(t *testing.T) {
 	}
 }
 
-func TestNewAgentMaxTurnsMatchesPiDefault(t *testing.T) {
+func TestNewAgentSafetyNetMatchesPiDefault(t *testing.T) {
 	core := &fakeCore{}
 	ag := newTestAgent(core, "test-model")
-	if ag.MaxTurns < 100 {
-		t.Errorf("MaxTurns = %d, safety net default should be >= 100 to cover long-task scenarios", ag.MaxTurns)
+	if ag.SafetyNet < 100 {
+		t.Errorf("SafetyNet = %d, default should be >= 100 (pi has no turn limit; ours is a safety net only)", ag.SafetyNet)
 	}
 }
 
@@ -337,21 +337,24 @@ func TestAgentMidBatchToolFailureKeepsAssistantAndResultsAligned(t *testing.T) {
 	}
 }
 
-func TestAgentMaxTurnsExceeded(t *testing.T) {
+func TestAgentSafetyNetReached(t *testing.T) {
 	core := &fakeCore{streamChunks: []llm.StreamEvent{
 		toolUseStartChunk("1", "loop"),
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
 	_ = core  // legacy streamChunks (unused)
-	ag := newTestAgent(core, "test-model").WithMaxTurns(2)
+	ag := newTestAgent(core, "test-model").WithSafetyNet(2)
 	ag.WithTool(agent.Tool{
 		Name:    "loop",
 		Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil },
 	})
 	_, err := runAgent(t, ag, "loop forever")
 	if err == nil {
-		t.Fatal("expected max-turns error, got nil")
+		t.Fatal("expected safety-net error, got nil")
+	}
+	if !strings.Contains(err.Error(), "safety net") {
+		t.Errorf("err = %q, want mentions safety net", err.Error())
 	}
 }
 
