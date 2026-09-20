@@ -54,6 +54,28 @@ func (s *Store) WriteHeader(meta SessionMeta) error {
 	return s.append(e)
 }
 
+type CompactionRecord struct {
+	Summary string `json:"summary"`
+	At      string `json:"at"`
+}
+
+func (s *Store) WriteCompaction(c CompactionRecord) error {
+	e := Entry{
+		Kind: "compaction",
+		At:   time.Now().UTC().Format(time.RFC3339Nano),
+		Data: mustMarshal(CompactionRecord{Summary: c.Summary, At: c.At}),
+	}
+	return s.append(e)
+}
+
+func mustMarshal(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return json.RawMessage("null")
+	}
+	return b
+}
+
 func (s *Store) WriteEvent(eventKind string, data any) error {
 	var raw json.RawMessage
 	if data != nil {
@@ -96,8 +118,9 @@ func (s *Store) append(e Entry) error {
 }
 
 type Loaded struct {
-	Meta   SessionMeta
-	Events []EventRecord
+	Meta        SessionMeta
+	Events      []EventRecord
+	Compactions []CompactionRecord
 }
 
 type EventRecord struct {
@@ -132,6 +155,11 @@ func Load(path string) (*Loaded, error) {
 				At:   e.At,
 				Data: e.Data,
 			})
+		case "compaction":
+			var c CompactionRecord
+			if err := json.Unmarshal(e.Data, &c); err == nil {
+				loaded.Compactions = append(loaded.Compactions, c)
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

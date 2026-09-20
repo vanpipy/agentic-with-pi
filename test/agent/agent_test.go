@@ -769,6 +769,45 @@ func TestAgentRepeatedErrorLimitIsConfigurable(t *testing.T) {
 	}
 }
 
+func TestAgentRunStreamResumedStartsWithHistory(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("resumed and done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "test-model")
+
+	history := []llm.Message{
+		{Role: "user", Content: "earlier task"},
+		{Role: "assistant", Content: "Previous conversation summary:\n## Goal\ndone X"},
+		{Role: "user", Content: "summarize"},
+		{Role: "assistant", Content: "the summary"},
+		{Role: "tool", Content: "tool result"},
+	}
+
+	var result string
+	for ev := range ag.RunStreamResumed(context.Background(), "next task", history) {
+		if ev.Category == agent.EventFinalAnswer {
+			result = ev.Content
+		}
+	}
+	if result != "resumed and done" {
+		t.Errorf("result = %q, want resumed and done", result)
+	}
+	if len(core.requests) != 1 {
+		t.Fatalf("stream calls = %d, want 1", len(core.requests))
+	}
+
+	req := core.requests[0]
+	if len(req.Messages) != len(history)+1 {
+		t.Errorf("messages = %d, want %d (history + new prompt)", len(req.Messages), len(history)+1)
+	}
+	lastMsg := req.Messages[len(req.Messages)-1]
+	if lastMsg.Role != "user" || lastMsg.Content != "next task" {
+		t.Errorf("last msg = %+v, want user/next task", lastMsg)
+	}
+}
+
 func TestAgentFinalAnswerDoesNotDuplicateReasoning(t *testing.T) {
 	core := &fakeCore{streamChunks: []llm.StreamEvent{
 		{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{

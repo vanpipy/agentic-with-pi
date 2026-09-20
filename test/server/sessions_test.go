@@ -211,3 +211,27 @@ func TestFileIsOneEntryPerLine(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteAndLoadCompaction(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.jsonl")
+	s := server.NewStore(path)
+	s.WriteHeader(server.SessionMeta{SessionID: "s"})
+
+	s.WriteEvent("thought_start", nil)
+	if err := s.WriteCompaction(server.CompactionRecord{Summary: "## Goal\nlearn repo", At: "2026-09-20T12:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	s.WriteEvent("thought_chunk", map[string]string{"content": "post-compact"})
+
+	loaded, err := server.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Compactions) != 1 {
+		t.Fatalf("got %d compactions, want 1", len(loaded.Compactions))
+	}
+	if loaded.Compactions[0].Summary != "## Goal\nlearn repo" {
+		t.Errorf("summary = %q", loaded.Compactions[0].Summary)
+	}
+}
