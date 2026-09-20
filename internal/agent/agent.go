@@ -69,7 +69,6 @@ func NewAgent(llmCore llm.Core) *Agent {
 			ReserveTokens:   16384,
 			KeepRecentTurns: 5,
 		},
-		contextWindow: 200000,
 	}
 }
 
@@ -81,7 +80,13 @@ func (a *Agent) WithMaxTurns(n int) *Agent {
 	return a
 }
 
-func (a *Agent) WithModel(model llm.Model) *Agent { a.Model = model; return a }
+func (a *Agent) WithModel(model llm.Model) *Agent {
+	a.Model = model
+	if model.MaxContextTokens > 0 {
+		a.contextWindow = model.MaxContextTokens
+	}
+	return a
+}
 func (a *Agent) WithTool(t Tool) *Agent           { a.Tools = append(a.Tools, t); return a }
 func (a *Agent) WithLogWriter(w io.Writer) *Agent { a.LogWriter = w; return a }
 func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }

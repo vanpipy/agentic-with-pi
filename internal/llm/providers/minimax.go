@@ -44,7 +44,7 @@ func (p *MiniMaxProvider) Models() []llm.Model {
 			ID:                "MiniMax-M3",
 			Name:              "MiniMax M3",
 			Vendor:            p.Name(),
-			MaxContextTokens:  10240000,
+			MaxContextTokens:  200000,
 			MaxOutputTokens:   4096,
 			SupportsTool:      true,
 			SupportsVision:    true,

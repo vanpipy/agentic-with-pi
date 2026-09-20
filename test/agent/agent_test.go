@@ -121,16 +121,31 @@ func newTestAgent(core *fakeCore, modelID string) *agent.Agent {
 
 func TestNewAgentContextWindowTriggersCompaction(t *testing.T) {
 	core := &fakeCore{}
-	ag := newTestAgent(core, "test-model")
-	if ag.ContextWindow() == 0 {
-		t.Fatal("NewAgent must set a non-zero contextWindow so ShouldCompact can fire")
-	}
-	if ag.ContextWindow() > 1_000_000 {
-		t.Errorf("contextWindow = %d, looks like a no-op hardcoded default (compaction would never trigger)", ag.ContextWindow())
+	ag := agent.NewAgent(core)
+	if ag.ContextWindow() != 0 {
+		t.Errorf("NewAgent must default contextWindow to 0; let WithModel populate from model.MaxContextTokens (got %d)", ag.ContextWindow())
 	}
 	settings := ag.CompactionSettingsForTest()
-	if settings.ReserveTokens >= ag.ContextWindow() {
-		t.Errorf("ReserveTokens (%d) >= contextWindow (%d), ShouldCompact would always return false", settings.ReserveTokens, ag.ContextWindow())
+	if settings.ReserveTokens >= 1_000_000 {
+		t.Errorf("ReserveTokens (%d) looks too large for a default (cap below 1M)", settings.ReserveTokens)
+	}
+}
+
+func TestWithModelPopulatesContextWindow(t *testing.T) {
+	core := &fakeCore{}
+	ag := agent.NewAgent(core).WithModel(llm.Model{ID: "m", MaxContextTokens: 128000})
+	if got := ag.ContextWindow(); got != 128000 {
+		t.Errorf("ContextWindow = %d, want 128000 (from model.MaxContextTokens)", got)
+	}
+}
+
+func TestWithContextWindowOverridesModel(t *testing.T) {
+	core := &fakeCore{}
+	ag := agent.NewAgent(core).
+		WithModel(llm.Model{ID: "m", MaxContextTokens: 128000}).
+		WithContextWindow(50000)
+	if got := ag.ContextWindow(); got != 50000 {
+		t.Errorf("ContextWindow = %d, want 50000 (explicit WithContextWindow should win over model.MaxContextTokens)", got)
 	}
 }
 
