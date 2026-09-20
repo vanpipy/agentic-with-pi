@@ -66,10 +66,20 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("invalid args: %w", err)
 			}
+			if strings.TrimSpace(args.Path) == "" {
+				return "", fmt.Errorf("path is required (use the ls tool to discover files in a directory)")
+			}
 			if args.Limit <= 0 {
 				args.Limit = maxLines
 			}
 			fullPath := absPath(cwd, args.Path)
+			info, err := os.Stat(fullPath)
+			if err != nil {
+				return "", err
+			}
+			if info.IsDir() {
+				return "", fmt.Errorf("%s is a directory (use the ls tool to list its contents, not read)", fullPath)
+			}
 			data, err := os.ReadFile(fullPath)
 			if err != nil {
 				return "", err

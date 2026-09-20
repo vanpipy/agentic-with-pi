@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,35 @@ func TestReadFileMissing(t *testing.T) {
 	_, err := tool.Execute(context.Background(), `{"path":"nonexistent.txt"}`)
 	if err == nil {
 		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestReadFileEmptyPath(t *testing.T) {
+	dir := t.TempDir()
+	tool := tools.ReadFile(dir, tools.FileOptions{})
+	out, err := tool.Execute(context.Background(), `{}`)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+	if !strings.Contains(err.Error(), "path is required") {
+		t.Errorf("err = %q, want mentions 'path is required'", err.Error())
+	}
+	_ = out
+}
+
+func TestReadFileDirectoryReturnsHelpfulError(t *testing.T) {
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tool := tools.ReadFile(dir, tools.FileOptions{})
+	_, err := tool.Execute(context.Background(), fmt.Sprintf(`{"path":%q}`, subdir))
+	if err == nil {
+		t.Fatal("expected error when reading a directory")
+	}
+	if !strings.Contains(err.Error(), "is a directory") || !strings.Contains(err.Error(), "ls") {
+		t.Errorf("err = %q, want hint to use ls", err.Error())
 	}
 }
 
