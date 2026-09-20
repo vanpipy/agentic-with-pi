@@ -161,16 +161,15 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 	const maxConsecutiveRepeats = 3
 	const maxToolsPerTurn = 6
 	recentCalls := []string{}
-	turnsSinceLastCompact := 0
 	for turn := 0; turn < a.MaxTurns; turn++ {
-		if ShouldCompact(msgs, a.contextWindow, a.compaction, turnsSinceLastCompact) {
-			compacted, err := a.compact(ctx, msgs)
+		if ShouldCompact(msgs, a.contextWindow, a.compaction) {
+			previousSummary := ExtractPreviousSummary(msgs)
+			compacted, err := a.compact(ctx, msgs, previousSummary)
 			if err != nil {
 				a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
 				return
 			}
 			msgs = compacted
-			turnsSinceLastCompact = 0
 		}
 		result, ok := a.runTurn(ctx, msgs, ch)
 		if !ok {
@@ -204,7 +203,6 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 		if !ok {
 			return
 		}
-		turnsSinceLastCompact++
 	}
 	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("max turns exceeded (%d)", a.MaxTurns)})
 }

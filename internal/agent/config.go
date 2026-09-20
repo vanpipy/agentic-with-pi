@@ -15,12 +15,9 @@ type ToolSpec struct {
 }
 
 type CompactionSettings struct {
-	Enabled            bool
-	ReserveTokens      int
-	KeepRecentTurns    int
-	CompactEveryTurns  int
-	MinTurnsBetween    int
-	FloorPercent       int
+	Enabled         bool
+	ReserveTokens   int
+	KeepRecentTurns int
 }
 
 type Config struct {

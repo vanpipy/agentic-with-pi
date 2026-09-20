@@ -2,17 +2,179 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
-const summarizationPrompt = `You are a context summarization assistant. Read the conversation below and produce a concise structured summary that preserves all critical information needed to continue the task: decisions made, files modified, tool results, errors, and the current state. Do NOT respond to any questions in the conversation. Output ONLY the structured summary.`
+const SummarizationPrompt = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned by user]
+- [Or "(none)" if none were mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+- [Or "(none)" if not applicable]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages. Do NOT continue the conversation. Do NOT respond to any questions in the conversation. Output ONLY the structured summary.`
+
+const UpdateSummarizationPrompt = `Update the existing structured summary with new information. RULES:
+- PRESERVE all existing information from the previous summary
+- ADD new progress, decisions, and context from the new messages
+- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
+- UPDATE "Next Steps" based on what was accomplished
+- PRESERVE exact file paths, function names, and error messages
+- If something is no longer relevant, you may remove it
+
+Use this EXACT format:
+
+## Goal
+[Preserve existing goals, add new ones if the task expanded]
+
+## Constraints & Preferences
+- [Preserve existing, add new ones discovered]
+
+## Progress
+### Done
+- [x] [Include previously done items AND newly completed items]
+
+### In Progress
+- [ ] [Current work - update based on progress]
+
+### Blocked
+- [Current blockers - remove if resolved]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale] (preserve all previous, add new)
+
+## Next Steps
+1. [Update based on current state]
+
+## Critical Context
+- [Preserve important context, add new if needed]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.`
+
+type FileOperations struct {
+	Read    map[string]bool
+	Written map[string]bool
+	Edited  map[string]bool
+}
+
+func ExtractFileOps(msgs []llm.Message) FileOperations {
+	ops := FileOperations{
+		Read:    map[string]bool{},
+		Written: map[string]bool{},
+		Edited:  map[string]bool{},
+	}
+	for _, m := range msgs {
+		if m.Role != "assistant" {
+			continue
+		}
+		for _, tc := range m.ToolCalls {
+			var args struct {
+				Path string `json:"path"`
+			}
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil || args.Path == "" {
+				continue
+			}
+			switch tc.Function.Name {
+			case "read":
+				ops.Read[args.Path] = true
+			case "write":
+				ops.Written[args.Path] = true
+			case "edit":
+				ops.Edited[args.Path] = true
+			}
+		}
+	}
+	return ops
+}
+
+func ComputeFileLists(ops FileOperations) (readOnly []string, modified []string) {
+	modifiedSet := map[string]bool{}
+	for p := range ops.Edited {
+		modifiedSet[p] = true
+	}
+	for p := range ops.Written {
+		modifiedSet[p] = true
+	}
+	for p := range ops.Read {
+		if !modifiedSet[p] {
+			readOnly = append(readOnly, p)
+		}
+	}
+	for p := range modifiedSet {
+		modified = append(modified, p)
+	}
+	sort.Strings(readOnly)
+	sort.Strings(modified)
+	return
+}
+
+func FormatFileOperations(readFiles, modifiedFiles []string) string {
+	var sections []string
+	if len(readFiles) > 0 {
+		sections = append(sections, "<read-files>\n"+strings.Join(readFiles, "\n")+"\n</read-files>")
+	}
+	if len(modifiedFiles) > 0 {
+		sections = append(sections, "<modified-files>\n"+strings.Join(modifiedFiles, "\n")+"\n</modified-files>")
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return "\n\n" + strings.Join(sections, "\n\n")
+}
+
+func ExtractPreviousSummary(msgs []llm.Message) string {
+	const prefix = "Previous conversation summary:\n"
+	for _, m := range msgs {
+		if m.Role == "assistant" && strings.HasPrefix(m.Content, prefix) {
+			return strings.TrimPrefix(m.Content, prefix)
+		}
+	}
+	return ""
+}
 
 func EstimateTokens(s string) int {
 	return (len(s) + 3) / 4
+}
+
+const toolResultMaxChars = 2000
+
+func TruncateForSummary(text string, maxChars int) string {
+	if text == "" || len(text) <= maxChars {
+		return text
+	}
+	truncated := len(text) - maxChars
+	return text[:maxChars] + "\n\n[... " + strconv.Itoa(truncated) + " more characters truncated]"
 }
 
 func estimateMessageTokens(m llm.Message) int {
@@ -67,31 +229,15 @@ func FindCutPoint(msgs []llm.Message, keepRecentTurns int) int {
 	return 0
 }
 
-func ShouldCompact(msgs []llm.Message, contextWindow int, settings CompactionSettings, turnsSinceLastCompact int) bool {
+func ShouldCompact(msgs []llm.Message, contextWindow int, settings CompactionSettings) bool {
 	if !settings.Enabled {
 		return false
 	}
-	if turnsSinceLastCompact < settings.MinTurnsBetween {
+	if contextWindow <= 0 {
 		return false
 	}
-	if contextWindow > 0 {
-		used := estimateTotalTokens(msgs)
-		threshold := contextWindow * settings.FloorPercent / 100
-		if used < threshold {
-			return false
-		}
-		if used > contextWindow-settings.ReserveTokens {
-			return true
-		}
-	}
-	if settings.CompactEveryTurns > 0 {
-		userTurns := CountUserTurns(msgs)
-		if userTurns > settings.KeepRecentTurns &&
-			(userTurns-settings.KeepRecentTurns)%settings.CompactEveryTurns == 0 {
-			return true
-		}
-	}
-	return false
+	used := estimateTotalTokens(msgs)
+	return used > contextWindow-settings.ReserveTokens
 }
 
 func SerializeForSummary(msgs []llm.Message) string {
@@ -111,7 +257,7 @@ func SerializeForSummary(msgs []llm.Message) string {
 				fmt.Fprintf(&b, "[assistant tool call] %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
 			}
 		case "tool":
-			fmt.Fprintf(&b, "[tool result %s] %s\n", m.ToolCallID, m.Content)
+			fmt.Fprintf(&b, "[tool result %s] %s\n", m.ToolCallID, TruncateForSummary(m.Content, toolResultMaxChars))
 		case "system":
 			continue
 		}
@@ -119,7 +265,7 @@ func SerializeForSummary(msgs []llm.Message) string {
 	return b.String()
 }
 
-func (a *Agent) compact(ctx context.Context, msgs []llm.Message) ([]llm.Message, error) {
+func (a *Agent) compact(ctx context.Context, msgs []llm.Message, previousSummary string) ([]llm.Message, error) {
 	if len(msgs) == 0 {
 		return msgs, nil
 	}
@@ -138,15 +284,26 @@ func (a *Agent) compact(ctx context.Context, msgs []llm.Message) ([]llm.Message,
 
 	slog.Debug("agent: compacting", "messages_to_summarize", len(toSummarize), "messages_to_keep", len(recent))
 
+	systemContent := SummarizationPrompt
+	if previousSummary != "" {
+		systemContent = UpdateSummarizationPrompt
+	}
+
+	userContent := SerializeForSummary(toSummarize)
+	if previousSummary != "" {
+		userContent = "<previous-summary>\n" + previousSummary + "\n</previous-summary>\n\n" + userContent
+	}
+
 	summaryReq := &llm.ChatRequest{
 		Model: a.Model.ID,
 		Messages: []llm.Message{
-			{Role: "system", Content: summarizationPrompt},
-			{Role: "user", Content: SerializeForSummary(toSummarize)},
+			{Role: "system", Content: systemContent},
+			{Role: "user", Content: userContent},
 		},
 	}
 
 	var summaryText strings.Builder
+	var finishReason llm.FinishReason
 	events, err := a.core.StreamChat(ctx, summaryReq)
 	if err != nil {
 		return nil, fmt.Errorf("summarize: %w", err)
@@ -160,8 +317,19 @@ func (a *Agent) compact(ctx context.Context, msgs []llm.Message) ([]llm.Message,
 		}
 		for _, c := range ev.Chunk.Choices {
 			summaryText.WriteString(c.Delta.Content)
+			if c.FinishReason != llm.FinishReasonUnknown {
+				finishReason = c.FinishReason
+			}
 		}
 	}
+
+	if finishReason == llm.FinishReasonLength {
+		return nil, fmt.Errorf("summarize: generation hit the token cap and the summary is incomplete")
+	}
+
+	fileOps := ExtractFileOps(toSummarize)
+	readOnly, modified := ComputeFileLists(fileOps)
+	summaryText.WriteString(FormatFileOperations(readOnly, modified))
 
 	summaryMsg := llm.Message{
 		Role:    "assistant",
