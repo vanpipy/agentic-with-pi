@@ -74,7 +74,7 @@ func loadAgent() *agent.Agent {
 	cfg, err := agent.LoadConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config error:", err)
-		fmt.Fprintln(os.Stderr, "Set MINIMAX_API_KEY or provide aw.yaml.")
+		fmt.Fprintln(os.Stderr, "Set MINIMAX_API_KEY or create ~/.awp/config.yaml.")
 		os.Exit(1)
 	}
 

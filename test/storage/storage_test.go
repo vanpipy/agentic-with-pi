@@ -91,8 +91,18 @@ func TestSocketPathDefault(t *testing.T) {
 func TestConfigPathDefault(t *testing.T) {
 	t.Setenv("AWP_CONFIG_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
-	if got := storage.ConfigPath(); got == "" {
-		t.Errorf("ConfigPath returned empty")
+	t.Setenv("AWP_HOME", "")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".awp", "config.yaml")
+	if got := storage.ConfigPath(); got != want {
+		t.Errorf("ConfigPath = %q, want %q", got, want)
+	}
+}
+
+func TestConfigPathRespectsHomeEnv(t *testing.T) {
+	t.Setenv("AWP_HOME", "/custom/home")
+	if got := storage.ConfigPath(); got != "/custom/home/config.yaml" {
+		t.Errorf("got %q, want /custom/home/config.yaml", got)
 	}
 }
 

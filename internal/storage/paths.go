@@ -55,7 +55,7 @@ func SocketPath() string {
 }
 
 func ConfigPath() string {
-	return filepath.Join(ConfigDir(), "awp.yaml")
+	return filepath.Join(Home(), "config.yaml")
 }
 
 func EnsureDirs() error {

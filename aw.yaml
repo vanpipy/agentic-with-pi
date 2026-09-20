@@ -1,3 +1,0 @@
-model: MiniMax-M3
-max_turns: 20
-log_path: /tmp/test-log.jsonl

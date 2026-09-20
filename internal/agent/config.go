@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/vanpiyp/awp/internal/storage"
 )
 
 type ToolSpec struct {
@@ -38,10 +39,9 @@ func LoadConfig() (*Config, error) {
 	v := viper.New()
 	v.SetEnvPrefix("AW")
 	v.AutomaticEnv()
-	v.SetConfigName("aw")
+	v.SetConfigName("config")
 	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-	v.AddConfigPath("./configs")
+	v.AddConfigPath(storage.Home())
 
 	v.SetDefault("model", "MiniMax-M3")
 	v.SetDefault("max_turns", 10)
