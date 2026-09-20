@@ -12,7 +12,6 @@ import (
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/llm"
 	"github.com/vanpiyp/awp/internal/protocol"
-	"github.com/vanpiyp/awp/internal/session"
 )
 
 func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol.Request) {
@@ -47,7 +46,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 
 	sessionID := params.SessionID
 	if sessionID == "" {
-		sessionID = session.NewID()
+		sessionID = NewID()
 	}
 
 	store := s.getOrCreateStore(sessionID)
@@ -70,7 +69,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	headerWritten := false
 	for ev := range events {
 		if !headerWritten {
-			meta := session.SessionMeta{
+			meta := SessionMeta{
 				SessionID: sessionID,
 				Model:     s.agent.Model.ID,
 				MaxTurns:  s.agent.MaxTurns,
@@ -104,7 +103,7 @@ func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
 		return
 	}
 
-	loaded, err := session.Load(session.DefaultPath(s.sessionsDir, params.SessionID))
+	loaded, err := Load(DefaultPath(s.sessionsDir, params.SessionID))
 	if err != nil {
 		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "session not found: " + params.SessionID,
@@ -135,8 +134,8 @@ func (s *Server) handleCancel(conn io.Writer, req *protocol.Request) {
 	protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, nil)
 }
 
-func (s *Server) sessionsHasHeader(store *session.Store, sessionID string) bool {
-	loaded, err := session.Load(store.Path())
+func (s *Server) sessionsHasHeader(store *Store, sessionID string) bool {
+	loaded, err := Load(store.Path())
 	if err != nil {
 		return false
 	}
