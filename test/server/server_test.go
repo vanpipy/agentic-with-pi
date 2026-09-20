@@ -403,23 +403,31 @@ func TestServerPromptWritesSession(t *testing.T) {
 	reader := bufio.NewReader(conn)
 
 	var sessionID string
-	for {
+	var sawFinal bool
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !sawFinal {
+		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		resp, err := protocol.ReadEvent(reader)
 		if err != nil {
 			break
 		}
-		if resp.Event == "session_started" {
+		if resp.Event == "session_started" && sessionID == "" {
 			var data struct {
 				SessionID string `json:"session_id"`
 			}
 			json.Unmarshal(resp.Data, &data)
 			sessionID = data.SessionID
-			break
+		}
+		if resp.Event == "final_answer" {
+			sawFinal = true
 		}
 	}
 
 	if sessionID == "" {
 		t.Fatal("did not receive session_started event")
+	}
+	if !sawFinal {
+		t.Fatal("did not receive final_answer event before timeout")
 	}
 
 	conn2, err := net.Dial("unix", socketPath)
@@ -434,6 +442,7 @@ func TestServerPromptWritesSession(t *testing.T) {
 	protocol.MarshalRequest(conn2, req2)
 
 	reader2 := bufio.NewReader(conn2)
+	conn2.SetReadDeadline(time.Now().Add(3 * time.Second))
 
 	var events []string
 	for {

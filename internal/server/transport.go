@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"io"
 	"log/slog"
 	"net"
 
@@ -71,6 +72,27 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 
 		s.dispatch(conn, connCtx, req)
+	}
+}
+
+// dispatchRun runs a single dispatch call and signals completion.
+// Used by dispatchAsync to keep the per-conn read loop responsive.
+func (s *Server) dispatchRun(conn io.Writer, connCtx context.Context, req *protocol.Request) {
+	switch req.Method {
+	case protocol.MethodPing:
+		s.handlePing(conn, req)
+	case protocol.MethodPrompt:
+		s.handlePrompt(conn, connCtx, req)
+	case protocol.MethodResume:
+		s.handleResume(conn, req)
+	case protocol.MethodCancel:
+		s.handleCancel(conn, req)
+	default:
+		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+			"error": "unknown method: " + req.Method,
+		}); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "default_error", "err", err)
+		}
 	}
 }
 
