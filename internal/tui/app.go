@@ -277,10 +277,7 @@ func (m *Model) View() tea.View {
 		return tea.NewView("initializing...")
 	}
 
-	status := m.statusRender()
-	statusRendered := styleStatus(status)
-
-	header := renderHeader(m.width, statusRendered, sessionLabel(m.session))
+	header := renderHeader(m.width, m.statusRender(), sessionLabel(m.session))
 
 	body := m.chat.View()
 
@@ -395,17 +392,6 @@ func renderHeader(width int, status, session string) string {
 		gap = 1
 	}
 	return left + headerTrack.Render(strings.Repeat(" ", gap)) + right
-}
-
-func styleStatus(state string) string {
-	switch state {
-	case "streaming":
-		return statusSpin.Render("● streaming")
-	case "error":
-		return statusErr.Render("● error")
-	default:
-		return statusOK.Render("● ready")
-	}
 }
 
 func spawnServer() error {
