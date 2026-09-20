@@ -62,7 +62,7 @@ type Agent struct {
 func NewAgent(llmCore llm.Core) *Agent {
 	return &Agent{
 		core:          llmCore,
-		MaxTurns:      10,
+		MaxTurns:      20,
 		SystemPrompts: "You are a helpful coding assistant",
 		compaction: CompactionSettings{
 			Enabled:         true,

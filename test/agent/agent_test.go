@@ -120,6 +120,14 @@ func TestNewAgentContextWindowTriggersCompaction(t *testing.T) {
 	}
 }
 
+func TestNewAgentMaxTurnsMatchesPiDefault(t *testing.T) {
+	core := &fakeCore{}
+	ag := newTestAgent(core, "test-model")
+	if ag.MaxTurns < 20 {
+		t.Errorf("MaxTurns = %d, pi uses 20 as default (--turns >= 20). Lower values encourage premature termination.", ag.MaxTurns)
+	}
+}
+
 func TestAgentReturnsFinalAnswerImmediately(t *testing.T) {
 	core := &fakeCore{streamChunks: []llm.StreamEvent{
 		textDeltaChunk("42"),
