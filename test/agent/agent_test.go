@@ -105,6 +105,21 @@ func newTestAgent(core *fakeCore, modelID string) *agent.Agent {
 	return agent.NewAgent(core).WithModel(llm.Model{ID: modelID, SupportsTool: true})
 }
 
+func TestNewAgentContextWindowTriggersCompaction(t *testing.T) {
+	core := &fakeCore{}
+	ag := newTestAgent(core, "test-model")
+	if ag.ContextWindow() == 0 {
+		t.Fatal("NewAgent must set a non-zero contextWindow so ShouldCompact can fire")
+	}
+	if ag.ContextWindow() > 1_000_000 {
+		t.Errorf("contextWindow = %d, looks like a no-op hardcoded default (compaction would never trigger)", ag.ContextWindow())
+	}
+	settings := ag.CompactionSettingsForTest()
+	if settings.ReserveTokens >= ag.ContextWindow() {
+		t.Errorf("ReserveTokens (%d) >= contextWindow (%d), ShouldCompact would always return false", settings.ReserveTokens, ag.ContextWindow())
+	}
+}
+
 func TestAgentReturnsFinalAnswerImmediately(t *testing.T) {
 	core := &fakeCore{streamChunks: []llm.StreamEvent{
 		textDeltaChunk("42"),

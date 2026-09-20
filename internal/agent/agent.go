@@ -69,7 +69,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 			ReserveTokens:   16384,
 			KeepRecentTurns: 5,
 		},
-		contextWindow: 10240000,
+		contextWindow: 200000,
 	}
 }
 
@@ -94,6 +94,14 @@ func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 func (a *Agent) WithContextWindow(tokens int) *Agent {
 	a.contextWindow = tokens
 	return a
+}
+
+func (a *Agent) ContextWindow() int {
+	return a.contextWindow
+}
+
+func (a *Agent) CompactionSettingsForTest() CompactionSettings {
+	return a.compaction
 }
 
 func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
