@@ -393,7 +393,7 @@ func renderChatMsg(m chatMsg, width int) string {
 		body = wrapText(m.text, bodyWidth)
 		bodyStyle = &userPromptText
 	case roleAssistant:
-		body = wrapText(m.text, bodyWidth)
+		body = renderMarkdownBody(m.text, bodyWidth)
 		bodyStyle = &aiText
 	default:
 		body = wrapText(m.text, bodyWidth)
