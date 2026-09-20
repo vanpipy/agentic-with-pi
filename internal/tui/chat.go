@@ -71,8 +71,6 @@ func (c *chatModel) buildContent() string {
 	return strings.Join(lines, "\n")
 }
 
-// glyph + body style per role. Body is the lipgloss Style applied to the
-// wrapped text; glyph is the prefix rendered on the first line.
 type roleLayout struct {
 	body  lipgloss.Style
 	glyph string
@@ -98,7 +96,6 @@ func roleLayoutFor(r role) roleLayout {
 	return roleLayout{}
 }
 
-// glyphPrefix adds an optional prompt number to a role's glyph.
 func glyphPrefix(layout roleLayout, role role, promptNum int) string {
 	if role == roleUser && promptNum > 0 {
 		return userPromptNum.Render(fmt.Sprintf("%d", promptNum)) + layout.glyph
@@ -106,9 +103,6 @@ func glyphPrefix(layout roleLayout, role role, promptNum int) string {
 	return layout.glyph
 }
 
-// renderMsg formats a single chat message as a sequence of wrapped lines.
-// Width-n lipgloss Style does the word wrapping; the prefix lives outside
-// the style so we can still pad continuation lines manually.
 func renderMsg(g chatMsg, width int) []string {
 	layout := roleLayoutFor(g.role)
 	glyph := glyphPrefix(layout, g.role, g.promptNum)
@@ -136,8 +130,6 @@ func renderMsg(g chatMsg, width int) []string {
 	return indented
 }
 
-// body returns the rendered body lines, with lipgloss.Style.Width(n) doing
-// the word wrap and styling.
 func (g chatMsg) body(layout roleLayout, width int) []string {
 	if g.role == roleAssistant {
 		return wrapRender(layout.body.Width(width), renderMarkdownBody(g.text, width))
@@ -209,9 +201,6 @@ func hintLines(g chatMsg) []string {
 	return nil
 }
 
-// prependPrefixAndIndent prefixes the first line and indents all
-// continuation lines with the same number of spaces (using the
-// rendered width of the prefix, which already counts ANSI glyphs).
 func prependPrefixAndIndent(lines []string, prefix string) []string {
 	if prefix == "" || len(lines) == 0 {
 		return lines
@@ -266,11 +255,6 @@ func (c *chatModel) GotoBottom() {
 	c.following = true
 }
 
-// JumpToPrompt moves the viewport so the next user-prompt message in the
-// given direction is on the top row. direction > 0 jumps backwards, < 0
-// forwards. Reads the message list directly instead of counting viewport
-// lines, since prompt numbers are stable and we know where each prompt
-// starts in the message slice.
 func (c *chatModel) JumpToPrompt(direction int) {
 	if direction == 0 || len(c.messages) == 0 {
 		return
@@ -307,9 +291,6 @@ func (c *chatModel) JumpToPrompt(direction int) {
 	c.following = c.viewport.AtBottom()
 }
 
-// promptNumAtViewportTop scans the first visible line for a user-prompt
-// marker and returns that prompt's number. If none, returns the model's
-// current promptNum so the first JumpToPrompt below always finds a target.
 func (c *chatModel) promptNumAtViewportTop() int {
 	y := c.viewport.YOffset()
 	walked := 0
@@ -437,12 +418,8 @@ func (c *chatModel) reset() {
 	c.refresh()
 }
 
-// Role is the exported alias of the role enum for external tests.
 type Role = role
 
-// ChatMsg is the test-only constructor for chatMsg values. It mirrors the
-// shape of chatMsg with all fields exported so external tests can build
-// fixture messages without poking private internals.
 type ChatMsg struct {
 	Role      Role
 	Text      string
@@ -465,7 +442,6 @@ func toChatMsg(c ChatMsg) chatMsg {
 	}
 }
 
-// RoleLayout is the test-friendly exported view of roleLayout.
 type RoleLayout struct {
 	body  lipgloss.Style
 	glyph string
@@ -475,28 +451,22 @@ func roleLayoutFromInternal(l roleLayout) RoleLayout {
 	return RoleLayout{body: l.body, glyph: l.glyph}
 }
 
-// Glyph returns the prefix glyph for the role layout.
 func (l RoleLayout) Glyph() string {
 	return l.glyph
 }
 
-// RoleLayoutForTest exposes roleLayoutFor.
 func RoleLayoutForTest(r Role) RoleLayout {
 	return roleLayoutFromInternal(roleLayoutFor(r))
 }
 
-// RenderMsgForTest exposes renderMsg to external tests.
 func RenderMsgForTest(g ChatMsg, width int) []string {
 	return renderMsg(toChatMsg(g), width)
 }
 
-// GlyphPrefixForTest exposes glyphPrefix.
 func GlyphPrefixForTest(layout RoleLayout, role Role, promptNum int) string {
 	return glyphPrefix(roleLayout{body: layout.body, glyph: layout.glyph}, role, promptNum)
 }
 
-// IndentWrappedLinesForTest exposes the old indent helper for tests that
-// only want to verify alignment without the prefix.
 func IndentWrappedLinesForTest(lines []string, prefixWidth int) []string {
 	if prefixWidth <= 0 {
 		return lines
@@ -510,12 +480,10 @@ func IndentWrappedLinesForTest(lines []string, prefixWidth int) []string {
 	return out
 }
 
-// NewChatModelForTest exposes newChatModel to external tests.
 func NewChatModelForTest() ChatModelT {
 	return ChatModelT{model: newChatModel()}
 }
 
-// ChatModelT is the test-friendly handle wrapping *chatModel.
 type ChatModelT struct {
 	model *chatModel
 }
