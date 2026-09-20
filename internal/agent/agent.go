@@ -24,6 +24,7 @@ const (
 	EventObserve
 	EventFinalAnswer
 	EventError
+	EventInvalid
 )
 
 type Event struct {
@@ -469,6 +470,9 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 		observe := Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: result}
 		if err != nil {
 			observe.ToolError = err.Error()
+			if tc.Function.Name == InvalidToolName {
+				observe.Category = EventInvalid
+			}
 		}
 		if !a.emit(ctx, ch, observe) {
 			return msgs, false
@@ -476,7 +480,11 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 		if err != nil {
 			content := fmt.Sprintf("Tool %s failed: %s", tc.Function.Name, err.Error())
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: content})
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: err.Error()})
+			if tc.Function.Name == InvalidToolName {
+				a.emit(ctx, ch, Event{Category: EventInvalid, ToolName: tc.Function.Name, ToolError: err.Error(), ToolArgs: tc.Function.Arguments})
+			} else {
+				a.emit(ctx, ch, Event{Category: EventError, ToolError: err.Error()})
+			}
 			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed", tc.Function.Name, tc.Function.Name))
 			return msgs, true
 		}

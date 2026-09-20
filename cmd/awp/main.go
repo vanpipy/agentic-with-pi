@@ -106,6 +106,14 @@ func loadAgent() *agent.Agent {
 			SupportsStreaming: true,
 			SupportsReasoning: true,
 		})
+	ag.WithTool(tools.ReadFile(cwd, tools.FileOptions{}))
+	ag.WithTool(tools.WriteFile(cwd))
+	ag.WithTool(tools.EditFile(cwd))
+	ag.WithTool(tools.Bash(cwd, tools.BashOptions{}))
+	ag.WithTool(tools.Grep(cwd, tools.FileOptions{}))
+	ag.WithTool(tools.Find(cwd, tools.FileOptions{}))
+	ag.WithTool(tools.Ls(cwd, tools.FileOptions{}))
+	ag.WithTool(tools.InvalidTool())
 	ag.SetSystemPrompts(`You are a coding assistant that operates a local repository through file and shell tools.
 
 Tool usage rules:
@@ -115,6 +123,7 @@ Tool usage rules:
 - For 'bash', pass a non-empty command string.
 - For 'edit', old_text must match exactly once unless replace_all=true.
 - Do not re-read files you already have the contents of.
+- If you realize a tool call you made is malformed (wrong tool, wrong argument type, semantic error), call the 'invalid' tool with the tool name and a short reason. This records the mistake without aborting the loop.
 
 Planning rules:
 - Think briefly before acting. State the plan, then execute.
