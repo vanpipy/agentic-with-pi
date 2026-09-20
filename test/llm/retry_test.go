@@ -187,3 +187,69 @@ func TestRetryCoreDoesNotRetryNonRetryableError(t *testing.T) {
 		t.Errorf("calls = %d, want 1 (no retry for auth error)", inner.streamCalls)
 	}
 }
+
+type timingCore struct {
+	calls []time.Time
+}
+
+func (t *timingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	t.calls = append(t.calls, time.Now())
+	return okStreamChannel("ok"), nil
+}
+
+func TestRateLimitedCoreThrottlesBursts(t *testing.T) {
+	inner := &timingCore{}
+	cfg := llm.RateLimitConfig{RatePerSec: 5, Burst: 2}
+	rc := llm.NewRateLimitedCore(inner, cfg)
+
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	if len(inner.calls) != 5 {
+		t.Fatalf("calls = %d, want 5", len(inner.calls))
+	}
+	if elapsed < 500*time.Millisecond {
+		t.Errorf("elapsed = %v, want >= 500ms (5 calls at 5/sec means burst 2 then 3 paced at 200ms each)", elapsed)
+	}
+}
+
+func TestRateLimitedCoreBurstAllowed(t *testing.T) {
+	inner := &timingCore{}
+	cfg := llm.RateLimitConfig{RatePerSec: 10, Burst: 3}
+	rc := llm.NewRateLimitedCore(inner, cfg)
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	elapsed := time.Since(start)
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("burst of 3 should be fast (took %v)", elapsed)
+	}
+}
+
+func TestRateLimitedCoreRespectsContextCancel(t *testing.T) {
+	inner := &timingCore{}
+	cfg := llm.RateLimitConfig{RatePerSec: 1, Burst: 1}
+	rc := llm.NewRateLimitedCore(inner, cfg)
+
+	if _, err := rc.StreamChat(context.Background(), &llm.ChatRequest{}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := rc.StreamChat(ctx, &llm.ChatRequest{})
+	if err == nil {
+		t.Fatal("expected error from cancelled context")
+	}
+}
