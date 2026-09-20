@@ -150,3 +150,45 @@ func TestParseEventData(t *testing.T) {
 		t.Errorf("got %+v", out)
 	}
 }
+
+func TestSendPromptOneShot(t *testing.T) {
+	_, socketPath := setupTestServer(t)
+
+	events, err := client_sdk.SendPrompt(context.Background(), socketPath, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var finalContent string
+	for ev := range events {
+		if ev.Kind == protocol.EventFinalAnswer {
+			var data struct {
+				Content string `json:"content"`
+			}
+			json.Unmarshal(ev.Data, &data)
+			finalContent = data.Content
+		}
+	}
+	if finalContent != "hello world" {
+		t.Errorf("content = %q, want hello world", finalContent)
+	}
+}
+
+func TestSendPromptClosesSocketAfterStreamEnds(t *testing.T) {
+	_, socketPath := setupTestServer(t)
+
+	events, err := client_sdk.SendPrompt(context.Background(), socketPath, "", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range events {
+	}
+	c, err := client_sdk.Dial(socketPath)
+	if err != nil {
+		t.Fatalf("second Dial after SendPrompt returned: %v", err)
+	}
+	if err := c.Ping(); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+	c.Close()
+}

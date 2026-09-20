@@ -27,6 +27,40 @@ func Dial(socketPath string) (*Client, error) {
 	}, nil
 }
 
+// SendPrompt is a one-shot helper that dials the socket, sends a single
+// prompt (optionally scoped to an existing session_id so the server can
+// pick up the latest compaction summary), and drains the response
+// stream until final_answer. The caller doesn't need to manage Dial
+// or Close; the underlying socket is closed when the stream ends.
+//
+// Use this when the call site is a single command. Use Dial +
+// PromptWithSessionID + Close when the caller wants to send multiple
+// prompts on the same connection.
+func SendPrompt(ctx context.Context, socketPath, sessionID, prompt string) (<-chan Event, error) {
+	c, err := Dial(socketPath)
+	if err != nil {
+		return nil, err
+	}
+	events, err := c.PromptWithSessionID(ctx, prompt, sessionID)
+	if err != nil {
+		c.Close()
+		return nil, err
+	}
+	wrapped := make(chan Event, 32)
+	go func() {
+		defer close(wrapped)
+		defer c.Close()
+		for ev := range events {
+			select {
+			case wrapped <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return wrapped, nil
+}
+
 func (c *Client) Close() error {
 	return c.conn.Close()
 }

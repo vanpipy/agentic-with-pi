@@ -192,21 +192,9 @@ func runConnect(args []string) {
 		}
 	}
 
-	c, err := client_sdk.Dial(socket)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "dial:", err)
-		os.Exit(1)
-	}
-	defer c.Close()
-
-	if err := c.Ping(); err != nil {
-		fmt.Fprintln(os.Stderr, "ping:", err)
-		os.Exit(1)
-	}
-
 	fmt.Printf("=== awp connect ===\nsocket: %s\n\n", socket)
 
-	events, err := c.Prompt(context.Background(), prompt)
+	events, err := client_sdk.SendPrompt(context.Background(), socket, "", prompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "prompt:", err)
 		os.Exit(1)
@@ -264,7 +252,7 @@ func runResume(args []string) {
 		return
 	}
 
-	events, err := c.PromptWithSessionID(context.Background(), newPrompt, sessionID)
+	events, err := client_sdk.SendPrompt(context.Background(), socket, sessionID, newPrompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "prompt:", err)
 		os.Exit(1)
@@ -272,6 +260,7 @@ func runResume(args []string) {
 	for ev := range events {
 		printServerEvent(ev.Kind, ev.Data)
 	}
+	_ = c
 }
 
 func spawnServer() error {
