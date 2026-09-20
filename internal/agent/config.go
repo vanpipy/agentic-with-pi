@@ -26,13 +26,10 @@ type CompactionSettings struct {
 type Config struct {
 	APIKey string
 
-	Model    string
-	MaxTurns int
-	LogPath  string
+	Model   string
+	LogPath string
 
 	Tools []ToolSpec
-
-	Compaction CompactionSettings
 }
 
 func LoadConfig() (*Config, error) {
@@ -44,15 +41,8 @@ func LoadConfig() (*Config, error) {
 	v.AddConfigPath(storage.Home())
 
 	v.SetDefault("model", "MiniMax-M3")
-	v.SetDefault("max_turns", 10)
 	v.SetDefault("log_path", "")
 	v.SetDefault("tools", []map[string]any{})
-	v.SetDefault("compaction.enabled", true)
-	v.SetDefault("compaction.reserve_tokens", 16384)
-	v.SetDefault("compaction.keep_recent_turns", 5)
-	v.SetDefault("compaction.compact_every_turns", 3)
-	v.SetDefault("compaction.min_turns_between", 5)
-	v.SetDefault("compaction.floor_percent", 40)
 
 	if err := v.BindEnv("api_key", "MINIMAX_API_KEY"); err != nil {
 		return nil, fmt.Errorf("bind env: %w", err)
@@ -65,18 +55,9 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		APIKey:   v.GetString("api_key"),
-		Model:    v.GetString("model"),
-		MaxTurns: v.GetInt("max_turns"),
-		LogPath:  v.GetString("log_path"),
-		Compaction: CompactionSettings{
-			Enabled:            v.GetBool("compaction.enabled"),
-			ReserveTokens:      v.GetInt("compaction.reserve_tokens"),
-			KeepRecentTurns:    v.GetInt("compaction.keep_recent_turns"),
-			CompactEveryTurns:  v.GetInt("compaction.compact_every_turns"),
-			MinTurnsBetween:    v.GetInt("compaction.min_turns_between"),
-			FloorPercent:       v.GetInt("compaction.floor_percent"),
-		},
+		APIKey:  v.GetString("api_key"),
+		Model:   v.GetString("model"),
+		LogPath: v.GetString("log_path"),
 	}
 
 	if cfg.APIKey == "" {

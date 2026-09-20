@@ -90,8 +90,7 @@ func loadAgent() *agent.Agent {
 			SupportsTool:      true,
 			SupportsStreaming: true,
 			SupportsReasoning: true,
-		}).
-		WithMaxTurns(cfg.MaxTurns)
+		})
 	ag.SetSystemPrompts("You are a coding assistant. Use file tools to read/write/edit code and bash to run commands. Think step by step before acting.")
 
 	ag.WithTool(tools.ReadFile(cwd, tools.FileOptions{}))
