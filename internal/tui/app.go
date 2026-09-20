@@ -14,6 +14,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/vanpiyp/awp/internal/client-sdk"
@@ -282,8 +283,7 @@ func (m *Model) View() tea.View {
 	status := m.statusRender()
 	statusRendered := styleStatus(status)
 
-	headerText := fmt.Sprintf(" awp  %s  session: %s ", statusRendered, sessionLabel(m.session))
-	header := headerBar.Width(m.width).Render(headerText)
+	header := renderHeader(m.width, statusRendered, sessionLabel(m.session))
 
 	body := m.chat.View()
 
@@ -383,6 +383,21 @@ func (m *Model) statusRender() string {
 	default:
 		return m.state.String()
 	}
+}
+
+func renderHeader(width int, status, session string) string {
+	if width <= 0 {
+		return ""
+	}
+	left := headerBrand.Render("awp") +
+		headerSeparator.Render(" │ ") +
+		status
+	right := headerSession.Render(session)
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + headerTrack.Render(strings.Repeat(" ", gap)) + right
 }
 
 func styleStatus(state string) string {

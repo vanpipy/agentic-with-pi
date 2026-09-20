@@ -43,10 +43,22 @@ var c = palette{
 }
 
 var (
-	headerBar = lipgloss.NewStyle().
+	headerBrand = lipgloss.NewStyle().
 			Background(c.accent).
 			Foreground(lipgloss.Color("#000000")).
-			Bold(true)
+			Bold(true).
+			Padding(0, 1)
+
+	headerSeparator = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#000000")).
+				Background(c.accent)
+
+	headerSession = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#000000")).
+			Background(c.accent).
+			Align(lipgloss.Right)
+
+	headerTrack = lipgloss.NewStyle()
 
 	statusOK = lipgloss.NewStyle().Foreground(c.success)
 	statusErr = lipgloss.NewStyle().Foreground(c.error).Bold(true)
