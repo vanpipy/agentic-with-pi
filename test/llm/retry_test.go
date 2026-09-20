@@ -9,6 +9,7 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
+
 type recordingCore struct {
 	streamCalls  int
 	streamEvents []llm.StreamEvent
@@ -114,5 +115,75 @@ func TestRetryCoreConstructorClampsNegative(t *testing.T) {
 	rc := llm.NewRetryCore(&recordingCore{}, cfg)
 	if rc == nil {
 		t.Fatal("constructor returned nil")
+	}
+}
+
+type flakyCore struct {
+	failures int
+	calls    int
+}
+
+func (f *flakyCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, &llm.Error{
+			Kind:    llm.ErrorKindServer,
+			Code:    529,
+			Message: "overloaded_error",
+		}
+	}
+	return okStreamChannel("recovered"), nil
+}
+
+func okStreamChannel(content string) <-chan llm.StreamEvent {
+	ch := make(chan llm.StreamEvent, 1)
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Delta: llm.Message{Content: content},
+	}}}}
+	close(ch)
+	return ch
+}
+
+func TestRetryCoreRetriesOnTransientFailure(t *testing.T) {
+	inner := &flakyCore{failures: 2}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err != nil {
+		t.Fatalf("expected eventual success, got %v", err)
+	}
+	_, content := drain(events)
+	if content != "recovered" {
+		t.Errorf("content = %q, want recovered", content)
+	}
+	if inner.calls != 3 {
+		t.Errorf("calls = %d, want 3 (2 failures + 1 success)", inner.calls)
+	}
+}
+
+func TestRetryCoreGivesUpAfterMaxRetries(t *testing.T) {
+	inner := &flakyCore{failures: 10}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err == nil {
+		t.Fatal("expected error after max retries")
+	}
+	if inner.calls != 4 {
+		t.Errorf("calls = %d, want 4 (1 initial + 3 retries)", inner.calls)
+	}
+}
+
+func TestRetryCoreDoesNotRetryNonRetryableError(t *testing.T) {
+	inner := &recordingCore{streamErr: &llm.Error{
+		Kind:    llm.ErrorKindAuth,
+		Code:    401,
+		Message: "invalid api key",
+	}}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if inner.streamCalls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry for auth error)", inner.streamCalls)
 	}
 }
