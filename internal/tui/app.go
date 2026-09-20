@@ -260,9 +260,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
-		if m.state == stateStreaming || m.lastKind != "" {
-			cmds = append(cmds, func() tea.Msg { return m.spinner.Tick() })
-		}
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
