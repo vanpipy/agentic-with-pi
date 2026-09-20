@@ -183,8 +183,8 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 		if !ok {
 			return
 		}
-		msgs = append(msgs, result.toAssistantMessage())
 		if len(result.toolCalls) == 0 {
+			msgs = append(msgs, result.toAssistantMessage())
 			return
 		}
 
@@ -192,7 +192,9 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 		if len(toolCalls) > maxToolsPerTurn {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
 			toolCalls = toolCalls[:maxToolsPerTurn]
+			result.toolCalls = toolCalls
 		}
+		msgs = append(msgs, result.toAssistantMessage())
 
 		signature := toolCallSignature(toolCalls)
 		remaining := a.MaxTurns - turn - 1

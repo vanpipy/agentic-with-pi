@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 )
 
 type fakeCore struct {
+	mu               sync.Mutex
 	streamChunksList [][]llm.StreamEvent
 	streamChunks     []llm.StreamEvent
 	streamErr        error
@@ -26,16 +29,16 @@ type fakeCore struct {
 }
 
 func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	f.mu.Lock()
 	f.streamCalls++
 	f.requests = append(f.requests, *req)
-	if f.streamErr != nil {
-		return nil, f.streamErr
-	}
-	var chunks []llm.StreamEvent
+	chunks := f.streamChunks
 	if f.streamCalls-1 < len(f.streamChunksList) {
 		chunks = f.streamChunksList[f.streamCalls-1]
-	} else {
-		chunks = f.streamChunks
+	}
+	f.mu.Unlock()
+	if f.streamErr != nil {
+		return nil, f.streamErr
 	}
 	ch := make(chan llm.StreamEvent, len(chunks))
 	for _, item := range chunks {
@@ -84,6 +87,17 @@ func messageStopChunk() llm.StreamEvent {
 	return llm.StreamEvent{Chunk: &llm.StreamChunk{}, Err: nil}
 }
 
+func toolUseIDDeltaChunk(id, name, args string) llm.StreamEvent {
+	return llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Index: 0,
+		Delta: llm.Message{ToolCalls: []llm.ToolCall{{
+			ID:       id,
+			Type:     "function",
+			Function: llm.FunctionCall{Name: name, Arguments: args},
+		}}},
+	}}}}
+}
+
 func runAgent(t *testing.T, ag *agent.Agent, msg string) (string, error) {
 	t.Helper()
 	var result string
@@ -125,6 +139,45 @@ func TestNewAgentMaxTurnsMatchesPiDefault(t *testing.T) {
 	ag := newTestAgent(core, "test-model")
 	if ag.MaxTurns < 20 {
 		t.Errorf("MaxTurns = %d, pi uses 20 as default (--turns >= 20). Lower values encourage premature termination.", ag.MaxTurns)
+	}
+}
+
+func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {
+	callIDs := make([]string, 7)
+	for i := range callIDs {
+		callIDs[i] = fmt.Sprintf("call_%d", i)
+	}
+	chunks := []llm.StreamEvent{toolUseStartChunk(callIDs[0], "ls")}
+	for _, id := range callIDs {
+		chunks = append(chunks, toolUseIDDeltaChunk(id, "ls", `{"path":"."}`))
+	}
+	chunks = append(chunks, messageDeltaStopChunk("tool_use"), messageStopChunk())
+	core := &fakeCore{streamChunks: chunks}
+	ag := newTestAgent(core, "test-model")
+	ag.WithTool(agent.Tool{Name: "ls", Execute: func(_ context.Context, _ string) (string, error) {
+		return "ok", nil
+	}})
+
+	_, _ = runAgent(t, ag, "explore")
+
+	core.mu.Lock()
+	defer core.mu.Unlock()
+	if len(core.requests) < 2 {
+		t.Fatalf("expected at least 2 chat requests (turn 0 prompt + turn 1 retry), got %d", len(core.requests))
+	}
+	lastReq := core.requests[len(core.requests)-1]
+	toolCallCount := 0
+	toolResultCount := 0
+	for _, m := range lastReq.Messages {
+		if m.Role == "assistant" {
+			toolCallCount += len(m.ToolCalls)
+		}
+		if m.Role == "tool" {
+			toolResultCount++
+		}
+	}
+	if toolCallCount > 0 && toolCallCount != toolResultCount {
+		t.Errorf("assistant.tool_calls (%d) != tool results (%d) after truncation; would cause API 400", toolCallCount, toolResultCount)
 	}
 }
 
