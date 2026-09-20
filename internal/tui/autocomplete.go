@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type autocompleteModel struct {
@@ -78,7 +78,7 @@ func (a *autocompleteModel) View() string {
 		return ""
 	}
 	var lines []string
-	lines = append(lines, helpStyle.Render(" commands:"))
+	lines = append(lines, " commands:")
 	for i, cmd := range a.items {
 		cursor := "  "
 		if i == a.cursor {

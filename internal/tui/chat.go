@@ -3,13 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 )
 
 type role int
@@ -71,7 +68,7 @@ type chatModel struct {
 }
 
 func newChatModel() *chatModel {
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = true
 	return &chatModel{
 		viewport:  vp,
@@ -82,14 +79,14 @@ func newChatModel() *chatModel {
 func (c *chatModel) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.viewport.Width = w
-	c.viewport.Height = h
+	c.viewport.SetWidth(w)
+	c.viewport.SetHeight(h)
 	c.refresh()
 }
 
 func (c *chatModel) Update(msg tea.Msg) (tea.Cmd, bool) {
-	var cmd tea.Cmd
-	c.viewport, cmd = c.viewport.Update(msg)
+	vp, cmd := c.viewport.Update(msg)
+	c.viewport = vp
 	return cmd, false
 }
 
@@ -107,20 +104,20 @@ func (c *chatModel) refresh() {
 func (c *chatModel) buildContent() string {
 	var lines []string
 	for _, m := range c.messages {
-		lines = append(lines, renderChatMsg(m, c.viewport.Width))
+		lines = append(lines, renderChatMsg(m, c.viewport.Width()))
 	}
 	if c.reasoning.Len() > 0 {
 		lines = append(lines, renderChatMsg(chatMsg{
 			role:      roleThinking,
 			text:      c.reasoning.String(),
 			collapsed: false,
-		}, c.viewport.Width))
+		}, c.viewport.Width()))
 	}
 	if c.streaming.Len() > 0 {
 		lines = append(lines, renderChatMsg(chatMsg{
 			role: roleAssistant,
 			text: c.streaming.String(),
-		}, c.viewport.Width))
+		}, c.viewport.Width()))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -130,14 +127,14 @@ func (c *chatModel) ScrollUp(n int) {
 		return
 	}
 	c.following = false
-	c.viewport.LineUp(n)
+	c.viewport.ScrollUp(n)
 }
 
 func (c *chatModel) ScrollDown(n int) {
 	if n <= 0 {
 		return
 	}
-	c.viewport.LineDown(n)
+	c.viewport.ScrollDown(n)
 	if c.viewport.AtBottom() {
 		c.following = true
 	}
@@ -145,11 +142,11 @@ func (c *chatModel) ScrollDown(n int) {
 
 func (c *chatModel) HalfPageUp() {
 	c.following = false
-	c.viewport.HalfViewUp()
+	c.viewport.HalfPageUp()
 }
 
 func (c *chatModel) HalfPageDown() {
-	c.viewport.HalfViewDown()
+	c.viewport.HalfPageDown()
 	if c.viewport.AtBottom() {
 		c.following = true
 	}
@@ -198,9 +195,9 @@ func (c *chatModel) JumpToPrompt(direction int) {
 }
 
 func (c *chatModel) firstVisibleMsgIndex() int {
-	yOffset := c.viewport.YOffset
+	yOffset := c.viewport.YOffset()
 	totalLines := c.totalRenderedLines()
-	linesFromBottom := totalLines - c.viewport.Height - yOffset
+	linesFromBottom := totalLines - c.viewport.Height() - yOffset
 	if linesFromBottom < 0 {
 		linesFromBottom = 0
 	}
@@ -234,7 +231,7 @@ func (c *chatModel) lineOffsetForMsg(msgIdx int) int {
 		offset += c.lineCountForMsg(c.messages[i]) + 1
 	}
 	total := c.viewport.TotalLineCount()
-	maxOffset := total - c.viewport.Height
+	maxOffset := total - c.viewport.Height()
 	if maxOffset < 0 {
 		maxOffset = 0
 	}
@@ -245,7 +242,7 @@ func (c *chatModel) lineOffsetForMsg(msgIdx int) int {
 }
 
 func (c *chatModel) lineCountForMsg(m chatMsg) int {
-	w := c.viewport.Width
+	w := c.viewport.Width()
 	if w <= 0 {
 		w = 80
 	}
@@ -348,23 +345,19 @@ func renderChatMsg(m chatMsg, width int) string {
 	prefix := ""
 	switch m.role {
 	case roleUser:
-		prefix = youStyle.Render("> you")
+		prefix = "> you"
 	case roleAssistant:
-		prefix = assistantStyle.Render("> ai ")
+		prefix = "> ai "
 	case roleTool:
-		prefix = toolStyle.Render("> ⚙  ")
+		prefix = "> ⚙  "
 	case roleObserve:
-		prefix = assistantStyle.Render("> ←  ")
+		prefix = "> ←  "
 	case roleError:
-		prefix = errorStyle.Render("> ✗  ")
+		prefix = "> ✗  "
 	case roleSystem:
-		prefix = helpStyle.Render("> ⋯  ")
+		prefix = "> ⋯  "
 	case roleThinking:
-		if m.collapsed {
-			prefix = thinkingStyle.Render("> ∵  ")
-		} else {
-			prefix = thinkingStyle.Render("> ∵  ")
-		}
+		prefix = "> ∵  "
 	}
 
 	bodyWidth := width - 4
@@ -376,8 +369,6 @@ func renderChatMsg(m chatMsg, width int) string {
 	switch m.role {
 	case roleThinking:
 		body = renderThinkingBody(m, bodyWidth)
-	case roleAssistant, roleSystem, roleTool, roleObserve, roleError:
-		body = renderMarkdownBody(m.text, bodyWidth)
 	case roleUser:
 		body = wrapText(m.text, bodyWidth)
 	default:
@@ -391,10 +382,10 @@ func renderChatMsg(m chatMsg, width int) string {
 
 	result := fmt.Sprintf("%s  %s", prefix, body)
 	if m.duration > 0 {
-		result += "\n" + helpStyle.Render(fmt.Sprintf("  ⏱ %s", m.duration.Round(time.Millisecond)))
+		result += "\n" + fmt.Sprintf("  ⏱ %s", m.duration.Round(time.Millisecond))
 	}
 	if m.usage != nil && m.usage.total > 0 {
-		result += "\n" + helpStyle.Render(fmt.Sprintf("  ↻ %d → %d  (%d tokens)", m.usage.prompt, m.usage.completion, m.usage.total))
+		result += "\n" + fmt.Sprintf("  ↻ %d → %d  (%d tokens)", m.usage.prompt, m.usage.completion, m.usage.total)
 	}
 	return result
 }
@@ -405,9 +396,9 @@ func renderThinkingBody(m chatMsg, width int) string {
 		if dur == 0 {
 			dur = m.duration.Round(time.Millisecond)
 		}
-		return helpStyle.Render(fmt.Sprintf("▸ thought for %s", dur))
+		return fmt.Sprintf("▸ thought for %s", dur)
 	}
-	return thinkingStyle.Render(wrapText(m.text, width))
+	return wrapText(m.text, width)
 }
 
 func renderToolInline(calls []toolCallInline, width int) string {
@@ -426,41 +417,7 @@ func renderToolInline(calls []toolCallInline, width int) string {
 	if len(calls) > 1 {
 		label = "tools: "
 	}
-	prefix := toolStyle.Render(label)
-	return prefix + strings.Join(parts, " · ")
-}
-
-var (
-	mdRenderer   *glamour.TermRenderer
-	mdRendererMu sync.Mutex
-)
-
-func renderMarkdownBody(text string, width int) string {
-	if text == "" {
-		return ""
-	}
-	mdRendererMu.Lock()
-	defer mdRendererMu.Unlock()
-
-	if mdRenderer == nil {
-		r, err := glamour.NewTermRenderer(
-			glamour.WithStandardStyle("notty"),
-			glamour.WithWordWrap(width),
-			glamour.WithEmoji(),
-		)
-		if err != nil {
-			return wrapText(text, width)
-		}
-		mdRenderer = r
-	}
-
-	out, err := mdRenderer.Render(text)
-	if err != nil {
-		return wrapText(text, width)
-	}
-	return lipgloss.NewStyle().
-		Width(width).
-		Render(strings.TrimRight(out, "\n"))
+	return label + strings.Join(parts, " · ")
 }
 
 func wrapText(text string, width int) string {

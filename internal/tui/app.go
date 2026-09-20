@@ -11,8 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
 	"golang.org/x/term"
 
 	"github.com/vanpiyp/awp/internal/client-sdk"
@@ -110,11 +109,7 @@ func Run() error {
 		autocomplete: newAutocompleteModel(),
 	}
 
-	p := tea.NewProgram(
-		m,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
+	p := tea.NewProgram(m)
 	program = p
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("tui: %w", err)
@@ -149,15 +144,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.layout()
 
-	case tea.MouseMsg:
+	case tea.MouseWheelMsg:
 		switch msg.Button {
-		case tea.MouseButtonWheelUp:
+		case tea.MouseWheelUp:
 			m.chat.ScrollUp(3)
-		case tea.MouseButtonWheelDown:
+		case tea.MouseWheelDown:
 			m.chat.ScrollDown(3)
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			m.shutdown()
@@ -264,42 +259,35 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
 	if m.width == 0 {
-		return "initializing..."
+		return tea.NewView("initializing...")
 	}
 
 	status := m.statusRender()
 
-	header := headerStyle.Width(m.width).Render(
-		fmt.Sprintf(" awp  [%s]  session: %s ", status, sessionLabel(m.session)))
+	header := fmt.Sprintf(" awp  [%s]  session: %s ", status, sessionLabel(m.session))
 
-	body := lipgloss.NewStyle().
-		Width(m.width - 2).
-		Height(m.height - 5).
-		Padding(0, 1).
-		Render(m.chat.View())
+	body := m.chat.View()
 
-	inputBox := paneStyle.
-		Width(m.width - 2).
-		Render(m.input.View())
+	inputBox := m.input.View()
 
 	footer := fmt.Sprintf(
-		" %s  %s",
-		statusOKStyle.Render("ready"),
-		helpStyle.Render("ctrl+c: quit  /quit: quit  ctrl+d: quit/eof  tab: complete  ↑↓: scroll"),
+		" ● ready  ctrl+c: quit  /quit: quit  ctrl+d: quit/eof  tab: complete  ↑↓: scroll",
 	)
 
-	parts := []string{header, body, inputBox}
+	lines := []string{header, "", body, "", inputBox, "", footer}
 	if m.autocomplete.visible {
-		acBox := paneStyle.
-			Width(m.width - 2).
-			Render(m.autocomplete.View())
-		parts = append(parts, acBox)
+		lines = append(lines, "", m.autocomplete.View())
 	}
-	parts = append(parts, footer)
+	v := tea.NewView(strings.Join(lines, "\n"))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
 
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+func statusOK(status string) string {
+	return "● " + status
 }
 
 func (m *Model) layout() {
@@ -387,11 +375,11 @@ func (m *Model) statusRender() string {
 	switch m.state {
 	case stateStreaming:
 		frame := spinnerFrames[m.spinnerFrame]
-		return statusOKStyle.Render(frame + " " + m.state.String())
+		return frame + " " + m.state.String()
 	case stateError:
-		return statusErrStyle.Render("● " + m.state.String())
+		return "● " + m.state.String()
 	default:
-		return statusOKStyle.Render("● " + m.state.String())
+		return "● " + m.state.String()
 	}
 }
 

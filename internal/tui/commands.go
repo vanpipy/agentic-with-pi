@@ -78,7 +78,7 @@ func (m *Model) executeCommand(text string) bool {
 
 	cmd, found := findCommand(parsed.name)
 	if !found {
-		m.chat.appendSystem(helpStyle.Render(" unknown command: /" + parsed.name) +
+		m.chat.appendSystem(" unknown command: /" + parsed.name +
 			"\n  type /help for available commands")
 		return true
 	}
@@ -106,14 +106,14 @@ func (m *Model) executeCommand(text string) bool {
 
 func (m *Model) cmdHelp() {
 	var lines []string
-	lines = append(lines, helpStyle.Render(" available slash commands:"))
+	lines = append(lines, " available slash commands:")
 	lines = append(lines, "")
 	for _, c := range builtinCommands() {
 		usage := "/" + c.name
 		if c.usage != "" {
 			usage = c.usage
 		}
-		lines = append(lines, fmt.Sprintf("  %s   %s", helpStyle.Render(usage), c.description))
+		lines = append(lines, fmt.Sprintf("  %s   %s", usage, c.description))
 	}
 	lines = append(lines, "")
 	m.chat.appendSystem(strings.Join(lines, "\n"))
@@ -121,7 +121,7 @@ func (m *Model) cmdHelp() {
 
 func (m *Model) cmdTools() {
 	lines := []string{
-		helpStyle.Render(" available tools:"),
+		" available tools:",
 		"",
 		"  read       read files",
 		"  write      write files",
@@ -136,7 +136,7 @@ func (m *Model) cmdTools() {
 
 func (m *Model) cmdResume(sessionID string) {
 	if sessionID == "" {
-		m.chat.appendSystem(helpStyle.Render(" usage: /resume <session_id>"))
+		m.chat.appendSystem(" usage: /resume <session_id>")
 		return
 	}
 	m.resumeSession(sessionID)

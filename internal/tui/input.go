@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 )
 
 type inputModel struct {
@@ -14,13 +14,13 @@ func newInputModel() *inputModel {
 	ti.Placeholder = "type a prompt, press Enter to send..."
 	ti.Focus()
 	ti.CharLimit = 4096
-	ti.Width = 80
+	ti.SetWidth(80)
 	return &inputModel{ti: ti}
 }
 
 func (i *inputModel) Update(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	i.ti, cmd = i.ti.Update(msg)
+	updated, cmd := i.ti.Update(msg)
+	i.ti = updated
 	return cmd
 }
 
