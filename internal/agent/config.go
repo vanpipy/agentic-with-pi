@@ -24,8 +24,6 @@ type CompactionSettings struct {
 }
 
 type Config struct {
-	APIKey string
-
 	Model   string
 	LogPath string
 
@@ -44,9 +42,6 @@ func LoadConfig() (*Config, error) {
 	v.SetDefault("log_path", "")
 	v.SetDefault("tools", []map[string]any{})
 
-	if err := v.BindEnv("api_key", "MINIMAX_API_KEY"); err != nil {
-		return nil, fmt.Errorf("bind env: %w", err)
-	}
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
@@ -55,13 +50,8 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		APIKey:  v.GetString("api_key"),
 		Model:   v.GetString("model"),
 		LogPath: v.GetString("log_path"),
-	}
-
-	if cfg.APIKey == "" {
-		return nil, errors.New("MINIMAX_API_KEY is required")
 	}
 
 	if err := v.UnmarshalKey("tools", &cfg.Tools); err != nil {

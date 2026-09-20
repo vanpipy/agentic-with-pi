@@ -74,12 +74,18 @@ func loadAgent() *agent.Agent {
 	cfg, err := agent.LoadConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config error:", err)
-		fmt.Fprintln(os.Stderr, "Set MINIMAX_API_KEY or create ~/.awp/config.yaml.")
+		fmt.Fprintln(os.Stderr, "Check ~/.awp/config.yaml.")
+		os.Exit(1)
+	}
+
+	apiKey := os.Getenv("MINIMAX_API_KEY")
+	if apiKey == "" {
+		fmt.Fprintln(os.Stderr, "MINIMAX_API_KEY is required.")
 		os.Exit(1)
 	}
 
 	registry := llm.NewRegistry()
-	registry.MustRegisterDefault(providers.NewMiniMaxProvider(cfg.APIKey))
+	registry.MustRegisterDefault(providers.NewMiniMaxProvider(apiKey))
 	provider, _ := registry.Default()
 	core := llm.NewRetryCore(llm.NewCore(provider, protocol.NewHTTPRest()), llm.DefaultRetryConfig())
 
