@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -488,7 +489,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed", tc.Function.Name, tc.Function.Name))
 			return msgs, true
 		}
-		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: result})
+		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(result, tc.Function.Arguments, tc.Function.Name)})
 	}
 	return msgs, true
 }
@@ -515,6 +516,33 @@ func allSameRecent(s []string) bool {
 		}
 	}
 	return true
+}
+
+const OversizedResultThreshold = 100_000
+
+func applyOversizedGuard(result, argsJSON, toolName string) string {
+	if len(result) <= OversizedResultThreshold {
+		return result
+	}
+	if acceptsLargeOutput(argsJSON) {
+		return result
+	}
+	return fmt.Sprintf(
+		"⚠️ OUTPUT WITHHELD: this tool returned %d bytes (~%dk tokens), exceeding the %d-byte threshold. "+
+			"Narrow the request: add or tighten 'path', 'glob', 'pattern', or set a limit. "+
+			"To accept this cost and see the full output, repeat the same call with `\"accept_large_output\": true`. "+
+			"That returns the full result and permanently spends the context budget on it.",
+		len(result), len(result)/4000, OversizedResultThreshold)
+}
+
+func acceptsLargeOutput(argsJSON string) bool {
+	var args struct {
+		AcceptLargeOutput *bool `json:"accept_large_output"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return false
+	}
+	return args.AcceptLargeOutput != nil && *args.AcceptLargeOutput
 }
 
 func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {

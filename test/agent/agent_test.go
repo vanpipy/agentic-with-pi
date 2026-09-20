@@ -792,6 +792,77 @@ func TestAgentDoesNotAbortOnSingleTransientToolError(t *testing.T) {
 	}
 }
 
+func TestAgentWithholdsOversizedToolResult(t *testing.T) {
+	huge := strings.Repeat("x", 200_000)
+	chunks := [][]llm.StreamEvent{
+		{toolUseStartChunk("c1", "dump"), toolUseIDDeltaChunk("c1", "dump", `{"intent":"test"}`),
+			messageDeltaStopChunk("tool_use"), messageStopChunk()},
+		{textDeltaChunk("read refusal"),
+			messageDeltaStopChunk("end_turn"), messageStopChunk()},
+	}
+	core := &fakeCore{streamChunksList: chunks}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
+	ag.WithTool(agent.Tool{Name: "dump", Execute: func(_ context.Context, _ string) (string, error) {
+		return huge, nil
+	}})
+
+	result, err := runAgentLastError(t, ag, "give me everything")
+	if err != nil {
+		t.Fatalf("expected final answer after withheld result, got %q", err.Error())
+	}
+	if result != "read refusal" {
+		t.Errorf("result = %q, want 'read refusal'", result)
+	}
+
+	msgs := core.requests[len(core.requests)-1].Messages
+	var sawRefusal bool
+	for _, m := range msgs {
+		if m.Role == "tool" && strings.Contains(m.Content, "OUTPUT WITHHELD") {
+			sawRefusal = true
+			if len(m.Content) >= len(huge) {
+				t.Errorf("refusal should be much smaller than raw result; refusal=%d bytes, raw=%d", len(m.Content), len(huge))
+			}
+		}
+	}
+	if !sawRefusal {
+		t.Errorf("expected tool result to be replaced with WITHHELD refusal")
+	}
+}
+
+func TestAgentAcceptLargeOutputOverridesWithhold(t *testing.T) {
+	huge := strings.Repeat("y", 200_000)
+	chunks := [][]llm.StreamEvent{
+		{toolUseStartChunk("c1", "dump"), toolUseIDDeltaChunk("c1", "dump", `{"accept_large_output":true,"intent":"test"}`),
+			messageDeltaStopChunk("tool_use"), messageStopChunk()},
+		{textDeltaChunk("got it"),
+			messageDeltaStopChunk("end_turn"), messageStopChunk()},
+	}
+	core := &fakeCore{streamChunksList: chunks}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
+	ag.WithTool(agent.Tool{Name: "dump", Execute: func(_ context.Context, _ string) (string, error) {
+		return huge, nil
+	}})
+
+	result, err := runAgentLastError(t, ag, "give me everything")
+	if err != nil {
+		t.Fatalf("expected final answer, got %q", err.Error())
+	}
+	if result != "got it" {
+		t.Errorf("result = %q, want 'got it'", result)
+	}
+
+	msgs := core.requests[len(core.requests)-1].Messages
+	var sawRaw bool
+	for _, m := range msgs {
+		if m.Role == "tool" && strings.Contains(m.Content, huge[:500]) {
+			sawRaw = true
+		}
+	}
+	if !sawRaw {
+		t.Errorf("expected raw oversized result to pass through when accept_large_output=true")
+	}
+}
+
 func TestAgentAbortsOnRepeatedToolError(t *testing.T) {
 	repeat := []llm.StreamEvent{
 		toolUseStartChunk("1", "read"),

@@ -8,6 +8,8 @@ import (
 
 const IntentField = "intent"
 const IntentDescription = "Why you are calling this tool. One short sentence that describes the goal."
+const AcceptLargeOutputField = "accept_large_output"
+const AcceptLargeOutputDescription = "Set true to receive oversized tool output even when it exceeds the context-budget guard. Off by default."
 
 type intentArgs struct {
 	Intent string `json:"intent"`
@@ -26,6 +28,13 @@ func requireIntentSchema(name string, schema map[string]any) map[string]any {
 		props[IntentField] = map[string]any{
 			"type":        "string",
 			"description": IntentDescription,
+		}
+	}
+	if _, ok := props[AcceptLargeOutputField]; !ok {
+		props[AcceptLargeOutputField] = map[string]any{
+			"type":        "boolean",
+			"default":     false,
+			"description": AcceptLargeOutputDescription,
 		}
 	}
 	if _, ok := schema["type"]; !ok {

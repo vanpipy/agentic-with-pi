@@ -64,6 +64,9 @@ func TestAllToolsRequireIntentInSchema(t *testing.T) {
 		if _, ok := props["intent"]; !ok {
 			t.Errorf("tool %q: schema missing intent property", tool.Name)
 		}
+		if _, ok := props["accept_large_output"]; !ok {
+			t.Errorf("tool %q: schema missing accept_large_output property", tool.Name)
+		}
 		required, ok := schema["required"].([]string)
 		if !ok {
 			t.Errorf("tool %q: schema required not []string", tool.Name)
@@ -78,6 +81,11 @@ func TestAllToolsRequireIntentInSchema(t *testing.T) {
 		}
 		if !hasIntent {
 			t.Errorf("tool %q: required does not contain 'intent'", tool.Name)
+		}
+		for _, r := range required {
+			if r == "accept_large_output" {
+				t.Errorf("tool %q: accept_large_output must NOT be required", tool.Name)
+			}
 		}
 	}
 }
