@@ -46,28 +46,30 @@ type Tool struct {
 }
 
 type Agent struct {
-	core          llm.Core
-	MaxTurns      int
-	Model         llm.Model
-	SystemPrompts string
-	Tools         []Tool
-	LogWriter     io.Writer
-	logMu         sync.Mutex
-	logBuf        *bufio.Writer
-	logSeq        int
-	compaction    CompactionSettings
+	core                    llm.Core
+	MaxTurns                int
+	Model                   llm.Model
+	SystemPrompts           string
+	Tools                   []Tool
+	LogWriter               io.Writer
+	logMu                   sync.Mutex
+	logBuf                  *bufio.Writer
+	logSeq                  int
+	compaction              CompactionSettings
+	repeatedToolErrorLimit  int
 }
 
 func NewAgent(llmCore llm.Core) *Agent {
 	return &Agent{
-		core:          llmCore,
-		MaxTurns:      20,
-		SystemPrompts: "You are a helpful coding assistant",
+		core:                   llmCore,
+		MaxTurns:               20,
+		SystemPrompts:          "You are a helpful coding assistant",
 		compaction: CompactionSettings{
 			Enabled:         true,
 			ReserveTokens:   16384,
 			KeepRecentTurns: 5,
 		},
+		repeatedToolErrorLimit: 3,
 	}
 }
 
@@ -82,6 +84,18 @@ func (a *Agent) WithMaxTurns(n int) *Agent {
 func (a *Agent) WithModel(model llm.Model) *Agent {
 	a.Model = model
 	return a
+}
+
+func (a *Agent) WithRepeatedToolErrorLimit(n int) *Agent {
+	if n < 1 {
+		n = 3
+	}
+	a.repeatedToolErrorLimit = n
+	return a
+}
+
+func AgentRepeatedToolErrorLimitForTest(a *Agent) int {
+	return a.repeatedToolErrorLimit
 }
 func (a *Agent) WithTool(t Tool) *Agent           { a.Tools = append(a.Tools, t); return a }
 func (a *Agent) WithLogWriter(w io.Writer) *Agent { a.LogWriter = w; return a }
@@ -170,6 +184,7 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 	const maxConsecutiveRepeats = 3
 	const maxToolsPerTurn = 6
 	recentCalls := []string{}
+	recentToolErrors := []string{}
 	for turn := 0; turn < a.MaxTurns; turn++ {
 		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
 			previousSummary := ExtractPreviousSummary(msgs)
@@ -213,6 +228,33 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 		msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
 		if !ok {
 			return
+		}
+
+		lastFailed := ""
+		for _, m := range msgs {
+			if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
+				lastFailed = m.Content
+				break
+			}
+		}
+		if lastFailed != "" {
+			recentToolErrors = append(recentToolErrors, lastFailed)
+			if len(recentToolErrors) > a.repeatedToolErrorLimit {
+				recentToolErrors = recentToolErrors[len(recentToolErrors)-a.repeatedToolErrorLimit:]
+			}
+			if len(recentToolErrors) >= a.repeatedToolErrorLimit {
+				allSame := true
+				for _, s := range recentToolErrors[1:] {
+					if s != recentToolErrors[0] {
+						allSame = false
+						break
+					}
+				}
+				if allSame {
+					a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", a.repeatedToolErrorLimit, lastFailed)})
+					return
+				}
+			}
 		}
 	}
 	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("max turns exceeded (%d)", a.MaxTurns)})

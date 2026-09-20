@@ -115,6 +115,21 @@ func runAgent(t *testing.T, ag *agent.Agent, msg string) (string, error) {
 	return result, firstErr
 }
 
+func runAgentLastError(t *testing.T, ag *agent.Agent, msg string) (string, error) {
+	t.Helper()
+	var result string
+	var lastErr error
+	for ev := range ag.RunStream(context.Background(), msg) {
+		switch ev.Category {
+		case agent.EventFinalAnswer:
+			result = ev.Content
+		case agent.EventError:
+			lastErr = errors.New(ev.ToolError)
+		}
+	}
+	return result, lastErr
+}
+
 func newTestAgent(core *fakeCore, modelID string) *agent.Agent {
 	return agent.NewAgent(core).WithModel(llm.Model{ID: modelID, SupportsTool: true})
 }
@@ -716,6 +731,41 @@ func TestAgentDefensiveMaxTurnsClamp(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "max turns") {
 		t.Errorf("err = %q, want mentions max turns", err.Error())
+	}
+}
+
+func TestAgentAbortsOnRepeatedToolError(t *testing.T) {
+	repeat := []llm.StreamEvent{
+		toolUseStartChunk("1", "read"),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}
+	chunksList := make([][]llm.StreamEvent, 5)
+	for i := range chunksList {
+		chunksList[i] = repeat
+	}
+	core := &fakeCore{streamChunksList: chunksList}
+	ag := newTestAgent(core, "test-model")
+	ag.WithTool(agent.Tool{
+		Name: "read",
+		Execute: func(ctx context.Context, argsJSON string) (string, error) {
+			return "", errors.New("path is required")
+		},
+	})
+	_, err := runAgentLastError(t, ag, "explore")
+	if err == nil {
+		t.Fatal("expected abort after repeated errors, got nil")
+	}
+	if !strings.Contains(err.Error(), "aborting") && !strings.Contains(err.Error(), "repeated") {
+		t.Errorf("err = %q, want mentions aborting/repeated", err.Error())
+	}
+}
+
+func TestAgentRepeatedErrorLimitIsConfigurable(t *testing.T) {
+	core := &fakeCore{}
+	ag := newTestAgent(core, "test-model").WithRepeatedToolErrorLimit(2)
+	if got := agent.AgentRepeatedToolErrorLimitForTest(ag); got != 2 {
+		t.Errorf("limit = %d, want 2", got)
 	}
 }
 
