@@ -18,8 +18,9 @@ func newInputModel() *inputModel {
 	ta.Focus()
 	ta.CharLimit = 4096
 	ta.SetWidth(80)
-	ta.SetHeight(5)
-	ta.MaxHeight = 5
+	ta.MinHeight = 1
+	ta.MaxHeight = 6
+	ta.DynamicHeight = true
 	ta.ShowLineNumbers = false
 	ta.KeyMap.InsertNewline = key.NewBinding(
 		key.WithKeys("shift+enter", "ctrl+j"),

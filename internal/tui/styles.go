@@ -80,4 +80,5 @@ var (
 
 	autocompleteHeader = lipgloss.NewStyle().Foreground(c.dim)
 	autocompleteCursor = lipgloss.NewStyle().Foreground(c.accent)
+	autocompleteCategory = lipgloss.NewStyle().Foreground(c.system)
 )

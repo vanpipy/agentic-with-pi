@@ -149,12 +149,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.layout()
 
 	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.chat.ScrollUp(3)
-		case tea.MouseWheelDown:
-			m.chat.ScrollDown(3)
-		}
+		cmd, _ := m.chat.Update(msg)
+		cmds = append(cmds, cmd)
 
 	case tea.KeyPressMsg:
 		switch msg.String() {
@@ -316,6 +312,7 @@ func (m *Model) layout() {
 	}
 	m.chat.SetSize(m.width-4, bodyHeight)
 	m.help.SetWidth(m.width)
+	m.input.SetWidth(m.width - 2)
 }
 
 func (m *Model) startStream(text string) tea.Cmd {

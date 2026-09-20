@@ -12,11 +12,13 @@ import (
 type commandItem struct {
 	title       string
 	description string
+	category    string
 }
 
 func (c commandItem) FilterValue() string { return c.title }
 func (c commandItem) Title() string       { return "/" + c.title }
 func (c commandItem) Description() string { return c.description }
+func (c commandItem) Category() string    { return c.category }
 
 type commandDelegate struct{}
 
@@ -34,7 +36,8 @@ func (d commandDelegate) Render(w io.Writer, m list.Model, index int, item list.
 	}
 	name := autocompleteHeader.Render("/" + c.title)
 	desc := helpFooter.Render(c.description)
-	fmt.Fprintf(w, "%s%s   %s", marker, name, desc)
+	cat := autocompleteCategory.Render(c.category)
+	fmt.Fprintf(w, "%s%s  %-7s  %s", marker, name, cat, desc)
 }
 
 type autocompleteModel struct {
@@ -46,12 +49,12 @@ type autocompleteModel struct {
 
 func newAutocompleteModel() *autocompleteModel {
 	all := []commandItem{
-		{title: "quit", description: "exit the TUI"},
-		{title: "help", description: "show available slash commands"},
-		{title: "new", description: "clear chat history, start fresh turn"},
-		{title: "tools", description: "list available tools"},
-		{title: "resume", description: "resume a previous session by id"},
-		{title: "clear", description: "clear chat history"},
+		{title: "quit", description: "exit the TUI", category: "exit"},
+		{title: "help", description: "show available slash commands", category: "help"},
+		{title: "new", description: "clear chat history, start fresh turn", category: "session"},
+		{title: "tools", description: "list available tools", category: "help"},
+		{title: "resume", description: "resume a previous session by id", category: "session"},
+		{title: "clear", description: "clear chat history", category: "session"},
 	}
 	const maxWidth = 80
 	const maxHeight = 6
