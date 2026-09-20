@@ -56,7 +56,6 @@ func main() {
 			return
 		}
 	}
-	// Default: launch TUI
 	if err := tui.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		os.Exit(1)

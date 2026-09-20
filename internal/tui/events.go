@@ -23,7 +23,6 @@ func parseUsage(data []byte) *msgUsage {
 	}
 	_ = json.Unmarshal(data, &d)
 	if d.TotalTokens == 0 {
-		// try strings fallback
 		var s struct {
 			PromptTokens     string `json:"prompt_tokens"`
 			CompletionTokens string `json:"completion_tokens"`

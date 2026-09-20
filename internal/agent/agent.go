@@ -181,7 +181,6 @@ func (a *Agent) loop(ctx context.Context, userMsg string, ch chan<- Event) {
 			return
 		}
 
-		// Cap tools per turn so a model cannot burn the entire turn budget in one batch.
 		toolCalls := result.toolCalls
 		if len(toolCalls) > maxToolsPerTurn {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
@@ -240,7 +239,6 @@ func allToolCallsEmpty(calls []llm.ToolCall) bool {
 	}
 	for _, c := range calls {
 		trimmed := strings.TrimSpace(c.Function.Arguments)
-		// "" is the only empty form; "{}" is a valid empty dict (not empty)
 		if trimmed != "" {
 			return false
 		}
@@ -314,7 +312,6 @@ func (a *Agent) runTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event
 		return turnResult{}, false
 
 	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0:
-		// tool_use finish with valid tool calls → continue loop to execute tools
 	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) == 0:
 		a.emit(ctx, ch, Event{Category: EventError, ToolError: "tool_use finish reason with no tool calls"})
 		return turnResult{}, false

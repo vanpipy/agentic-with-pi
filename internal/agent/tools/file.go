@@ -1,6 +1,3 @@
-// Package tools provides standard agent tool implementations
-// for the agent package. Each file in this package owns one
-// tool category (file ops, shell, search, etc.).
 package tools
 
 import (

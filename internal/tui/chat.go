@@ -171,7 +171,6 @@ func (c *chatModel) JumpToPrompt(direction int) {
 	}
 	var promptIdx int = -1
 	if direction > 0 {
-		// next prompt down (smaller msg index)
 		currentVisible := c.firstVisibleMsgIndex()
 		for i, m := range c.messages {
 			if i >= currentVisible {
@@ -182,7 +181,6 @@ func (c *chatModel) JumpToPrompt(direction int) {
 			}
 		}
 	} else {
-		// previous prompt up (larger msg index)
 		currentVisible := c.firstVisibleMsgIndex()
 		for i := currentVisible; i < len(c.messages); i++ {
 			if c.messages[i].role == roleUser {
