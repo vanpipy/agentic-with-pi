@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -44,6 +45,7 @@ type chatMsg struct {
 	duration  time.Duration
 	collapsed bool
 	usage     *msgUsage
+	promptNum int
 }
 
 type toolCallInline struct {
@@ -58,13 +60,14 @@ type msgUsage struct {
 }
 
 type chatModel struct {
-	viewport  viewport.Model
-	messages  []chatMsg
-	streaming strings.Builder
-	reasoning strings.Builder
-	width     int
-	height    int
-	following bool
+	viewport   viewport.Model
+	messages   []chatMsg
+	streaming  strings.Builder
+	reasoning  strings.Builder
+	width      int
+	height     int
+	following  bool
+	promptNum  int
 }
 
 func newChatModel() *chatModel {
@@ -265,7 +268,12 @@ func (c *chatModel) submit(text string) {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	c.messages = append(c.messages, chatMsg{role: roleUser, text: text})
+	c.promptNum++
+	c.messages = append(c.messages, chatMsg{
+		role:      roleUser,
+		text:      text,
+		promptNum: c.promptNum,
+	})
 	c.refresh()
 }
 
@@ -342,35 +350,51 @@ func (c *chatModel) reset() {
 }
 
 func renderChatMsg(m chatMsg, width int) string {
-	prefix := ""
-	switch m.role {
-	case roleUser:
-		prefix = "> you"
-	case roleAssistant:
-		prefix = "> ai "
-	case roleTool:
-		prefix = "> ⚙  "
-	case roleObserve:
-		prefix = "> ←  "
-	case roleError:
-		prefix = "> ✗  "
-	case roleSystem:
-		prefix = "> ⋯  "
-	case roleThinking:
-		prefix = "> ∵  "
-	}
-
 	bodyWidth := width - 4
 	if bodyWidth < 16 {
 		bodyWidth = 16
 	}
 
+	var prefix, indent string
+	switch m.role {
+	case roleUser:
+		num := ""
+		if m.promptNum > 0 {
+			num = fmt.Sprintf("%d", m.promptNum)
+		}
+		prefix = userPromptNum.Render(num) + userPromptArrow.Render(" › ")
+		indent = strings.Repeat(" ", lipgloss.Width(num)+2)
+	case roleAssistant:
+		prefix = aiPrefix.Render(" ✦ ")
+		indent = "   "
+	case roleTool:
+		prefix = toolPrefix.Render(" ⚙ ")
+		indent = "   "
+	case roleObserve:
+		prefix = observePrefix.Render(" ← ")
+		indent = "   "
+	case roleError:
+		prefix = errorPrefix.Render(" ✗ ")
+		indent = "   "
+	case roleSystem:
+		prefix = systemPrefix.Render(" ⋯ ")
+		indent = "   "
+	case roleThinking:
+		prefix = aiThinking.Render(" ∵ ")
+		indent = "   "
+	}
+
 	var body string
+	var bodyStyle *lipgloss.Style
 	switch m.role {
 	case roleThinking:
 		body = renderThinkingBody(m, bodyWidth)
 	case roleUser:
 		body = wrapText(m.text, bodyWidth)
+		bodyStyle = &userPromptText
+	case roleAssistant:
+		body = wrapText(m.text, bodyWidth)
+		bodyStyle = &aiText
 	default:
 		body = wrapText(m.text, bodyWidth)
 	}
@@ -380,14 +404,41 @@ func renderChatMsg(m chatMsg, width int) string {
 		body = toolInline + "\n" + body
 	}
 
-	result := fmt.Sprintf("%s  %s", prefix, body)
+	bodyIndented := indentLines(body, indent)
+
+	var styledBody string
+	if bodyStyle != nil {
+		styledBody = bodyStyle.Render(bodyIndented)
+	} else {
+		styledBody = bodyIndented
+	}
+
+	result := prefix + " " + styledBody
+
 	if m.duration > 0 {
-		result += "\n" + fmt.Sprintf("  ⏱ %s", m.duration.Round(time.Millisecond))
+		dur := durationHint.Render(fmt.Sprintf("  ⏱ %s", m.duration.Round(time.Millisecond)))
+		result += "\n" + dur
 	}
 	if m.usage != nil && m.usage.total > 0 {
-		result += "\n" + fmt.Sprintf("  ↻ %d → %d  (%d tokens)", m.usage.prompt, m.usage.completion, m.usage.total)
+		tok := tokenHint.Render(fmt.Sprintf("  ↻ %d → %d  (%d tokens)", m.usage.prompt, m.usage.completion, m.usage.total))
+		result += "\n" + tok
 	}
 	return result
+}
+
+func indentLines(s, indent string) string {
+	if indent == "" {
+		return s
+	}
+	var b strings.Builder
+	for i, line := range strings.Split(s, "\n") {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(indent)
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func renderThinkingBody(m chatMsg, width int) string {
@@ -396,7 +447,7 @@ func renderThinkingBody(m chatMsg, width int) string {
 		if dur == 0 {
 			dur = m.duration.Round(time.Millisecond)
 		}
-		return fmt.Sprintf("▸ thought for %s", dur)
+		return thinkingCollapsed.Render(fmt.Sprintf("▸ thought for %s", dur))
 	}
 	return wrapText(m.text, width)
 }
@@ -411,13 +462,13 @@ func renderToolInline(calls []toolCallInline, width int) string {
 		if len(args) > 40 {
 			args = args[:37] + "..."
 		}
-		parts[i] = fmt.Sprintf("%s(%s)", c.name, args)
+		parts[i] = toolName.Render(c.name) + "(" + args + ")"
 	}
 	label := "tool: "
 	if len(calls) > 1 {
 		label = "tools: "
 	}
-	return label + strings.Join(parts, " · ")
+	return toolPrefix.Render(label) + strings.Join(parts, toolSeparator.Render(" · "))
 }
 
 func wrapText(text string, width int) string {

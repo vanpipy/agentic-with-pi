@@ -78,8 +78,8 @@ func (m *Model) executeCommand(text string) bool {
 
 	cmd, found := findCommand(parsed.name)
 	if !found {
-		m.chat.appendSystem(" unknown command: /" + parsed.name +
-			"\n  type /help for available commands")
+		m.chat.appendSystem(errorPrefix.Render(" unknown command: /" + parsed.name) +
+			helpFooter.Render("\n  type /help for available commands"))
 		return true
 	}
 
@@ -106,14 +106,14 @@ func (m *Model) executeCommand(text string) bool {
 
 func (m *Model) cmdHelp() {
 	var lines []string
-	lines = append(lines, " available slash commands:")
+	lines = append(lines, systemPrefix.Render(" available slash commands:"))
 	lines = append(lines, "")
 	for _, c := range builtinCommands() {
 		usage := "/" + c.name
 		if c.usage != "" {
 			usage = c.usage
 		}
-		lines = append(lines, fmt.Sprintf("  %s   %s", usage, c.description))
+		lines = append(lines, fmt.Sprintf("  %s   %s", userPromptArrow.Render(usage), helpFooter.Render(c.description)))
 	}
 	lines = append(lines, "")
 	m.chat.appendSystem(strings.Join(lines, "\n"))
@@ -121,22 +121,22 @@ func (m *Model) cmdHelp() {
 
 func (m *Model) cmdTools() {
 	lines := []string{
-		" available tools:",
+		systemPrefix.Render(" available tools:"),
 		"",
-		"  read       read files",
-		"  write      write files",
-		"  edit       edit files",
-		"  bash       run shell commands",
-		"  grep       search file contents",
-		"  find       find files by name",
-		"  ls         list directory",
+		"  " + toolName.Render("read       ") + helpFooter.Render("read files"),
+		"  " + toolName.Render("write      ") + helpFooter.Render("write files"),
+		"  " + toolName.Render("edit       ") + helpFooter.Render("edit files"),
+		"  " + toolName.Render("bash       ") + helpFooter.Render("run shell commands"),
+		"  " + toolName.Render("grep       ") + helpFooter.Render("search file contents"),
+		"  " + toolName.Render("find       ") + helpFooter.Render("find files by name"),
+		"  " + toolName.Render("ls         ") + helpFooter.Render("list directory"),
 	}
 	m.chat.appendSystem(strings.Join(lines, "\n"))
 }
 
 func (m *Model) cmdResume(sessionID string) {
 	if sessionID == "" {
-		m.chat.appendSystem(" usage: /resume <session_id>")
+		m.chat.appendSystem(helpFooter.Render(" usage: /resume <session_id>"))
 		return
 	}
 	m.resumeSession(sessionID)

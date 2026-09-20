@@ -78,14 +78,14 @@ func (a *autocompleteModel) View() string {
 		return ""
 	}
 	var lines []string
-	lines = append(lines, " commands:")
+	lines = append(lines, autocompleteHeader.Render(" commands:"))
 	for i, cmd := range a.items {
 		cursor := "  "
 		if i == a.cursor {
-			cursor = "▶ "
+			cursor = autocompleteCursor.Render("▶ ")
 		}
 		def, _ := findCommand(cmd)
-		line := fmt.Sprintf("%s/%s   %s", cursor, cmd, def.description)
+		line := fmt.Sprintf("%s%s   %s", cursor, autocompleteHeader.Render("/"+cmd), helpFooter.Render(def.description))
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")

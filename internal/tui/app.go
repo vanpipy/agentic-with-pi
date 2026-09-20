@@ -265,16 +265,16 @@ func (m *Model) View() tea.View {
 	}
 
 	status := m.statusRender()
+	statusRendered := styleStatus(status)
 
-	header := fmt.Sprintf(" awp  [%s]  session: %s ", status, sessionLabel(m.session))
+	headerText := fmt.Sprintf(" awp  %s  session: %s ", statusRendered, sessionLabel(m.session))
+	header := headerBar.Width(m.width).Render(headerText)
 
 	body := m.chat.View()
 
 	inputBox := m.input.View()
 
-	footer := fmt.Sprintf(
-		" ● ready  ctrl+c: quit  /quit: quit  ctrl+d: quit/eof  tab: complete  ↑↓: scroll",
-	)
+	footer := helpFooter.Render(" ● ready  ctrl+c: quit  /quit: quit  ctrl+d: quit/eof  tab: complete  ↑↓: scroll")
 
 	lines := []string{header, "", body, "", inputBox, "", footer}
 	if m.autocomplete.visible {
@@ -284,10 +284,6 @@ func (m *Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
-}
-
-func statusOK(status string) string {
-	return "● " + status
 }
 
 func (m *Model) layout() {
@@ -376,10 +372,19 @@ func (m *Model) statusRender() string {
 	case stateStreaming:
 		frame := spinnerFrames[m.spinnerFrame]
 		return frame + " " + m.state.String()
-	case stateError:
-		return "● " + m.state.String()
 	default:
-		return "● " + m.state.String()
+		return m.state.String()
+	}
+}
+
+func styleStatus(state string) string {
+	switch state {
+	case "streaming":
+		return statusSpin.Render("● streaming")
+	case "error":
+		return statusErr.Render("● error")
+	default:
+		return statusOK.Render("● ready")
 	}
 }
 
