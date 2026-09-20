@@ -45,11 +45,21 @@ func TestRuntimeDirHasFallback(t *testing.T) {
 	}
 }
 
-func TestConfigDirPrefersXDG(t *testing.T) {
+func TestConfigDirUnderHome(t *testing.T) {
+	t.Setenv("AWP_HOME", "/custom/home")
+	if got := storage.ConfigDir(); got != "/custom/home" {
+		t.Errorf("got %q, want /custom/home", got)
+	}
+}
+
+func TestConfigDirIgnoresXDG(t *testing.T) {
 	t.Setenv("AWP_CONFIG_HOME", "")
 	t.Setenv("XDG_CONFIG_HOME", "/home/user/.config")
-	if got := storage.ConfigDir(); got != "/home/user/.config/awp" {
-		t.Errorf("got %q, want /home/user/.config/awp", got)
+	t.Setenv("AWP_HOME", "")
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, ".awp")
+	if got := storage.ConfigDir(); got != want {
+		t.Errorf("ConfigDir = %q, want %q (XDG must not leak into ConfigDir)", got, want)
 	}
 }
 

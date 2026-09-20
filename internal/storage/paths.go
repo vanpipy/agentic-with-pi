@@ -32,11 +32,7 @@ func ConfigDir() string {
 	if env := os.Getenv("AWP_CONFIG_HOME"); env != "" {
 		return env
 	}
-	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
-		return filepath.Join(xdg, "awp")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "awp")
+	return Home()
 }
 
 func LogsDir() string {
