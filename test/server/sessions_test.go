@@ -1,4 +1,4 @@
-package session_test
+package server_test
 
 import (
 	"encoding/json"
@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vanpiyp/awp/internal/session"
+	"github.com/vanpiyp/awp/internal/server"
 )
 
 func TestNewID(t *testing.T) {
-	id1 := session.NewID()
-	id2 := session.NewID()
+	id1 := server.NewID()
+	id2 := server.NewID()
 
 	if id1 == id2 {
 		t.Error("NewID should generate unique IDs")
@@ -25,19 +25,19 @@ func TestNewID(t *testing.T) {
 func TestStorePath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
 	if s.Path() != path {
-		t.Errorf("Path() = %q", s.Path())
+		t.Errorf("Path() = %q", path)
 	}
 }
 
 func TestWriteHeader(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "subdir", "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
-	meta := session.SessionMeta{
+	meta := server.SessionMeta{
 		SessionID: "abc-123",
 		Model:     "test-model",
 		MaxTurns:  10,
@@ -46,7 +46,7 @@ func TestWriteHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := session.Load(path)
+	loaded, err := server.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +61,9 @@ func TestWriteHeader(t *testing.T) {
 func TestWriteEvent(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
-	s.WriteHeader(session.SessionMeta{SessionID: "s1"})
+	s.WriteHeader(server.SessionMeta{SessionID: "s1"})
 	if err := s.WriteEvent("thought_chunk", map[string]string{"content": "hello"}); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestWriteEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := session.Load(path)
+	loaded, err := server.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestWriteEvent(t *testing.T) {
 }
 
 func TestLoadNonexistentFile(t *testing.T) {
-	if _, err := session.Load("/nonexistent/path.jsonl"); err == nil {
+	if _, err := server.Load("/nonexistent/path.jsonl"); err == nil {
 		t.Error("expected error for missing file")
 	}
 }
@@ -103,16 +103,16 @@ func TestLoadNonexistentFile(t *testing.T) {
 func TestRoundTripMultipleEvents(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
-	s.WriteHeader(session.SessionMeta{SessionID: "session-x"})
+	s.WriteHeader(server.SessionMeta{SessionID: "session-x"})
 
 	events := []string{"thought_start", "thought_chunk", "thought_end", "tool", "observe", "final_answer"}
 	for _, ev := range events {
 		s.WriteEvent(ev, map[string]string{"data": ev})
 	}
 
-	loaded, err := session.Load(path)
+	loaded, err := server.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,14 +131,14 @@ func TestAppendOnlyMode(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
 
-	s := session.NewStore(path)
-	s.WriteHeader(session.SessionMeta{SessionID: "first"})
+	s := server.NewStore(path)
+	s.WriteHeader(server.SessionMeta{SessionID: "first"})
 	s.WriteEvent("thought_start", nil)
 
-	s = session.NewStore(path)
+	s = server.NewStore(path)
 	s.WriteEvent("thought_chunk", map[string]string{"content": "second"})
 
-	loaded, err := session.Load(path)
+	loaded, err := server.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestAppendOnlyMode(t *testing.T) {
 }
 
 func TestDefaultPath(t *testing.T) {
-	p := session.DefaultPath("/tmp/sessions", "session-id")
+	p := server.DefaultPath("/tmp/sessions", "session-id")
 	want := "/tmp/sessions/session-id.jsonl"
 	if p != want {
 		t.Errorf("got %q, want %q", p, want)
@@ -164,17 +164,17 @@ func TestDefaultPath(t *testing.T) {
 func TestDataIsValidJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
 	data := struct {
 		Name    string `json:"name"`
 		Number  int    `json:"number"`
 		Flag    bool   `json:"flag"`
 	}{Name: "test", Number: 42, Flag: true}
-	s.WriteHeader(session.SessionMeta{SessionID: "s"})
+	s.WriteHeader(server.SessionMeta{SessionID: "s"})
 	s.WriteEvent("data", data)
 
-	loaded, _ := session.Load(path)
+	loaded, _ := server.Load(path)
 
 	var got struct {
 		Name   string `json:"name"`
@@ -192,9 +192,9 @@ func TestDataIsValidJSON(t *testing.T) {
 func TestFileIsOneEntryPerLine(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.jsonl")
-	s := session.NewStore(path)
+	s := server.NewStore(path)
 
-	s.WriteHeader(session.SessionMeta{SessionID: "s"})
+	s.WriteHeader(server.SessionMeta{SessionID: "s"})
 	s.WriteEvent("e1", nil)
 	s.WriteEvent("e2", nil)
 	s.WriteEvent("e3", nil)

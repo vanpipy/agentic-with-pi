@@ -11,9 +11,8 @@ A Go binary (`awp`) that talks to LLM APIs with tool orchestration, sessions, an
 - `internal/llm/protocol/` — transport (`HTTPRest`: HTTP + SSE). Leaf pkg.
 - `internal/llm/providers/` — vendor adapters (`minimax` is Anthropic-compat).
 - `internal/client-sdk/` — Unix socket client SDK (Dial / Prompt / Resume / Ping).
-- `internal/server/` — accept loop + JSON-RPC 2.0 dispatch.
+- `internal/server/` — accept loop + JSON-RPC 2.0 dispatch + session store (JSONL append-only, header + events).
 - `internal/protocol/` — JSON-RPC 2.0 message types (Request / Response).
-- `internal/session/` — JSONL append-only store (header + events).
 - `internal/storage/` — XDG paths (`Home` / `RuntimeDir` / `ConfigDir` / `LogsDir` / `SessionsDir` / `SocketPath`).
 - `internal/log/` — `slog` multi-handler + file rotation + cleanup.
 - `internal/transport/` — Unix domain socket (`Listen` / `Dial` / `IsRunning`).
@@ -65,8 +64,8 @@ Server socket: `$AWP_SOCKET` (default `~/.awp/runtime/awp.sock`).
 8. `internal/server/` exposes JSON-RPC 2.0 over Unix domain socket.
    `internal/client-sdk/` is the Go client. They share
    `internal/protocol/` for message types — never duplicate.
-9. `internal/session/` is JSONL append-only. Headers and events
-   share one file. Compaction is left to future work.
+9. Session storage lives inside `internal/server/` (JSONL append-only,
+   header + events share one file). Compaction is left to future work.
 10. `internal/tui/` uses bubbletea. It depends on `internal/client-sdk`
     and `internal/storage` — never on `internal/server/` or
     `internal/agent/` directly.
