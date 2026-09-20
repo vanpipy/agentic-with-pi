@@ -75,6 +75,25 @@ func TestDialFailsForMissingServer(t *testing.T) {
 	}
 }
 
+func TestCloseIdempotent(t *testing.T) {
+	_, socketPath := setupTestServer(t)
+
+	c, err := client_sdk.Dial(socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Errorf("first Close returned error: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Errorf("second Close returned error: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Errorf("third Close returned error: %v", err)
+	}
+}
+
 func TestPing(t *testing.T) {
 	_, socketPath := setupTestServer(t)
 	c, err := client_sdk.Dial(socketPath)

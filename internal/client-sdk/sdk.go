@@ -6,14 +6,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/vanpiyp/awp/internal/protocol"
 	"github.com/vanpiyp/awp/internal/transport"
 )
 
 type Client struct {
-	conn   net.Conn
-	reader *bufio.Reader
+	conn    net.Conn
+	reader  *bufio.Reader
+	closeMu sync.Mutex
+	closed  bool
 }
 
 func Dial(socketPath string) (*Client, error) {
@@ -53,6 +56,12 @@ func SendPrompt(ctx context.Context, socketPath, sessionID, prompt string) (<-ch
 }
 
 func (c *Client) Close() error {
+	c.closeMu.Lock()
+	defer c.closeMu.Unlock()
+	if c.closed {
+		return nil
+	}
+	c.closed = true
 	return c.conn.Close()
 }
 
