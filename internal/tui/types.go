@@ -27,16 +27,10 @@ var (
 type chatMsg struct {
 	role      role
 	text      string
-	toolCalls []toolCallInline
 	duration  time.Duration
 	usage     *msgUsage
 	promptNum int
 	collapsed bool
-}
-
-type toolCallInline struct {
-	name string
-	args string
 }
 
 type msgUsage struct {

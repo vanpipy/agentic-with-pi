@@ -119,10 +119,6 @@ func renderMsg(g chatMsg, width int) []string {
 		return nil
 	}
 	indented := prependPrefixAndIndent(body, glyph)
-	if g.toolCalls != nil {
-		toolLine := renderToolInline(g.toolCalls)
-		indented = append(append(toolLine, ""), indented...)
-	}
 	hints := hintLines(g)
 	if len(hints) > 0 {
 		indented = append(indented, hints...)
@@ -170,25 +166,6 @@ func renderAssistant(text string, width int) []string {
 		bodyWidth = 8
 	}
 	return wrapRender(layout.body.Width(bodyWidth), rendered)
-}
-
-func renderToolInline(calls []toolCallInline) []string {
-	if len(calls) == 0 {
-		return nil
-	}
-	parts := make([]string, len(calls))
-	for i, c := range calls {
-		args := c.args
-		if len(args) > 40 {
-			args = args[:37] + "..."
-		}
-		parts[i] = toolName.Render(c.name) + "(" + args + ")"
-	}
-	label := "tool: "
-	if len(calls) > 1 {
-		label = "tools: "
-	}
-	return []string{toolPrefix.Render(label) + strings.Join(parts, toolSeparator.Render(" · "))}
 }
 
 func hintLines(g chatMsg) []string {
@@ -423,7 +400,6 @@ type Role = role
 type ChatMsg struct {
 	Role      Role
 	Text      string
-	ToolCalls []toolCallInline
 	Duration  time.Duration
 	Usage     *msgUsage
 	PromptNum int
@@ -434,7 +410,6 @@ func toChatMsg(c ChatMsg) chatMsg {
 	return chatMsg{
 		role:      c.Role,
 		text:      c.Text,
-		toolCalls: c.ToolCalls,
 		duration:  c.Duration,
 		usage:     c.Usage,
 		promptNum: c.PromptNum,

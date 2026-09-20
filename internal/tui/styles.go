@@ -65,7 +65,6 @@ var (
 
 	toolPrefix = lipgloss.NewStyle().Foreground(c.tool).Bold(true)
 	toolName = lipgloss.NewStyle().Foreground(c.accent)
-	toolSeparator = lipgloss.NewStyle().Foreground(c.dim)
 
 	observePrefix = lipgloss.NewStyle().Foreground(c.dim)
 	systemPrefix = lipgloss.NewStyle().Foreground(c.system)
