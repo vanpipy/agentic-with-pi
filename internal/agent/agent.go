@@ -238,22 +238,17 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 			}
 		}
 		if lastFailed != "" {
-			recentToolErrors = append(recentToolErrors, lastFailed)
+			if len(recentToolErrors) > 0 && recentToolErrors[len(recentToolErrors)-1] == lastFailed {
+				recentToolErrors[len(recentToolErrors)-1] = lastFailed
+			} else {
+				recentToolErrors = append(recentToolErrors, lastFailed)
+			}
 			if len(recentToolErrors) > a.repeatedToolErrorLimit {
 				recentToolErrors = recentToolErrors[len(recentToolErrors)-a.repeatedToolErrorLimit:]
 			}
-			if len(recentToolErrors) >= a.repeatedToolErrorLimit {
-				allSame := true
-				for _, s := range recentToolErrors[1:] {
-					if s != recentToolErrors[0] {
-						allSame = false
-						break
-					}
-				}
-				if allSame {
-					a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", a.repeatedToolErrorLimit, lastFailed)})
-					return
-				}
+			if len(recentToolErrors) == a.repeatedToolErrorLimit && allSameRecent(recentToolErrors) {
+				a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", a.repeatedToolErrorLimit, lastFailed)})
+				return
 			}
 		}
 	}
@@ -500,6 +495,18 @@ func appendSkippedToolResults(msgs []llm.Message, calls []llm.ToolCall, startInd
 		})
 	}
 	return msgs
+}
+
+func allSameRecent(s []string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, v := range s[1:] {
+		if v != s[0] {
+			return false
+		}
+	}
+	return true
 }
 
 func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {

@@ -127,6 +127,9 @@ func runAgentLastError(t *testing.T, ag *agent.Agent, msg string) (string, error
 			lastErr = errors.New(ev.ToolError)
 		}
 	}
+	if result != "" {
+		return result, nil
+	}
 	return result, lastErr
 }
 
@@ -757,6 +760,35 @@ func TestAgentSafetyNetStopsLongLoop(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "aborting") && !strings.Contains(err.Error(), "max turns") {
 		t.Errorf("err = %q, want safety-net abort (either 'aborting' for repeated calls or 'max turns')", err.Error())
+	}
+}
+
+func TestAgentDoesNotAbortOnSingleTransientToolError(t *testing.T) {
+	chunks := [][]llm.StreamEvent{
+		{toolUseStartChunk("c1", "read"), toolUseIDDeltaChunk("c1", "read", `{}`),
+			messageDeltaStopChunk("tool_use"), messageStopChunk()},
+		{toolUseStartChunk("c2", "read"), toolUseIDDeltaChunk("c2", "read", `{"path":"AGENTS.md"}`),
+			messageDeltaStopChunk("tool_use"), messageStopChunk()},
+		{toolUseStartChunk("c3", "read"), toolUseIDDeltaChunk("c3", "read", `{"path":"README.md"}`),
+			messageDeltaStopChunk("tool_use"), messageStopChunk()},
+		{textDeltaChunk("all done"),
+			messageDeltaStopChunk("end_turn"), messageStopChunk()},
+	}
+	core := &fakeCore{streamChunksList: chunks}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
+	ag.WithTool(agent.Tool{Name: "read", Execute: func(ctx context.Context, argsJSON string) (string, error) {
+		if argsJSON == "{}" {
+			return "", errors.New("path is required")
+		}
+		return "ok", nil
+	}})
+
+	result, err := runAgentLastError(t, ag, "explore")
+	if err != nil {
+		t.Fatalf("expected recovery after one transient error, got %q", err.Error())
+	}
+	if result != "all done" {
+		t.Errorf("result = %q, want 'all done'", result)
 	}
 }
 
