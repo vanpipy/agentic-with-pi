@@ -75,8 +75,6 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 }
 
-// dispatchRun runs a single dispatch call and signals completion.
-// Used by dispatchAsync to keep the per-conn read loop responsive.
 func (s *Server) dispatchRun(conn io.Writer, connCtx context.Context, req *protocol.Request) {
 	switch req.Method {
 	case protocol.MethodPing:

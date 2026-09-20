@@ -149,10 +149,6 @@ func (a *Agent) RunStreamResumed(ctx context.Context, userMsg string, history []
 	return a.runStreamResumedImpl(ctx, userMsg, history, nil)
 }
 
-// RunStreamResumedWithSnapshot behaves like RunStreamResumed but reports
-// the final messages snapshot (after compact + tool loops) on done.
-// The snapshot is delivered even if the loop terminated early with an
-// error, so callers can keep their session state in sync.
 func (a *Agent) RunStreamResumedWithSnapshot(ctx context.Context, userMsg string, history []llm.Message) (<-chan Event, <-chan []llm.Message) {
 	done := make(chan []llm.Message, 1)
 	ch := a.runStreamResumedImpl(ctx, userMsg, history, done)
