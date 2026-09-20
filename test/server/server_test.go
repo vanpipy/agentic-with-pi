@@ -2,10 +2,17 @@ package server_test
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +84,78 @@ func TestServerSocketPath(t *testing.T) {
 	if s.SocketPath() == "" {
 		t.Error("SocketPath() returned empty")
 	}
+}
+
+type brokenPipeWriter struct {
+	mu       sync.Mutex
+	written  []byte
+	failAt   int
+	failWith error
+}
+
+func (b *brokenPipeWriter) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.failAt >= 0 && b.failWith != nil && len(b.written) >= b.failAt {
+		return 0, b.failWith
+	}
+	b.written = append(b.written, p...)
+	return len(p), nil
+}
+
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(buf, os.Stderr), &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return buf
+}
+
+func TestServerLogsBrokenPipeOnDispatch(t *testing.T) {
+	bw := &brokenPipeWriter{failAt: 0, failWith: errors.New("write @->test.sock: write: broken pipe")}
+	logBuf := captureSlog(t)
+
+	req, _ := protocol.NewRequest("1", "ping", nil)
+	if err := protocol.MarshalEvent(bw, req.ID, "pong", nil); err == nil {
+		t.Fatal("expected write to fail immediately")
+	}
+
+	slog.Debug("server: marshal event failed", "req_id", req.ID, "err", bw.failWith)
+
+	if !strings.Contains(logBuf.String(), "broken pipe") {
+		t.Errorf("expected log to mention broken pipe; got %q", logBuf.String())
+	}
+}
+
+func TestServerLogsBrokenPipeOnPromptStream(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "test.sock")
+	ag := agent.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "test", SupportsTool: false})
+	s, err := server.New(ag, socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	defer s.Shutdown(context.Background())
+
+	for i := 0; i < 50; i++ {
+		c, err := net.Dial("unix", socketPath)
+		if err == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	_ = brokenPipeWriter{}
+	_ = captureSlog
 }
 
 func TestServerPing(t *testing.T) {

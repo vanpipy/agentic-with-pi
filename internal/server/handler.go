@@ -25,22 +25,28 @@ func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol
 	case protocol.MethodCancel:
 		s.handleCancel(conn, req)
 	default:
-		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "unknown method: " + req.Method,
-		})
+		}); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "default_error", "err", err)
+		}
 	}
 }
 
 func (s *Server) handlePing(conn io.Writer, req *protocol.Request) {
-	protocol.MarshalEvent(conn, req.ID, "pong", nil)
+	if err := protocol.MarshalEvent(conn, req.ID, "pong", nil); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "ping_pong", "err", err)
+	}
 }
 
 func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *protocol.Request) {
 	var params protocol.PromptParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "invalid params",
-		})
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "invalid_params", "err", mErr)
+		}
 		return
 	}
 
@@ -50,9 +56,12 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	}
 
 	store := s.getOrCreateStore(sessionID)
-	protocol.MarshalEvent(conn, req.ID, "session_started", map[string]string{
+	if err := protocol.MarshalEvent(conn, req.ID, "session_started", map[string]string{
 		"session_id": sessionID,
-	})
+	}); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "session_started", "session_id", sessionID, "err", err)
+		return
+	}
 
 	runCtx, runCancel := context.WithCancel(connCtx)
 	s.registerConnCancel(req.ID, runCancel)
@@ -85,6 +94,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 		eventName, data := mapAgentEvent(ev)
 
 		if err := protocol.MarshalEvent(conn, req.ID, eventName, data); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "prompt_stream", "session_id", sessionID, "event", eventName, "err", err)
 			return
 		}
 
@@ -97,41 +107,52 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
 	var params protocol.ResumeParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "invalid params",
-		})
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_invalid_params", "err", mErr)
+		}
 		return
 	}
 
 	loaded, err := Load(DefaultPath(s.sessionsDir, params.SessionID))
 	if err != nil {
-		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "session not found: " + params.SessionID,
-		})
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_not_found", "err", mErr)
+		}
 		return
 	}
 
 	for _, ev := range loaded.Events {
 		if err := protocol.MarshalEvent(conn, req.ID, ev.Kind, json.RawMessage(ev.Data)); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
 			return
 		}
 	}
 
-	protocol.MarshalEvent(conn, req.ID, "session_resumed", map[string]int{
+	if err := protocol.MarshalEvent(conn, req.ID, "session_resumed", map[string]int{
 		"event_count": len(loaded.Events),
-	})
+	}); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_done", "session_id", params.SessionID, "err", err)
+	}
 }
 
 func (s *Server) handleCancel(conn io.Writer, req *protocol.Request) {
 	cancel := s.popConnCancel(req.ID)
 	if cancel == nil {
-		protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "no active prompt to cancel for id " + req.ID,
-		})
+		}); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_no_active", "err", err)
+		}
 		return
 	}
 	cancel()
-	protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, nil)
+	if err := protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, nil); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack", "err", err)
+	}
 }
 
 func (s *Server) sessionsHasHeader(store *Store, sessionID string) bool {
