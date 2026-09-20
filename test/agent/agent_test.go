@@ -168,8 +168,8 @@ func TestShouldCompactFallsBackWhenModelZero(t *testing.T) {
 func TestNewAgentMaxTurnsMatchesPiDefault(t *testing.T) {
 	core := &fakeCore{}
 	ag := newTestAgent(core, "test-model")
-	if ag.MaxTurns < 20 {
-		t.Errorf("MaxTurns = %d, pi uses 20 as default (--turns >= 20). Lower values encourage premature termination.", ag.MaxTurns)
+	if ag.MaxTurns < 100 {
+		t.Errorf("MaxTurns = %d, safety net default should be >= 100 to cover long-task scenarios", ag.MaxTurns)
 	}
 }
 
@@ -725,12 +725,35 @@ func TestAgentDefensiveMaxTurnsClamp(t *testing.T) {
 	core := &fakeCore{streamChunksList: chunksList}
 	ag := newTestAgent(core, "test-model").WithMaxTurns(0)
 	ag.WithTool(agent.Tool{Name: "loop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
-	_, err := runAgent(t, ag, "x")
+	_, err := runAgentLastError(t, ag, "x")
 	if err == nil {
 		t.Fatal("expected error from clamped 0 max turns, got nil")
 	}
-	if !strings.Contains(err.Error(), "max turns") {
-		t.Errorf("err = %q, want mentions max turns", err.Error())
+	if !strings.Contains(err.Error(), "aborting") && !strings.Contains(err.Error(), "max turns") {
+		t.Errorf("err = %q, want mentions aborting or max turns (WithMaxTurns(0) clamps to 200 safety net; here loop repeats cause repeated-tool-error abort)", err.Error())
+	}
+}
+
+func TestAgentSafetyNetStopsLongLoop(t *testing.T) {
+	repeat := []llm.StreamEvent{
+		toolUseStartChunk("loop", "noop"),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}
+	chunksList := make([][]llm.StreamEvent, 250)
+	for i := range chunksList {
+		chunksList[i] = repeat
+	}
+	core := &fakeCore{streamChunksList: chunksList}
+	ag := newTestAgent(core, "test-model").WithMaxTurns(250)
+	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
+
+	_, err := runAgentLastError(t, ag, "x")
+	if err == nil {
+		t.Fatal("expected error from long loop, got nil")
+	}
+	if !strings.Contains(err.Error(), "aborting") && !strings.Contains(err.Error(), "max turns") {
+		t.Errorf("err = %q, want safety-net abort (either 'aborting' for repeated calls or 'max turns')", err.Error())
 	}
 }
 

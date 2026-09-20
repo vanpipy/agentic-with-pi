@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
 	"os/exec"
 	"os/signal"
@@ -29,32 +28,32 @@ import (
 const usage = `awp — agent with pi
 
 Usage:
-  awp [--max-turns N]               launch TUI (recommended, requires terminal)
-  awp serve [--max-turns N]         run as background server (Unix socket)
-  awp connect <prompt> [--max-turns N]   spawn server + send prompt + print events
+  awp                              launch TUI (recommended, requires terminal)
+  awp serve                        run as background server (Unix socket)
+  awp connect <prompt>             spawn server + send prompt + print events
   awp resume <session_id> [new_prompt]   resume session; with new_prompt,
                                           picks up the last compaction summary.
-                                          MaxTurns is a fresh per-call budget,
-                                          not a sliding window across calls.
-                                          Use --max-turns to raise it.
+                                          State is held in the server, so
+                                          multiple prompts on the same
+                                          session_id accumulate messages and
+                                          slide the context window via
+                                          compaction (see docs/compaction).
   awp help                         show this message
 
 Server socket: $AWP_SOCKET (default ~/.awp/runtime/awp.sock)
 `
 
 func main() {
-	maxTurns := extractMaxTurnsFlag(os.Args)
-	args := stripMaxTurnsFlag(os.Args)
-	if len(args) > 1 {
-		switch args[1] {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
 		case "serve":
-			runServe(maxTurns)
+			runServe()
 			return
 		case "connect":
-			runConnect(args[2:], maxTurns)
+			runConnect(os.Args[2:])
 			return
 		case "resume":
-			runResume(args[2:], maxTurns)
+			runResume(os.Args[2:])
 			return
 		case "demo":
 			runDemo()
@@ -68,42 +67,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tui:", err)
 		os.Exit(1)
 	}
-}
-
-func extractMaxTurnsFlag(argv []string) int {
-	for i := 1; i < len(argv); i++ {
-		if argv[i] == "--max-turns" {
-			if i+1 < len(argv) {
-				if n, err := strconv.Atoi(argv[i+1]); err == nil && n > 0 {
-					return n
-				}
-			}
-		}
-		if v, ok := strings.CutPrefix(argv[i], "--max-turns="); ok {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				return n
-			}
-		}
-	}
-	return 0
-}
-
-func stripMaxTurnsFlag(argv []string) []string {
-	out := argv[:1]
-	for i := 1; i < len(argv); {
-		if argv[i] == "--max-turns" && i+1 < len(argv) {
-			i += 2
-			continue
-		}
-		if v, ok := strings.CutPrefix(argv[i], "--max-turns="); ok {
-			_ = v
-			i++
-			continue
-		}
-		out = append(out, argv[i])
-		i++
-	}
-	return out
 }
 
 func setupLog() {
@@ -170,12 +133,9 @@ Planning rules:
 	return ag
 }
 
-func runServe(maxTurns int) {
+func runServe() {
 	setupLog()
 	ag := loadAgent()
-	if maxTurns > 0 {
-		ag.WithMaxTurns(maxTurns)
-	}
 
 	socket := storage.SocketPath()
 	srv, err := server.New(ag, socket)
@@ -201,7 +161,7 @@ func runServe(maxTurns int) {
 	}
 }
 
-func runConnect(args []string, maxTurns int) {
+func runConnect(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: awp connect <prompt>")
 		os.Exit(1)
@@ -248,7 +208,7 @@ func runConnect(args []string, maxTurns int) {
 	}
 }
 
-func runResume(args []string, maxTurns int) {
+func runResume(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, "usage: awp resume <session_id> [new_prompt]")
 		os.Exit(1)

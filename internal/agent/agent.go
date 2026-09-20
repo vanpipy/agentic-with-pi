@@ -62,7 +62,7 @@ type Agent struct {
 func NewAgent(llmCore llm.Core) *Agent {
 	return &Agent{
 		core:                   llmCore,
-		MaxTurns:               20,
+		MaxTurns:               200,
 		SystemPrompts:          "You are a helpful coding assistant",
 		compaction: CompactionSettings{
 			Enabled:         true,
@@ -75,7 +75,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 
 func (a *Agent) WithMaxTurns(n int) *Agent {
 	if n <= 0 {
-		n = 10
+		n = 200
 	}
 	a.MaxTurns = n
 	return a
