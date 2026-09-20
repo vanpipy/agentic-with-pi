@@ -47,11 +47,11 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 	}
 	return agent.Tool{
 		Name:        "read",
-		Description: fmt.Sprintf("Read file contents. Output is truncated to %d lines or %dKB (whichever hits first). Use offset/limit for large files.", maxLines, maxBytes/1024),
+		Description: fmt.Sprintf("Read file contents. Output is truncated to %d lines or %dKB (whichever hits first). Use offset/limit for large files. REQUIRED: the 'path' argument must always be provided.", maxLines, maxBytes/1024),
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "Path to file (relative or absolute)"},
+				"path":   map[string]any{"type": "string", "description": "REQUIRED. Path to file (relative or absolute). Omit only if you intentionally want to discover the working directory."},
 				"offset": map[string]any{"type": "integer", "description": "Line number to start reading from (1-indexed)"},
 				"limit":  map[string]any{"type": "integer", "description": "Maximum number of lines to read"},
 			},
@@ -109,12 +109,12 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 func WriteFile(cwd string) agent.Tool {
 	return agent.Tool{
 		Name:        "write",
-		Description: "Write content to a file (overwrites existing content). Creates parent directories as needed.",
+		Description: "Write content to a file (overwrites existing content). Creates parent directories as needed. REQUIRED: both 'path' and 'content' must be provided.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string"},
-				"content": map[string]any{"type": "string"},
+				"path":    map[string]any{"type": "string", "description": "REQUIRED. Path to file to write."},
+				"content": map[string]any{"type": "string", "description": "REQUIRED. Full file content to write."},
 			},
 			"required": []string{"path", "content"},
 		},
@@ -147,19 +147,20 @@ type EditOp struct {
 func EditFile(cwd string) agent.Tool {
 	return agent.Tool{
 		Name:        "edit",
-		Description: "Apply one or more edits to a file. Each edit replaces old_text with new_text in order. By default old_text must match exactly once.",
+		Description: "Apply one or more edits to a file. Each edit replaces old_text with new_text in order. By default old_text must match exactly once. REQUIRED: 'path' must be a file path; 'edits' must be a non-empty array.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path": map[string]any{"type": "string"},
+				"path": map[string]any{"type": "string", "description": "REQUIRED. Path to file to edit."},
 				"edits": map[string]any{
-					"type": "array",
+					"type":        "array",
+					"description": "REQUIRED. Non-empty array of {old_text, new_text} pairs.",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
-							"old_text":    map[string]any{"type": "string"},
-							"new_text":    map[string]any{"type": "string"},
-							"replace_all": map[string]any{"type": "boolean", "default": false},
+							"old_text":    map[string]any{"type": "string", "description": "Text to find (must be unique unless replace_all=true)"},
+							"new_text":    map[string]any{"type": "string", "description": "Replacement text"},
+							"replace_all": map[string]any{"type": "boolean", "default": false, "description": "Replace every occurrence (otherwise old_text must match exactly once)"},
 						},
 						"required": []string{"old_text", "new_text"},
 					},

@@ -29,11 +29,11 @@ func Bash(cwd string, opts BashOptions) agent.Tool {
 	}
 	return agent.Tool{
 		Name:        "bash",
-		Description: "Execute a shell command and return stdout+stderr. Working directory is cwd.",
+		Description: "Execute a shell command and return stdout+stderr. Working directory is cwd. REQUIRED: the 'command' argument must always be a non-empty string.",
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string"},
+				"command": map[string]any{"type": "string", "description": "REQUIRED. The shell command to run. Must be non-empty."},
 				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 60)"},
 			},
 			"required": []string{"command"},
