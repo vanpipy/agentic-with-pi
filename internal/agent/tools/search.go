@@ -28,7 +28,7 @@ func Grep(cwd string, opts FileOptions) agent.Tool {
 	return agent.Tool{
 		Name:        "grep",
 		Description: "Search file contents for a regex or literal pattern. Returns matching lines as `path:lineno:text`. REQUIRED: 'pattern' must be a non-empty string.",
-		Parameters: map[string]any{
+		Parameters: requireIntentSchema("grep", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"pattern":    map[string]any{"type": "string", "description": "REQUIRED. Regex or literal pattern to search for."},
@@ -39,8 +39,11 @@ func Grep(cwd string, opts FileOptions) agent.Tool {
 				"context":    map[string]any{"type": "integer", "description": "Lines before/after match (default 0)"},
 			},
 			"required": []string{"pattern"},
-		},
+		}),
 		Execute: func(_ context.Context, argsJSON string) (string, error) {
+			if err := requireIntentOrError(argsJSON); err != nil {
+				return "", err
+			}
 			var args struct {
 				Pattern    string `json:"pattern"`
 				Path       string `json:"path,omitempty"`
@@ -48,6 +51,7 @@ func Grep(cwd string, opts FileOptions) agent.Tool {
 				IgnoreCase bool   `json:"ignoreCase,omitempty"`
 				Literal    bool   `json:"literal,omitempty"`
 				Context    int    `json:"context,omitempty"`
+				Intent     string `json:"intent"`
 			}
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("invalid args: %w", err)
@@ -139,7 +143,7 @@ func Find(cwd string, opts FileOptions) agent.Tool {
 	return agent.Tool{
 		Name:        "find",
 		Description: "Find files matching a glob pattern. Default cwd. Limited results. REQUIRED: 'pattern' must be a non-empty glob (e.g. '*.go', 'cmd/**/*.ts').",
-		Parameters: map[string]any{
+		Parameters: requireIntentSchema("find", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"pattern": map[string]any{"type": "string", "description": "REQUIRED. Glob pattern, e.g. '*.go' or 'cmd/**/*.ts'."},
@@ -147,12 +151,16 @@ func Find(cwd string, opts FileOptions) agent.Tool {
 				"limit":   map[string]any{"type": "integer", "description": "Max results (default 1000)"},
 			},
 			"required": []string{"pattern"},
-		},
+		}),
 		Execute: func(_ context.Context, argsJSON string) (string, error) {
+			if err := requireIntentOrError(argsJSON); err != nil {
+				return "", err
+			}
 			var args struct {
 				Pattern string `json:"pattern"`
 				Path    string `json:"path,omitempty"`
 				Limit   int    `json:"limit,omitempty"`
+				Intent  string `json:"intent"`
 			}
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("invalid args: %w", err)
@@ -205,17 +213,21 @@ func Ls(cwd string, opts FileOptions) agent.Tool {
 	return agent.Tool{
 		Name:        "ls",
 		Description: "List directory entries. Default cwd. Directories have / suffix. The 'path' argument is optional; if omitted, lists the current working directory.",
-		Parameters: map[string]any{
+		Parameters: requireIntentSchema("ls", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path":  map[string]any{"type": "string", "description": "Optional. Directory to list (default cwd). Pass an explicit path to explore a specific directory; omitting it lists cwd."},
 				"limit": map[string]any{"type": "integer", "description": "Max entries (default 500)"},
 			},
-		},
+		}),
 		Execute: func(_ context.Context, argsJSON string) (string, error) {
+			if err := requireIntentOrError(argsJSON); err != nil {
+				return "", err
+			}
 			var args struct {
-				Path  string `json:"path,omitempty"`
-				Limit int    `json:"limit,omitempty"`
+				Path   string `json:"path,omitempty"`
+				Limit  int    `json:"limit,omitempty"`
+				Intent string `json:"intent"`
 			}
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("invalid args: %w", err)

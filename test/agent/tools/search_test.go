@@ -28,7 +28,7 @@ func TestLsSimple(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "subdir"), 0o755)
 
 	tool := tools.Ls(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{}`)
+	out, err := tool.Execute(context.Background(), `{"intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLsLimit(t *testing.T) {
 	}
 
 	tool := tools.Ls(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"limit":2}`)
+	out, err := tool.Execute(context.Background(), `{"limit":2,"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestLsLimit(t *testing.T) {
 func TestLsMissing(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Ls(dir, tools.FileOptions{})
-	_, err := tool.Execute(context.Background(), `{"path":"nonexistent"}`)
+	_, err := tool.Execute(context.Background(), `{"path":"nonexistent","intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error for missing directory")
 	}
@@ -76,7 +76,7 @@ func TestFindGlob(t *testing.T) {
 	writeFile(t, dir, "baz.txt", "")
 
 	tool := tools.Find(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"*.go"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"*.go","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestFindRecursive(t *testing.T) {
 	writeFile(t, dir, "top.go", "")
 
 	tool := tools.Find(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"*.go"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"*.go","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestFindLimit(t *testing.T) {
 		writeFile(t, dir, "f"+string(rune('a'+i))+".txt", "")
 	}
 	tool := tools.Find(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"*.txt","limit":3}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"*.txt","limit":3,"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestFindLimit(t *testing.T) {
 func TestFindNoMatch(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Find(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"*.xyz"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"*.xyz","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestGrepPattern(t *testing.T) {
 	writeFile(t, dir, "b.txt", "hello world\n")
 
 	tool := tools.Grep(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"hello"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"hello","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestGrepIgnoreCase(t *testing.T) {
 	writeFile(t, dir, "a.txt", "Hello World\nHELLO WORLD\n")
 
 	tool := tools.Grep(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"hello","ignoreCase":true}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"hello","ignoreCase":true,"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestGrepLiteral(t *testing.T) {
 	writeFile(t, dir, "a.txt", "a.b.c\naXbXc\n")
 
 	tool := tools.Grep(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"a.b.c","literal":true}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"a.b.c","literal":true,"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestGrepGlob(t *testing.T) {
 	writeFile(t, dir, "a.txt", "match here too\n")
 
 	tool := tools.Grep(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"match","glob":"*.go"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"match","glob":"*.go","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestGrepNoMatch(t *testing.T) {
 	writeFile(t, dir, "a.txt", "hello\n")
 
 	tool := tools.Grep(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{"pattern":"xyz"}`)
+	out, err := tool.Execute(context.Background(), `{"pattern":"xyz","intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}

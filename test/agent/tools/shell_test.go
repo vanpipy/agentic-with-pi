@@ -13,7 +13,7 @@ func TestBashSimple(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Bash(dir, tools.BashOptions{})
 
-	out, err := tool.Execute(context.Background(), `{"command":"echo hello"}`)
+	out, err := tool.Execute(context.Background(), `{"command":"echo hello","intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestBashWorkingDirectory(t *testing.T) {
 	writeFile(t, dir, "marker.txt", "found")
 
 	tool := tools.Bash(dir, tools.BashOptions{})
-	out, err := tool.Execute(context.Background(), `{"command":"ls marker.txt"}`)
+	out, err := tool.Execute(context.Background(), `{"command":"ls marker.txt","intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestBashTimeout(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Bash(dir, tools.BashOptions{})
 
-	_, err := tool.Execute(context.Background(), `{"command":"sleep 5","timeout":1}`)
+	_, err := tool.Execute(context.Background(), `{"command":"sleep 5","timeout":1,"intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -53,7 +53,7 @@ func TestBashFailure(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Bash(dir, tools.BashOptions{})
 
-	_, err := tool.Execute(context.Background(), `{"command":"exit 1"}`)
+	_, err := tool.Execute(context.Background(), `{"command":"exit 1","intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error for exit 1")
 	}
@@ -66,7 +66,7 @@ func TestBashStderrCaptured(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.Bash(dir, tools.BashOptions{})
 
-	out, err := tool.Execute(context.Background(), `{"command":"echo err 1>&2"}`)
+	out, err := tool.Execute(context.Background(), `{"command":"echo err 1>&2","intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestBashContextCancel(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := tool.Execute(ctx, `{"command":"sleep 10"}`)
+	_, err := tool.Execute(ctx, `{"command":"sleep 10","intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error from cancelled context")
 	}

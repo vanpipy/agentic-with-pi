@@ -8,8 +8,79 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/agent/tools"
 )
+
+func TestReadFileMissingIntent(t *testing.T) {
+	dir := t.TempDir()
+	tool := tools.ReadFile(dir, tools.FileOptions{})
+	_, err := tool.Execute(context.Background(), `{"path":"hello.txt"}`)
+	if err == nil {
+		t.Fatal("expected error for missing intent")
+	}
+	if !strings.Contains(err.Error(), "intent") {
+		t.Errorf("err = %q, want mentions 'intent'", err.Error())
+	}
+}
+
+func TestReadFileWithIntent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := tools.ReadFile(dir, tools.FileOptions{})
+	out, err := tool.Execute(context.Background(), `{"path":"hello.txt","intent":"read hello for greeting"}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("out = %q, want contains 'hi'", out)
+	}
+}
+
+func TestAllToolsRequireIntentInSchema(t *testing.T) {
+	cwd := t.TempDir()
+	allTools := []agent.Tool{
+		tools.ReadFile(cwd, tools.FileOptions{}),
+		tools.WriteFile(cwd),
+		tools.EditFile(cwd),
+		tools.Bash(cwd, tools.BashOptions{}),
+		tools.Grep(cwd, tools.FileOptions{}),
+		tools.Find(cwd, tools.FileOptions{}),
+		tools.Ls(cwd, tools.FileOptions{}),
+	}
+	for _, tool := range allTools {
+		schema, ok := tool.Parameters.(map[string]any)
+		if !ok {
+			t.Errorf("tool %q: parameters not a map", tool.Name)
+			continue
+		}
+		props, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Errorf("tool %q: schema has no properties", tool.Name)
+			continue
+		}
+		if _, ok := props["intent"]; !ok {
+			t.Errorf("tool %q: schema missing intent property", tool.Name)
+		}
+		required, ok := schema["required"].([]string)
+		if !ok {
+			t.Errorf("tool %q: schema required not []string", tool.Name)
+			continue
+		}
+		hasIntent := false
+		for _, r := range required {
+			if r == "intent" {
+				hasIntent = true
+				break
+			}
+		}
+		if !hasIntent {
+			t.Errorf("tool %q: required does not contain 'intent'", tool.Name)
+		}
+	}
+}
 
 func TestReadFile(t *testing.T) {
 	dir := t.TempDir()
@@ -19,7 +90,7 @@ func TestReadFile(t *testing.T) {
 
 	tool := tools.ReadFile(dir, tools.FileOptions{})
 
-	out, err := tool.Execute(context.Background(), `{"path":"hello.txt"}`)
+	out, err := tool.Execute(context.Background(), `{"path":"hello.txt","intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -37,7 +108,7 @@ func TestReadFileWithOffset(t *testing.T) {
 
 	tool := tools.ReadFile(dir, tools.FileOptions{})
 
-	out, err := tool.Execute(context.Background(), `{"path":"f.txt","offset":2,"limit":2}`)
+	out, err := tool.Execute(context.Background(), `{"path":"f.txt","offset":2,"limit":2,"intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -49,7 +120,7 @@ func TestReadFileWithOffset(t *testing.T) {
 func TestReadFileMissing(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.ReadFile(dir, tools.FileOptions{})
-	_, err := tool.Execute(context.Background(), `{"path":"nonexistent.txt"}`)
+	_, err := tool.Execute(context.Background(), `{"path":"nonexistent.txt","intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
@@ -58,7 +129,7 @@ func TestReadFileMissing(t *testing.T) {
 func TestReadFileEmptyPath(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.ReadFile(dir, tools.FileOptions{})
-	out, err := tool.Execute(context.Background(), `{}`)
+	out, err := tool.Execute(context.Background(), `{"intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error for empty path")
 	}
@@ -75,7 +146,7 @@ func TestReadFileDirectoryReturnsHelpfulError(t *testing.T) {
 		t.Fatal(err)
 	}
 	tool := tools.ReadFile(dir, tools.FileOptions{})
-	_, err := tool.Execute(context.Background(), fmt.Sprintf(`{"path":%q}`, subdir))
+	_, err := tool.Execute(context.Background(), fmt.Sprintf(`{"path":%q,"intent":"test"}`, subdir))
 	if err == nil {
 		t.Fatal("expected error when reading a directory")
 	}
@@ -88,7 +159,7 @@ func TestWriteFile(t *testing.T) {
 	dir := t.TempDir()
 	tool := tools.WriteFile(dir)
 
-	out, err := tool.Execute(context.Background(), `{"path":"sub/dir/out.txt","content":"written content"}`)
+	out, err := tool.Execute(context.Background(), `{"path":"sub/dir/out.txt","content":"written content","intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -113,7 +184,7 @@ func TestWriteFileOverwrite(t *testing.T) {
 	}
 
 	tool := tools.WriteFile(dir)
-	if _, err := tool.Execute(context.Background(), `{"path":"f.txt","content":"new"}`); err != nil {
+	if _, err := tool.Execute(context.Background(), `{"path":"f.txt","content":"new","intent":"test"}`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,7 +203,7 @@ func TestEditFileSingleEdit(t *testing.T) {
 	}
 
 	tool := tools.EditFile(dir)
-	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo bar","new_text":"BAZ"}]}`)
+	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo bar","new_text":"BAZ"}],"intent":"test"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -155,7 +226,7 @@ func TestEditFileReplaceAll(t *testing.T) {
 	}
 
 	tool := tools.EditFile(dir)
-	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo","new_text":"bar","replace_all":true}]}`)
+	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo","new_text":"bar","replace_all":true}],"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +245,7 @@ func TestEditFileAmbiguousMatchFails(t *testing.T) {
 	}
 
 	tool := tools.EditFile(dir)
-	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo","new_text":"bar"}]}`)
+	_, err := tool.Execute(context.Background(), `{"path":"f.txt","edits":[{"old_text":"foo","new_text":"bar"}],"intent":"test"}`)
 	if err == nil {
 		t.Fatal("expected error for ambiguous match (3 matches without replace_all)")
 	}
@@ -192,7 +263,7 @@ func TestEditFileMultipleEdits(t *testing.T) {
 
 	tool := tools.EditFile(dir)
 	_, err := tool.Execute(context.Background(),
-		`{"path":"f.txt","edits":[{"old_text":"a","new_text":"A"},{"old_text":"e","new_text":"E"}]}`)
+		`{"path":"f.txt","edits":[{"old_text":"a","new_text":"A"},{"old_text":"e","new_text":"E"}],"intent":"test"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
