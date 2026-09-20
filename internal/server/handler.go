@@ -68,7 +68,12 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	defer s.popConnCancel(req.ID)
 	defer runCancel()
 
-	events := s.agent.RunStream(runCtx, params.Prompt)
+	var events <-chan agent.Event
+	if history, ok := s.loadResumeHistory(sessionID); ok && len(history) > 0 {
+		events = s.agent.RunStreamResumed(runCtx, params.Prompt, history)
+	} else {
+		events = s.agent.RunStream(runCtx, params.Prompt)
+	}
 	defer func() {
 		if !s.sessionsHasHeader(store, sessionID) {
 			_ = os.Remove(store.Path())
@@ -102,6 +107,20 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 			slog.Debug("server: session write failed", "err", writeErr)
 		}
 	}
+}
+
+func (s *Server) loadResumeHistory(sessionID string) ([]llm.Message, bool) {
+	loaded, err := Load(DefaultPath(s.sessionsDir, sessionID))
+	if err != nil {
+		return nil, false
+	}
+	if len(loaded.Compactions) == 0 {
+		return nil, false
+	}
+	last := loaded.Compactions[len(loaded.Compactions)-1]
+	return []llm.Message{
+		{Role: "assistant", Content: "Previous conversation summary:\n" + last.Summary},
+	}, true
 }
 
 func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
