@@ -7,9 +7,9 @@ import (
 )
 
 const IntentField = "intent"
-const IntentDescription = "Why you are calling this tool. One short sentence that describes the goal."
+const IntentDescription = "Required short label shown in the UI: why this call is being made."
 const AcceptLargeOutputField = "accept_large_output"
-const AcceptLargeOutputDescription = "Set true to receive oversized tool output even when it exceeds the context-budget guard. Off by default."
+const AcceptLargeOutputDescription = "Default false; set true only when accepting the token cost of a withheld result."
 
 type intentArgs struct {
 	Intent string `json:"intent"`
