@@ -106,14 +106,9 @@ func loadAgent() *agent.Agent {
 			SupportsStreaming: true,
 			SupportsReasoning: true,
 		})
-	ag.WithTool(tools.ReadFile(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.WriteFile(cwd))
-	ag.WithTool(tools.EditFile(cwd))
-	ag.WithTool(tools.Bash(cwd, tools.BashOptions{}))
-	ag.WithTool(tools.Grep(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.Find(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.Ls(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.InvalidTool())
+	for _, t := range tools.All(cwd) {
+		ag.WithTool(t)
+	}
 	ag.SetSystemPrompts(`You are a coding assistant that operates a local repository through file and shell tools.
 
 Tool usage rules:
@@ -131,14 +126,6 @@ Planning rules:
 - Prefer minimal, focused tool calls over broad exploration.
 - Avoid running the same command twice — its output is already in your history.
 - Stop and report to the user when the task is done, rather than continuing to explore.`)
-
-	ag.WithTool(tools.ReadFile(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.WriteFile(cwd))
-	ag.WithTool(tools.EditFile(cwd))
-	ag.WithTool(tools.Bash(cwd, tools.BashOptions{}))
-	ag.WithTool(tools.Grep(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.Find(cwd, tools.FileOptions{}))
-	ag.WithTool(tools.Ls(cwd, tools.FileOptions{}))
 
 	return ag
 }
