@@ -15,6 +15,8 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
+const InvalidToolName = "invalid"
+
 type EventCategory int
 
 const (
