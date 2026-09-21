@@ -38,7 +38,7 @@ func TestParseCommandRejectsNonSlash(t *testing.T) {
 
 func TestRegistryHasEveryBuiltin(t *testing.T) {
 	specs := tui.AllCommandSpecsForTest()
-	want := []string{"quit", "help", "new", "tools", "resume"}
+	want := []string{"quit", "help", "new", "resume"}
 	have := map[string]bool{}
 	for _, s := range specs {
 		have[s.Name] = true
@@ -46,6 +46,20 @@ func TestRegistryHasEveryBuiltin(t *testing.T) {
 	for _, w := range want {
 		if !have[w] {
 			t.Errorf("registry missing %q", w)
+		}
+	}
+}
+
+func TestRegistryHasNoOtherCommands(t *testing.T) {
+	specs := tui.AllCommandSpecsForTest()
+	want := []string{"quit", "help", "new", "resume"}
+	have := map[string]bool{}
+	for _, w := range want {
+		have[w] = true
+	}
+	for _, s := range specs {
+		if !have[s.Name] {
+			t.Errorf("registry has extra command %q", s.Name)
 		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/vanpiyp/awp/internal/agent/tools"
 	client_sdk "github.com/vanpiyp/awp/internal/client-sdk"
 )
 
@@ -43,15 +42,6 @@ var registry = []commandSpec{
 		Category:    "session",
 		Run: func(m *Model, _ string) (bool, tea.Cmd) {
 			m.chat.reset()
-			return false, nil
-		},
-	},
-	{
-		Name:        "tools",
-		Description: "list available tools",
-		Category:    "help",
-		Run: func(m *Model, _ string) (bool, tea.Cmd) {
-			m.cmdTools()
 			return false, nil
 		},
 	},
@@ -135,25 +125,6 @@ func (m *Model) executeCommand(text string) (quit bool, cmd tea.Cmd) {
 func (m *Model) cmdHelp() {
 	m.showHelp = true
 }
-
-func (m *Model) cmdTools() {
-	all := tools.All("")
-	lines := []string{systemPrefix.Render(" available tools:"), ""}
-	for _, t := range all {
-		lines = append(lines, "  "+toolName.Render(padName(t.Name))+helpFooter.Render(t.Description))
-	}
-	m.chat.appendSystem(strings.Join(lines, "\n"))
-}
-
-func padName(name string) string {
-	const pad = 10
-	if len(name) >= pad {
-		return name + " "
-	}
-	return name + strings.Repeat(" ", pad-len(name))
-}
-
-
 
 type ParsedCommand struct {
 	Name string
