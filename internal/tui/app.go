@@ -171,6 +171,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 				break
 			}
+			if m.autocomplete.visible {
+				m.autocomplete.hide()
+				m.input.Reset()
+				break
+			}
 			if m.state == stateStreaming {
 				m.cancel()
 				break
@@ -293,6 +298,10 @@ func (m *Model) View() tea.View {
 	} else {
 		footer = m.help.ShortHelpView(m.keys.ShortHelp())
 	}
+	footerLines := 1
+	if footer == "" {
+		footerLines = 0
+	}
 
 	if m.showHelp {
 		helpText := systemPrefix.Render(" help") + "\n" +
@@ -304,11 +313,37 @@ func (m *Model) View() tea.View {
 		return v
 	}
 
-	body := m.chat.View()
-	lines := []string{header, "", body, "", inputBox, "", footer}
+	popup := ""
 	if m.autocomplete.visible {
-		lines = append(lines, "", m.autocomplete.View())
+		popup = m.autocomplete.View()
 	}
+	popupLineCount := 0
+	if popup != "" {
+		popupLineCount = strings.Count(popup, "\n") + 1
+	}
+
+	body := m.chat.View()
+	bodyLines := strings.Split(body, "\n")
+
+	fixedLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
+	availableForBody := m.height - fixedLines - popupLineCount
+	if availableForBody < 1 {
+		availableForBody = 1
+	}
+	if len(bodyLines) > availableForBody {
+		bodyLines = bodyLines[:availableForBody]
+	}
+	if len(bodyLines) < availableForBody {
+		padding := make([]string, availableForBody-len(bodyLines))
+		bodyLines = append(bodyLines, padding...)
+	}
+
+	lines := []string{header, "", strings.Join(bodyLines, "\n")}
+	if popup != "" {
+		lines = append(lines, popup)
+	}
+	lines = append(lines, "", inputBox, "", footer)
+
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -324,12 +359,7 @@ func (m *Model) layout() {
 		footerLines = len(strings.Split(m.help.FullHelpView(m.keys.FullHelp()), "\n"))
 	}
 	staticLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
-	popupLines := 0
-	if m.autocomplete.visible {
-		popupLines = strings.Count(m.autocomplete.View(), "\n") + 1 + 1
-	}
-	reservedLines := staticLines + popupLines
-	bodyHeight := m.height - reservedLines
+	bodyHeight := m.height - staticLines
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
