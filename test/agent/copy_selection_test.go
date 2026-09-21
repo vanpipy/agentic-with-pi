@@ -100,3 +100,65 @@ func TestExtractSelectionTextNewlinesSkipsAnsi(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "alpha")
 	}
 }
+
+func TestDragEdgeForCoordTopZone(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	for i := 0; i < 6; i++ {
+		m.SubmitForTest("msg")
+	}
+	m.SetSizeForTest(80, 2)
+	m.BeginSelectionForTest(5, 0)
+	m.ExtendSelectionForTest(5, 1)
+	if edge := m.DragEdgeForCoordForTest(0); edge != "top" {
+		t.Errorf("top row should be edge=top, got %q (atTop=%v atBottom=%v)",
+			edge, m.AtTopForTest(), m.AtBottomForTest())
+	}
+}
+
+func TestDragEdgeForCoordBottomZone(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	for i := 0; i < 6; i++ {
+		m.SubmitForTest("msg")
+	}
+	m.SetSizeForTest(80, 2)
+	m.ScrollUpForTest(2)
+	m.BeginSelectionForTest(0, 0)
+	m.ExtendSelectionForTest(0, 1)
+	if edge := m.DragEdgeForCoordForTest(1); edge != "bottom" {
+		t.Errorf("bottom row should be edge=bottom, got %q", edge)
+	}
+}
+
+func TestDragEdgeForCoordMiddleIsNone(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	m.SubmitForTest("a")
+	m.SetSizeForTest(80, 10)
+	m.BeginSelectionForTest(0, 0)
+	m.ExtendSelectionForTest(0, 1)
+	if edge := m.DragEdgeForCoordForTest(5); edge != "none" {
+		t.Errorf("middle row should be edge=none, got %q", edge)
+	}
+}
+
+func TestSelectAll(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	m.SubmitForTest("first")
+	m.SubmitForTest("second")
+	m.SubmitForTest("third")
+	m.SetSizeForTest(80, 10)
+	m.SelectAllForTest()
+	got := m.EndSelectionForTest()
+	want := "first\nsecond\nthird"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestHitTestForDragClampsToLastLine(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	m.SubmitForTest("alpha")
+	msgIdx, _ := m.HitTestForDragForTest(0, 999)
+	if msgIdx != 0 {
+		t.Errorf("overshoot y=999 should clamp to last msg idx=0, got %d", msgIdx)
+	}
+}

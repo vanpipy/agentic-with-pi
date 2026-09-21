@@ -14,19 +14,20 @@ import (
 )
 
 type chatModel struct {
-	viewport    viewport.Model
-	messages     []chatMsg
-	streaming    strings.Builder
-	reasoning    strings.Builder
-	width        int
-	height       int
-	following    bool
-	promptNum    int
-	selActive    bool
-	selAnchorMsg int
-	selAnchorCol int
-	selEndMsg    int
-	selEndCol    int
+	viewport                  viewport.Model
+	messages                   []chatMsg
+	streaming                  strings.Builder
+	reasoning                  strings.Builder
+	width                      int
+	height                     int
+	following                  bool
+	promptNum                  int
+	selActive                  bool
+	selAnchorMsg               int
+	selAnchorCol               int
+	selEndMsg                  int
+	selEndCol                  int
+	dragEdgeFromLastSelection  dragEdge
 }
 
 func newChatModel() *chatModel {
@@ -113,36 +114,151 @@ func (c *chatModel) CancelSelection() {
 func (c *chatModel) IsSelecting() bool { return c.selActive }
 
 func (c *chatModel) HitTest(x, y int) (msgIdx, col int) {
+	return c.hitTestInternal(x, y, false)
+}
+
+func (c *chatModel) HitTestForDrag(x, y int) (msgIdx, col int) {
+	return c.hitTestInternal(x, y, true)
+}
+
+func (c *chatModel) hitTestInternal(x, y int, clampToEdges bool) (msgIdx, col int) {
 	if x < 0 || y < 0 {
 		return -1, 0
+	}
+	layoutCache := func(role role, promptNum int) int {
+		l := roleLayoutFor(role)
+		return lipgloss.Width(glyphPrefix(l, role, promptNum))
 	}
 	line := y
 	for idx, m := range c.messages {
 		msgLines := renderMsg(m, c.viewport.Width())
 		if line < len(msgLines) {
-			bodyCol := 0
-			if line == 0 {
-				layout := roleLayoutFor(m.role)
-				glyph := glyphPrefix(layout, m.role, m.promptNum)
-				glyphWidth := lipgloss.Width(glyph)
-				bodyCol = x - glyphWidth
-				if bodyCol < 0 {
-					bodyCol = 0
-				}
-			} else {
-				layout := roleLayoutFor(m.role)
-				glyph := glyphPrefix(layout, m.role, m.promptNum)
-				glyphWidth := lipgloss.Width(glyph)
-				bodyCol = x - glyphWidth
-				if bodyCol < 0 {
-					bodyCol = 0
-				}
+			bodyCol := x - layoutCache(m.role, m.promptNum)
+			if bodyCol < 0 {
+				bodyCol = 0
+			}
+			width := lipgloss.Width(msgLines[line])
+			if bodyCol > width {
+				bodyCol = width
 			}
 			return idx, bodyCol
 		}
 		line -= len(msgLines)
 	}
+	if clampToEdges && len(c.messages) > 0 {
+		last := len(c.messages) - 1
+		m := c.messages[last]
+		msgLines := renderMsg(m, c.viewport.Width())
+		if len(msgLines) > 0 {
+			bodyCol := x - layoutCache(m.role, m.promptNum)
+			if bodyCol < 0 {
+				bodyCol = 0
+			}
+			width := lipgloss.Width(msgLines[len(msgLines)-1])
+			if bodyCol > width {
+				bodyCol = width
+			}
+			return last, bodyCol
+		}
+	}
 	return -1, 0
+}
+
+type dragEdge int
+
+const (
+	edgeNone dragEdge = iota
+	edgeTop
+	edgeBottom
+)
+
+func (c *chatModel) DragEdgeForCoord(y int) dragEdge {
+	if !c.selActive {
+		return edgeNone
+	}
+	h := c.viewport.Height()
+	if h <= 0 {
+		return edgeNone
+	}
+	zone := edgeZoneRows(h)
+	if y < zone && !c.AtTop() {
+		return edgeTop
+	}
+	if y >= h-zone && !c.AtBottom() {
+		return edgeBottom
+	}
+	return edgeNone
+}
+
+func edgeZoneRows(height int) int {
+	switch {
+	case height <= 4:
+		return 1
+	case height <= 11:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func (c *chatModel) ScrollByEdge(edge dragEdge) {
+	switch edge {
+	case edgeTop:
+		c.ScrollUp(1)
+	case edgeBottom:
+		c.ScrollDown(1)
+	}
+}
+
+func (c *chatModel) AdvanceEdgeScroll() {
+	if !c.selActive {
+		return
+	}
+	startMsg, _, _, _, _ := c.selectionRange()
+	edge := c.dragEdgeFromLastSelection
+	switch edge {
+	case edgeTop:
+		c.ScrollUp(1)
+		if startMsg > 0 {
+			c.ExtendSelection(startMsg-1, 0)
+		}
+	case edgeBottom:
+		c.ScrollDown(1)
+		c.ExtendSelection(startMsg, c.viewport.Width())
+	}
+}
+
+func (c *chatModel) AtTop() bool {
+	return c.viewport.AtTop()
+}
+
+func (c *chatModel) AtBottom() bool {
+	return c.viewport.AtBottom()
+}
+func (c *chatModel) dragEdge() dragEdge {
+	return c.dragEdgeFromLastSelection
+}
+
+func (c *chatModel) SelectAll() {
+	if len(c.messages) == 0 {
+		return
+	}
+	c.selActive = true
+	c.selAnchorMsg = 0
+	c.selAnchorCol = 0
+	c.selEndMsg = len(c.messages) - 1
+	last := c.messages[len(c.messages)-1]
+	msgLines := renderMsg(last, c.viewport.Width())
+	lastLineWidth := 0
+	if len(msgLines) > 0 {
+		lastLineWidth = lipgloss.Width(msgLines[len(msgLines)-1])
+	}
+	layout := roleLayoutFor(last.role)
+	c.selEndCol = lastLineWidth - lipgloss.Width(glyphPrefix(layout, last.role, last.promptNum))
+	if c.selEndCol < 0 {
+		c.selEndCol = 0
+	}
+	c.refresh()
 }
 
 func (c *chatModel) ExtractSelectionText() string {
@@ -571,12 +687,12 @@ func (c *chatModel) lineCount(g chatMsg) int {
 	return len(renderMsg(g, c.viewport.Width()))
 }
 
-func (c *chatModel) AtBottom() bool {
-	return c.viewport.AtBottom()
-}
-
 func (c *chatModel) IsFollowing() bool {
 	return c.following
+}
+
+func (c *chatModel) DragEdgeState() dragEdge {
+	return c.dragEdgeFromLastSelection
 }
 
 func (c *chatModel) submit(text string) {
@@ -761,8 +877,52 @@ func (t ChatModelT) HitTestForTest(x, y int) (msgIdx, col int) {
 	return t.model.HitTest(x, y)
 }
 
+func (t ChatModelT) HitTestForDragForTest(x, y int) (msgIdx, col int) {
+	return t.model.HitTestForDrag(x, y)
+}
+
+func (t ChatModelT) SelectAllForTest() {
+	t.model.SelectAll()
+}
+
+func (t ChatModelT) DragEdgeForCoordForTest(y int) string {
+	e := t.model.DragEdgeForCoord(y)
+	switch e {
+	case edgeTop:
+		return "top"
+	case edgeBottom:
+		return "bottom"
+	default:
+		return "none"
+	}
+}
+
+func (t ChatModelT) SubmitForTest2(text string) (chatMsg, bool) {
+	return t.model.submitTest(text)
+}
+
+func (c *chatModel) submitTest(text string) (chatMsg, bool) {
+	c.submit(text)
+	if len(c.messages) == 0 {
+		return chatMsg{}, false
+	}
+	return c.messages[len(c.messages)-1], true
+}
+
 func (t ChatModelT) SetSizeForTest(w, h int) {
 	t.model.SetSize(w, h)
+}
+
+func (t ChatModelT) AtTopForTest() bool {
+	return t.model.AtTop()
+}
+
+func (t ChatModelT) AtBottomForTest() bool {
+	return t.model.AtBottom()
+}
+
+func (t ChatModelT) ScrollUpForTest(n int) {
+	t.model.ScrollUp(n)
 }
 
 func NewSpinnerForTest() SpinnerT {
