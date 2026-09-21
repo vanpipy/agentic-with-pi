@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 	"charm.land/bubbles/v2/spinner"
@@ -119,7 +120,25 @@ func (c *chatModel) HitTest(x, y int) (msgIdx, col int) {
 	for idx, m := range c.messages {
 		msgLines := renderMsg(m, c.viewport.Width())
 		if line < len(msgLines) {
-			return idx, x
+			bodyCol := 0
+			if line == 0 {
+				layout := roleLayoutFor(m.role)
+				glyph := glyphPrefix(layout, m.role, m.promptNum)
+				glyphWidth := lipgloss.Width(glyph)
+				bodyCol = x - glyphWidth
+				if bodyCol < 0 {
+					bodyCol = 0
+				}
+			} else {
+				layout := roleLayoutFor(m.role)
+				glyph := glyphPrefix(layout, m.role, m.promptNum)
+				glyphWidth := lipgloss.Width(glyph)
+				bodyCol = x - glyphWidth
+				if bodyCol < 0 {
+					bodyCol = 0
+				}
+			}
+			return idx, bodyCol
 		}
 		line -= len(msgLines)
 	}
@@ -138,22 +157,28 @@ func (c *chatModel) ExtractSelectionText() string {
 	for idx := startMsg; idx <= endMsg && idx < len(c.messages); idx++ {
 		msg := c.messages[idx]
 		msgLines := renderMsg(msg, c.viewport.Width())
-		for _, line := range msgLines {
-			ls := 0
+		layout := roleLayoutFor(msg.role)
+		glyph := glyphPrefix(layout, msg.role, msg.promptNum)
+		glyphWidth := lipgloss.Width(glyph)
+		for lineIdx, line := range msgLines {
+			ls := glyphWidth
 			le := textWidth(line)
 			if idx == startMsg {
-				ls = startCol
+				ls = glyphWidth + startCol
 			}
 			if idx == endMsg {
-				le = endCol
+				le = glyphWidth + endCol
 			}
 			if ls >= le {
 				continue
 			}
 			prefix := truncateToCol(line, ls)
-			leTrunc := truncateToCol(line, le)
-			mid := leTrunc[len(prefix):]
-			parts = append(parts, mid)
+			fullEnd := truncateToCol(line, le)
+			mid := fullEnd[len(prefix):]
+			if lineIdx == 0 {
+				mid = ansi.Strip(mid)
+			}
+			parts = append(parts, strings.TrimRight(mid, " "))
 		}
 	}
 	return strings.Join(parts, "\n")
@@ -177,7 +202,7 @@ func (c *chatModel) buildContent() string {
 		if c.selActive {
 			startMsg, startCol, endMsg, endCol, _ := c.selectionRange()
 			if idx >= startMsg && idx <= endMsg {
-				msgLines = applyHighlight(msgLines, idx, startMsg, startCol, endMsg, endCol)
+				msgLines = applyHighlight(msgLines, idx, m, startMsg, startCol, endMsg, endCol)
 			}
 		}
 		lines = append(lines, msgLines...)
@@ -191,16 +216,19 @@ func (c *chatModel) buildContent() string {
 	return strings.Join(lines, "\n")
 }
 
-func applyHighlight(msgLines []string, idx, startMsg, startCol, endMsg, endCol int) []string {
+func applyHighlight(msgLines []string, idx int, m chatMsg, startMsg, startCol, endMsg, endCol int) []string {
 	out := make([]string, len(msgLines))
+	layout := roleLayoutFor(m.role)
+	glyph := glyphPrefix(layout, m.role, m.promptNum)
+	glyphWidth := lipgloss.Width(glyph)
 	for i, line := range msgLines {
-		lineStartCol := 0
+		lineStartCol := glyphWidth
 		lineEndCol := textWidth(line)
 		if idx == startMsg {
-			lineStartCol = startCol
+			lineStartCol += startCol
 		}
 		if idx == endMsg {
-			lineEndCol = endCol
+			lineEndCol = glyphWidth + endCol
 		}
 		if lineStartCol >= lineEndCol {
 			out[i] = line
@@ -217,7 +245,9 @@ func applyHighlight(msgLines []string, idx, startMsg, startCol, endMsg, endCol i
 		}
 		suffix := ""
 		if lineEndCol < textWidth(line) {
-			suffix = ansi.Strip(truncateToCol(line, lineEndCol))[len(ansi.Strip(prefix)):]
+			fullEnd := truncateToCol(line, lineEndCol)
+			midEnd := fullEnd[len(prefix):]
+			suffix = line[len(prefix)+ansi.StringWidth(midEnd):]
 		}
 		out[i] = prefix + selectionStyle.Render(mid) + suffix
 	}
@@ -231,13 +261,29 @@ func textWidth(s string) int {
 func truncateToCol(s string, col int) string {
 	w := 0
 	lastBoundary := 0
-	for i := range s {
-		rw := ansi.StringWidth(string(s[i]))
+	i := 0
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == 0x1b {
+			escEnd := i + size
+			for escEnd < len(s) {
+				c := s[escEnd]
+				if c == 'm' || c == 'K' || c == 'H' || c == 'J' || c == 'A' || c == 'B' || c == 'C' || c == 'D' || c == '0' {
+					escEnd++
+					break
+				}
+				escEnd++
+			}
+			i = escEnd
+			continue
+		}
+		rw := ansi.StringWidth(string(r))
 		if w+rw > col {
 			return s[:lastBoundary]
 		}
 		w += rw
-		lastBoundary = i + len(string(s[i]))
+		i += size
+		lastBoundary = i
 		if w >= col {
 			return s[:lastBoundary]
 		}
@@ -697,6 +743,22 @@ func (t ChatModelT) PromptNumAtViewportTopForTest() int {
 
 func (t ChatModelT) JumpToPromptForTest(direction int) {
 	t.model.JumpToPrompt(direction)
+}
+
+func (t ChatModelT) BeginSelectionForTest(msgIdx, col int) {
+	t.model.BeginSelection(msgIdx, col)
+}
+
+func (t ChatModelT) ExtendSelectionForTest(msgIdx, col int) {
+	t.model.ExtendSelection(msgIdx, col)
+}
+
+func (t ChatModelT) EndSelectionForTest() string {
+	return t.model.EndSelection()
+}
+
+func (t ChatModelT) HitTestForTest(x, y int) (msgIdx, col int) {
+	return t.model.HitTest(x, y)
 }
 
 func (t ChatModelT) SetSizeForTest(w, h int) {
