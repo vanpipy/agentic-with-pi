@@ -50,7 +50,7 @@ type autocompleteModel struct {
 func newAutocompleteModel() *autocompleteModel {
 	all := commandsToItems()
 	const maxWidth = 80
-	const maxHeight = 6
+	const maxHeight = 5
 	delegate := commandDelegate{}
 	l := list.New(toCommandItems(all), delegate, maxWidth, maxHeight)
 	l.SetShowTitle(false)
@@ -83,15 +83,18 @@ func (a *autocompleteModel) setQuery(text string) {
 	}
 	body := strings.TrimPrefix(text, "/")
 	parts := strings.SplitN(body, " ", 2)
-	query := parts[0]
-	if query == "" {
+	if len(parts) > 1 {
 		a.visible = false
 		return
 	}
-	a.query = query
-	a.list.SetFilterText(query)
+	newQuery := parts[0]
+	if newQuery == a.query && a.visible {
+		return
+	}
+	a.query = newQuery
+	a.list.SetFilterText(a.query)
 	visible := a.list.VisibleItems()
-	a.visible = len(visible) > 0 && len(parts) == 1
+	a.visible = len(visible) > 0
 	if a.visible && a.list.Index() >= len(visible) {
 		a.list.Select(0)
 	}
