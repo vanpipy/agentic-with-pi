@@ -6,17 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/vanpiyp/awp/internal/agent"
 )
-
-type BashOptions struct {
-	Shell         string
-	CommandPrefix string
-	TimeoutSec    int
-}
 
 func Bash(cwd string, opts BashOptions) agent.Tool {
 	shell := opts.Shell
@@ -50,7 +43,7 @@ func Bash(cwd string, opts BashOptions) agent.Tool {
 			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 				return "", fmt.Errorf("invalid args: %w", err)
 			}
-			if strings.TrimSpace(args.Command) == "" {
+			if trimSpace(args.Command) == "" {
 				return "", fmt.Errorf("command is required")
 			}
 			timeout := args.Timeout
