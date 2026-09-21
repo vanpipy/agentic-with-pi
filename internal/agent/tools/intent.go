@@ -67,9 +67,3 @@ func requireIntentOrError(argsJSON string) error {
 	}
 	return nil
 }
-
-func intentFromArgs(argsJSON string) string {
-	var args intentArgs
-	_ = json.Unmarshal([]byte(argsJSON), &args)
-	return args.Intent
-}
