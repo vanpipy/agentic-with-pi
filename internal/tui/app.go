@@ -155,6 +155,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd, _ := m.chat.Update(msg)
 		cmds = append(cmds, cmd)
 
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft {
+			msgIdx, col := m.chat.HitTest(msg.X, msg.Y)
+			if msgIdx >= 0 {
+				m.chat.BeginSelection(msgIdx, col)
+			}
+		}
+
+	case tea.MouseMsg:
+		ms := msg.Mouse()
+		if ms.Button == tea.MouseLeft {
+			msgIdx, col := m.chat.HitTest(ms.X, ms.Y)
+			if msgIdx >= 0 && m.chat.IsSelecting() {
+				m.chat.ExtendSelection(msgIdx, col)
+			}
+		}
+
+	case tea.MouseReleaseMsg:
+		if m.chat.IsSelecting() {
+			text := m.chat.EndSelection()
+			if text != "" {
+				if err := CopyToClipboard(text); err != nil {
+					m.chat.appendSystem(systemPrefix.Render(" copy failed: ") + helpFooter.Render(err.Error()))
+				} else {
+					m.chat.appendSystem(systemPrefix.Render(" copied ") + helpFooter.Render("(" + fmt.Sprintf("%d chars", len(text)) + ")"))
+				}
+			} else {
+				m.chat.CancelSelection()
+			}
+		}
+
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":

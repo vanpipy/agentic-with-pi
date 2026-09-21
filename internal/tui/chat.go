@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
@@ -12,14 +13,19 @@ import (
 )
 
 type chatModel struct {
-	viewport viewport.Model
-	messages  []chatMsg
-	streaming strings.Builder
-	reasoning strings.Builder
-	width     int
-	height    int
-	following bool
-	promptNum int
+	viewport    viewport.Model
+	messages     []chatMsg
+	streaming    strings.Builder
+	reasoning    strings.Builder
+	width        int
+	height       int
+	following    bool
+	promptNum    int
+	selActive    bool
+	selAnchorMsg int
+	selAnchorCol int
+	selEndMsg    int
+	selEndCol    int
 }
 
 func newChatModel() *chatModel {
@@ -58,10 +64,123 @@ func (c *chatModel) refresh() {
 	}
 }
 
+func (c *chatModel) BeginSelection(msgIdx, col int) {
+	c.selActive = true
+	c.selAnchorMsg = msgIdx
+	c.selAnchorCol = col
+	c.selEndMsg = msgIdx
+	c.selEndCol = col
+	c.refresh()
+}
+
+func (c *chatModel) ExtendSelection(msgIdx, col int) {
+	if !c.selActive {
+		c.BeginSelection(msgIdx, col)
+		return
+	}
+	c.selEndMsg = msgIdx
+	c.selEndCol = col
+	c.refresh()
+}
+
+func (c *chatModel) EndSelection() string {
+	if !c.selActive {
+		return ""
+	}
+	text := c.ExtractSelectionText()
+	c.selActive = false
+	c.selAnchorMsg = 0
+	c.selAnchorCol = 0
+	c.selEndMsg = 0
+	c.selEndCol = 0
+	c.refresh()
+	return text
+}
+
+func (c *chatModel) CancelSelection() {
+	if !c.selActive {
+		return
+	}
+	c.selActive = false
+	c.selAnchorMsg = 0
+	c.selAnchorCol = 0
+	c.selEndMsg = 0
+	c.selEndCol = 0
+	c.refresh()
+}
+
+func (c *chatModel) IsSelecting() bool { return c.selActive }
+
+func (c *chatModel) HitTest(x, y int) (msgIdx, col int) {
+	if x < 0 || y < 0 {
+		return -1, 0
+	}
+	line := y
+	for idx, m := range c.messages {
+		msgLines := renderMsg(m, c.viewport.Width())
+		if line < len(msgLines) {
+			return idx, x
+		}
+		line -= len(msgLines)
+	}
+	return -1, 0
+}
+
+func (c *chatModel) ExtractSelectionText() string {
+	if !c.selActive {
+		return ""
+	}
+	startMsg, startCol, endMsg, endCol, _ := c.selectionRange()
+	if startMsg == endMsg && startCol == endCol {
+		return ""
+	}
+	var parts []string
+	for idx := startMsg; idx <= endMsg && idx < len(c.messages); idx++ {
+		msg := c.messages[idx]
+		msgLines := renderMsg(msg, c.viewport.Width())
+		for _, line := range msgLines {
+			ls := 0
+			le := textWidth(line)
+			if idx == startMsg {
+				ls = startCol
+			}
+			if idx == endMsg {
+				le = endCol
+			}
+			if ls >= le {
+				continue
+			}
+			prefix := truncateToCol(line, ls)
+			leTrunc := truncateToCol(line, le)
+			mid := leTrunc[len(prefix):]
+			parts = append(parts, mid)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func (c *chatModel) selectionRange() (startMsg, startCol, endMsg, endCol int, ok bool) {
+	if !c.selActive {
+		return 0, 0, 0, 0, false
+	}
+	if c.selAnchorMsg < c.selEndMsg ||
+		(c.selAnchorMsg == c.selEndMsg && c.selAnchorCol <= c.selEndCol) {
+		return c.selAnchorMsg, c.selAnchorCol, c.selEndMsg, c.selEndCol, true
+	}
+	return c.selEndMsg, c.selEndCol, c.selAnchorMsg, c.selAnchorCol, true
+}
+
 func (c *chatModel) buildContent() string {
 	var lines []string
-	for _, m := range c.messages {
-		lines = append(lines, renderMsg(m, c.viewport.Width())...)
+	for idx, m := range c.messages {
+		msgLines := renderMsg(m, c.viewport.Width())
+		if c.selActive {
+			startMsg, startCol, endMsg, endCol, _ := c.selectionRange()
+			if idx >= startMsg && idx <= endMsg {
+				msgLines = applyHighlight(msgLines, idx, startMsg, startCol, endMsg, endCol)
+			}
+		}
+		lines = append(lines, msgLines...)
 	}
 	if c.reasoning.Len() > 0 {
 		lines = append(lines, renderThinking(c.reasoning.String(), c.viewport.Width(), false)...)
@@ -71,6 +190,62 @@ func (c *chatModel) buildContent() string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+func applyHighlight(msgLines []string, idx, startMsg, startCol, endMsg, endCol int) []string {
+	out := make([]string, len(msgLines))
+	for i, line := range msgLines {
+		lineStartCol := 0
+		lineEndCol := textWidth(line)
+		if idx == startMsg {
+			lineStartCol = startCol
+		}
+		if idx == endMsg {
+			lineEndCol = endCol
+		}
+		if lineStartCol >= lineEndCol {
+			out[i] = line
+			continue
+		}
+		left := truncateToCol(line, lineStartCol)
+		mid := truncateToCol(line, lineEndCol)
+		if idx == startMsg && i == 0 && len(left) > 0 {
+			mid = mid[len(left):]
+		}
+		prefix := ""
+		if lineStartCol > 0 {
+			prefix = truncateToCol(line, lineStartCol)
+		}
+		suffix := ""
+		if lineEndCol < textWidth(line) {
+			suffix = ansi.Strip(truncateToCol(line, lineEndCol))[len(ansi.Strip(prefix)):]
+		}
+		out[i] = prefix + selectionStyle.Render(mid) + suffix
+	}
+	return out
+}
+
+func textWidth(s string) int {
+	return ansi.StringWidth(s)
+}
+
+func truncateToCol(s string, col int) string {
+	w := 0
+	lastBoundary := 0
+	for i := range s {
+		rw := ansi.StringWidth(string(s[i]))
+		if w+rw > col {
+			return s[:lastBoundary]
+		}
+		w += rw
+		lastBoundary = i + len(string(s[i]))
+		if w >= col {
+			return s[:lastBoundary]
+		}
+	}
+	return s
+}
+
+var selectionStyle = lipgloss.NewStyle().Reverse(true)
 
 type roleLayout struct {
 	body  lipgloss.Style
@@ -237,36 +412,76 @@ func (c *chatModel) JumpToPrompt(direction int) {
 	if direction == 0 || len(c.messages) == 0 {
 		return
 	}
-	currentPrompt := c.promptNumAtViewportTop()
 	target := -1
+	lastUserIdx := -1
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].role == roleUser && c.messages[i].promptNum > 0 {
+			lastUserIdx = i
+			break
+		}
+	}
+	if lastUserIdx == -1 {
+		return
+	}
+
+	currentPrompt := c.promptNumAtViewportTop()
 	switch {
 	case direction > 0:
-		for i := len(c.messages) - 1; i >= 0; i-- {
-			m := c.messages[i]
-			if m.role != roleUser || m.promptNum == 0 {
-				continue
-			}
-			if m.promptNum < currentPrompt {
-				target = i
-				break
+		if c.following {
+			target = lastUserIdx
+			c.following = false
+		} else {
+			for i := lastUserIdx; i >= 0; i-- {
+				m := c.messages[i]
+				if m.role != roleUser || m.promptNum == 0 {
+					continue
+				}
+				if m.promptNum < currentPrompt {
+					target = i
+					break
+				}
 			}
 		}
 	case direction < 0:
-		for i, m := range c.messages {
-			if m.role != roleUser || m.promptNum == 0 {
-				continue
-			}
-			if m.promptNum > currentPrompt {
-				target = i
-				break
-			}
+		if !c.following {
+			return
+		}
+		target = lastUserIdx
+		if target == -1 {
+			c.GotoBottom()
+			return
 		}
 	}
 	if target == -1 {
 		return
 	}
-	c.viewport.SetYOffset(c.lineOffsetFor(target))
-	c.following = c.viewport.AtBottom()
+	wasFollowing := c.following
+	c.scrollToMessage(target)
+	if wasFollowing {
+		c.following = false
+	} else {
+		c.following = c.viewport.AtBottom()
+	}
+}
+
+func (c *chatModel) scrollToMessage(idx int) {
+	totalLines := 0
+	for _, m := range c.messages {
+		totalLines += c.lineCount(m)
+	}
+	height := c.viewport.Height()
+	if totalLines <= height {
+		return
+	}
+	maxOffset := totalLines - height
+	offset := 0
+	for i := 0; i < idx; i++ {
+		offset += c.lineCount(c.messages[i])
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	c.viewport.SetYOffset(offset)
 }
 
 func (c *chatModel) promptNumAtViewportTop() int {
@@ -294,6 +509,14 @@ func (c *chatModel) lineOffsetFor(idx int) int {
 	}
 	if offset > maxOffset {
 		offset = maxOffset
+	}
+	return offset
+}
+
+func (c *chatModel) scrollYOffsetFor(idx int) int {
+	offset := 0
+	for i := 0; i < idx; i++ {
+		offset += c.lineCount(c.messages[i])
 	}
 	return offset
 }
