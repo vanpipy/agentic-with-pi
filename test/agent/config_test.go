@@ -11,7 +11,7 @@ import (
 
 func TestLoadConfigReadsUserFields(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "config.yaml", "model: claude-3\nlog_path: /tmp/awp.log\n")
+	writeFile(t, dir, "config.yaml", "model: claude-3\n")
 	t.Setenv("AWP_HOME", dir)
 
 	cfg, err := agent.LoadConfig()
@@ -20,9 +20,6 @@ func TestLoadConfigReadsUserFields(t *testing.T) {
 	}
 	if cfg.Model != "claude-3" {
 		t.Errorf("Model = %q, want claude-3", cfg.Model)
-	}
-	if cfg.LogPath != "/tmp/awp.log" {
-		t.Errorf("LogPath = %q", cfg.LogPath)
 	}
 }
 
@@ -37,9 +34,6 @@ func TestLoadConfigEmptyFileUsesDefaults(t *testing.T) {
 	}
 	if cfg.Model != "MiniMax-M3" {
 		t.Errorf("Model = %q, want default MiniMax-M3", cfg.Model)
-	}
-	if cfg.LogPath != "" {
-		t.Errorf("LogPath = %q, want empty default", cfg.LogPath)
 	}
 }
 

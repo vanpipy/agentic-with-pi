@@ -85,10 +85,6 @@ func (a *Agent) WithSafetyNet(n int) *Agent {
 	return a
 }
 
-func (a *Agent) WithMaxTurns(n int) *Agent {
-	return a.WithSafetyNet(n)
-}
-
 func (a *Agent) WithModel(model llm.Model) *Agent {
 	a.Model = model
 	return a
@@ -114,19 +110,6 @@ func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 	return a
 }
 
-func (a *Agent) WithContextWindow(tokens int) *Agent {
-	a.Model.MaxContextTokens = tokens
-	return a
-}
-
-func (a *Agent) ContextWindow() int {
-	return a.Model.MaxContextTokens
-}
-
-func (a *Agent) SafetyNetLimit() int {
-	return a.SafetyNet
-}
-
 func (a *Agent) CompactionSettingsForTest() CompactionSettings {
 	return a.compaction
 }
@@ -145,10 +128,6 @@ func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 		a.loopWithMsgs(ctx, msgs, ch)
 	}()
 	return ch
-}
-
-func (a *Agent) RunStreamResumed(ctx context.Context, userMsg string, history []llm.Message) <-chan Event {
-	return a.runStreamResumedImpl(ctx, userMsg, history, nil)
 }
 
 func (a *Agent) RunStreamResumedWithSnapshot(ctx context.Context, userMsg string, history []llm.Message) (<-chan Event, <-chan []llm.Message) {

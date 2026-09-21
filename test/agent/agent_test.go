@@ -729,7 +729,7 @@ func TestAgentDefensiveMaxTurnsClamp(t *testing.T) {
 		chunksList[i] = repeat
 	}
 	core := &fakeCore{streamChunksList: chunksList}
-	ag := newTestAgent(core, "test-model").WithMaxTurns(0)
+	ag := newTestAgent(core, "test-model").WithSafetyNet(0)
 	ag.WithTool(agent.Tool{Name: "loop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
 	_, err := runAgentLastError(t, ag, "x")
 	if err == nil {
@@ -751,7 +751,7 @@ func TestAgentSafetyNetStopsLongLoop(t *testing.T) {
 		chunksList[i] = repeat
 	}
 	core := &fakeCore{streamChunksList: chunksList}
-	ag := newTestAgent(core, "test-model").WithMaxTurns(250)
+	ag := newTestAgent(core, "test-model").WithSafetyNet(250)
 	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
 
 	_, err := runAgentLastError(t, ag, "x")
@@ -915,7 +915,8 @@ func TestAgentRunStreamResumedStartsWithHistory(t *testing.T) {
 	}
 
 	var result string
-	for ev := range ag.RunStreamResumed(context.Background(), "next task", history) {
+	ch, _ := ag.RunStreamResumedWithSnapshot(context.Background(), "next task", history)
+	for ev := range ch {
 		if ev.Category == agent.EventFinalAnswer {
 			result = ev.Content
 		}

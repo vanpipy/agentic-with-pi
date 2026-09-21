@@ -70,7 +70,3 @@ func IsRunning(path string) bool {
 	conn.Close()
 	return true
 }
-
-func Cleanup(path string) error {
-	return os.Remove(path)
-}

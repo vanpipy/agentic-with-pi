@@ -8,12 +8,6 @@ import (
 	"github.com/vanpiyp/awp/internal/storage"
 )
 
-type ToolSpec struct {
-	Name        string         `mapstructure:"name"`
-	Description string         `mapstructure:"description"`
-	Parameters  map[string]any `mapstructure:"parameters"`
-}
-
 type CompactionSettings struct {
 	Enabled         bool
 	ReserveTokens   int
@@ -21,10 +15,7 @@ type CompactionSettings struct {
 }
 
 type Config struct {
-	Model   string
-	LogPath string
-
-	Tools []ToolSpec
+	Model string
 }
 
 func LoadConfig() (*Config, error) {
@@ -36,8 +27,6 @@ func LoadConfig() (*Config, error) {
 	v.AddConfigPath(storage.Home())
 
 	v.SetDefault("model", "MiniMax-M3")
-	v.SetDefault("log_path", "")
-	v.SetDefault("tools", []map[string]any{})
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
@@ -47,12 +36,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Model:   v.GetString("model"),
-		LogPath: v.GetString("log_path"),
-	}
-
-	if err := v.UnmarshalKey("tools", &cfg.Tools); err != nil {
-		return nil, fmt.Errorf("unmarshal tools: %w", err)
+		Model: v.GetString("model"),
 	}
 
 	return cfg, nil

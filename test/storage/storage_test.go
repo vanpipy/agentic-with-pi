@@ -159,47 +159,6 @@ func TestAtomicWriteFilePermission(t *testing.T) {
 	}
 }
 
-func TestWriteSecret(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permissions not applicable on windows")
-	}
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "secret.txt")
-
-	if err := storage.WriteSecret(path, []byte("api-key-here")); err != nil {
-		t.Fatal(err)
-	}
-
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != storage.PrivatePerm {
-		t.Errorf("perm = %v, want 0600", info.Mode().Perm())
-	}
-
-	got, _ := os.ReadFile(path)
-	if string(got) != "api-key-here" {
-		t.Errorf("content = %q", got)
-	}
-}
-
-func TestEnforceSecretPerm(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permissions not applicable on windows")
-	}
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "loose.txt")
-
-	os.WriteFile(path, []byte("data"), 0o644)
-
-	if err := storage.EnforceSecretPerm(path); err != nil {
-		t.Fatal(err)
-	}
-
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != storage.PrivatePerm {
-		t.Errorf("perm = %v, want 0600", info.Mode().Perm())
-	}
-}
-
 func TestEnsureDirsCreatesAll(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AWP_HOME", filepath.Join(tmp, "home"))
