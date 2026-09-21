@@ -41,10 +41,10 @@ func (d commandDelegate) Render(w io.Writer, m list.Model, index int, item list.
 }
 
 type autocompleteModel struct {
-	visible bool
-	query   string
-	list    list.Model
-	all     []commandItem
+	visible       bool
+	query         string
+	list          list.Model
+	all           []commandItem
 }
 
 func newAutocompleteModel() *autocompleteModel {
@@ -99,6 +99,9 @@ func (a *autocompleteModel) setQuery(text string) {
 
 func (a *autocompleteModel) hide() {
 	a.visible = false
+}
+
+func (a *autocompleteModel) SetSize(width, height int) {
 }
 
 func (a *autocompleteModel) next() {

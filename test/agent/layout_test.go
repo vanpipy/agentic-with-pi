@@ -96,6 +96,26 @@ func TestTextareaBodyShrinksAsInputGrows(t *testing.T) {
 	}
 }
 
+func TestAutocompletePopupReservesSpace(t *testing.T) {
+	for _, h := range []int{16, 20, 30} {
+		m := tui.NewModelForTest()
+		out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: h})
+		m = out.(*tui.Model)
+
+		for _, r := range "/ne" {
+			out, _ = m.Update(tea.KeyPressMsg{Text: string(r)})
+			m = out.(*tui.Model)
+		}
+
+		v := m.View()
+		plain := stripANSI(v.Content)
+		lines := strings.Split(plain, "\n")
+		if len(lines) != h {
+			t.Errorf("height=%d: View should be %d lines, got %d", h, h, len(lines))
+		}
+	}
+}
+
 func TestTextareaMultiLineShrinksBody(t *testing.T) {
 	m := tui.NewModelForTest()
 	out, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 30})

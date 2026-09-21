@@ -323,7 +323,12 @@ func (m *Model) layout() {
 	if m.showHelp {
 		footerLines = len(strings.Split(m.help.FullHelpView(m.keys.FullHelp()), "\n"))
 	}
-	reservedLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
+	staticLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
+	popupLines := 0
+	if m.autocomplete.visible {
+		popupLines = strings.Count(m.autocomplete.View(), "\n") + 1 + 1
+	}
+	reservedLines := staticLines + popupLines
 	bodyHeight := m.height - reservedLines
 	if bodyHeight < 1 {
 		bodyHeight = 1
@@ -384,6 +389,8 @@ func (m *Model) StateForTest() State { return m.state }
 func (m *Model) SetStateForTest(s State) { m.state = s }
 
 func (m *Model) InputValueForTest() string { return m.input.Value() }
+
+func (m *Model) AutocompleteViewForTest() string { return m.autocomplete.View() }
 
 func (m *Model) shutdown() {
 	if m.conn != nil {
