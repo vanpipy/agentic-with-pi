@@ -38,7 +38,7 @@ func TestParseCommandRejectsNonSlash(t *testing.T) {
 
 func TestRegistryHasEveryBuiltin(t *testing.T) {
 	specs := tui.AllCommandSpecsForTest()
-	want := []string{"quit", "help", "new", "clear", "tools", "resume"}
+	want := []string{"quit", "help", "new", "tools", "resume"}
 	have := map[string]bool{}
 	for _, s := range specs {
 		have[s.Name] = true

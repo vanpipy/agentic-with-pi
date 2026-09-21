@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/vanpiyp/awp/internal/agent/tools"
 	client_sdk "github.com/vanpiyp/awp/internal/client-sdk"
 )
 
@@ -46,15 +47,6 @@ var registry = []commandSpec{
 		},
 	},
 	{
-		Name:        "clear",
-		Description: "clear chat history",
-		Category:    "session",
-		Run: func(m *Model, _ string) (bool, tea.Cmd) {
-			m.chat.reset()
-			return false, nil
-		},
-	},
-	{
 		Name:        "tools",
 		Description: "list available tools",
 		Category:    "help",
@@ -88,13 +80,8 @@ func (m *Model) startResume(sessionID string) tea.Cmd {
 	m.session = sessionID
 	m.chat.reset()
 	m.state = stateStreaming
-	return func() tea.Msg {
-		ev, ok := <-events
-		if !ok {
-			return streamEventMsg{done: true}
-		}
-		return streamEventMsg{ev: ev}
-	}
+	m.events = events
+	return m.readNextEvent()
 }
 
 func findCommand(name string) (commandSpec, bool) {
@@ -150,19 +137,23 @@ func (m *Model) cmdHelp() {
 }
 
 func (m *Model) cmdTools() {
-	lines := []string{
-		systemPrefix.Render(" available tools:"),
-		"",
-		"  " + toolName.Render("read       ") + helpFooter.Render("read files"),
-		"  " + toolName.Render("write      ") + helpFooter.Render("write files"),
-		"  " + toolName.Render("edit       ") + helpFooter.Render("edit files"),
-		"  " + toolName.Render("bash       ") + helpFooter.Render("run shell commands"),
-		"  " + toolName.Render("grep       ") + helpFooter.Render("search file contents"),
-		"  " + toolName.Render("find       ") + helpFooter.Render("find files by name"),
-		"  " + toolName.Render("ls         ") + helpFooter.Render("list directory"),
+	all := tools.All("")
+	lines := []string{systemPrefix.Render(" available tools:"), ""}
+	for _, t := range all {
+		lines = append(lines, "  "+toolName.Render(padName(t.Name))+helpFooter.Render(t.Description))
 	}
 	m.chat.appendSystem(strings.Join(lines, "\n"))
 }
+
+func padName(name string) string {
+	const pad = 10
+	if len(name) >= pad {
+		return name + " "
+	}
+	return name + strings.Repeat(" ", pad-len(name))
+}
+
+
 
 type ParsedCommand struct {
 	Name string
