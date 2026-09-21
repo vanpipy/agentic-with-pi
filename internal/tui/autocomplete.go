@@ -84,22 +84,26 @@ func (a *autocompleteModel) setQuery(text string) {
 	body := strings.TrimPrefix(text, "/")
 	parts := strings.SplitN(body, " ", 2)
 	query := parts[0]
-	a.query = query
 	if query == "" {
-		a.list.SetItems(toCommandItems(a.all))
-	} else {
-		matched := []commandItem{}
-		for _, c := range a.all {
-			if strings.HasPrefix(c.title, query) {
-				matched = append(matched, c)
-			}
-		}
-		a.list.SetItems(toCommandItems(matched))
+		a.visible = false
+		return
 	}
+	a.query = query
+	matched := []commandItem{}
+	for _, c := range a.all {
+		if strings.HasPrefix(c.title, query) {
+			matched = append(matched, c)
+		}
+	}
+	a.list.SetItems(toCommandItems(matched))
 	a.visible = len(a.list.Items()) > 0 && len(parts) == 1
 	if a.visible && a.list.Index() >= len(a.list.Items()) {
 		a.list.Select(0)
 	}
+}
+
+func (a *autocompleteModel) hide() {
+	a.visible = false
 }
 
 func (a *autocompleteModel) next() {

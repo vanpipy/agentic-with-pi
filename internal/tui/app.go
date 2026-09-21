@@ -187,6 +187,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			m.input.Reset()
+			m.autocomplete.hide()
 
 			if strings.HasPrefix(text, "/") {
 				shouldQuit, cmd := m.executeCommand(text)
@@ -290,9 +291,6 @@ func (m *Model) View() tea.View {
 	if m.autocomplete.visible {
 		lines = append(lines, "", m.autocomplete.View())
 	}
-	if m.showHelp {
-		lines = append(lines, "", m.help.FullHelpView(m.keys.FullHelp()))
-	}
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -336,6 +334,25 @@ func (m *Model) readNextEvent() tea.Cmd {
 		return streamEventMsg{ev: ev}
 	}
 }
+
+func NewModelForTest() *Model {
+	m := &Model{
+		state:        stateReady,
+		chat:         newChatModel(),
+		input:        newInputModel(),
+		autocomplete: newAutocompleteModel(),
+		spinner:      newSpinner(),
+		help:         help.New(),
+		keys:         defaultKeys(),
+		width:        80,
+		height:       40,
+	}
+	return m
+}
+
+func (m *Model) ShowHelpForTest() bool { return m.showHelp }
+
+func (m *Model) AutocompleteVisibleForTest() bool { return m.autocomplete.visible }
 
 func (m *Model) shutdown() {
 	if m.conn != nil {
