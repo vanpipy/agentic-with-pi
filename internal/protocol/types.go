@@ -17,10 +17,11 @@ type Response struct {
 }
 
 const (
-	MethodPrompt = "prompt"
-	MethodResume = "resume"
-	MethodCancel = "cancel"
-	MethodPing   = "ping"
+	MethodPrompt      = "prompt"
+	MethodResume      = "resume"
+	MethodCancel      = "cancel"
+	MethodPing        = "ping"
+	MethodListSessions = "list_sessions"
 )
 
 const (
@@ -44,3 +45,16 @@ type ResumeParams struct {
 }
 
 type CancelParams struct{}
+
+type SessionSummary struct {
+	SessionID string `json:"session_id"`
+	Model     string `json:"model"`
+	StartedAt string `json:"started_at"`
+	Events    int    `json:"events"`
+}
+
+type ListSessionsParams struct{}
+
+type ListSessionsResult struct {
+	Sessions []SessionSummary `json:"sessions"`
+}

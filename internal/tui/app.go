@@ -54,6 +54,7 @@ type Model struct {
 	chat         *chatModel
 	input        *inputModel
 	autocomplete *autocompleteModel
+	picker       *sessionPickerModel
 	events       <-chan client_sdk.Event
 	lastKind     string
 	spinner      spinner.Model
@@ -114,6 +115,7 @@ func Run() error {
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
+		picker:       newSessionPickerModel(),
 		spinner:      newSpinner(),
 		help:         help.New(),
 		keys:         defaultKeys(),
@@ -170,10 +172,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showHelp {
 				m.showHelp = false
 				break
-			}
+}
 			if m.autocomplete.visible {
 				m.autocomplete.hide()
 				m.input.Reset()
+				break
+			}
+			if m.picker.visible {
+				m.picker.hide()
 				break
 			}
 			if m.state == stateStreaming {
@@ -187,40 +193,57 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
-case "enter":
-		if m.state == stateStreaming {
-			break
-		}
-		text := m.input.Value()
-		if strings.TrimSpace(text) == "" {
-			break
-		}
-		m.input.Reset()
-		m.autocomplete.hide()
+		case "enter":
+			if m.picker.visible {
+				selected := m.picker.current()
+				m.picker.hide()
+				m.input.Reset()
+				if selected != "" {
+					cmds = append(cmds, m.startResume(selected))
+				}
+				break
+			}
+			if m.state == stateStreaming {
+				break
+			}
+			text := m.input.Value()
+			if strings.TrimSpace(text) == "" {
+				break
+			}
+			m.input.Reset()
+			m.autocomplete.hide()
 
-		if strings.HasPrefix(text, "/") {
-			shouldQuit, cmd := m.executeCommand(text)
-			m.layout()
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+			if strings.HasPrefix(text, "/") {
+				shouldQuit, cmd := m.executeCommand(text)
+				m.layout()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				if shouldQuit {
+					return m, tea.Quit
+				}
+				return m, tea.Batch(cmds...)
 			}
-			if shouldQuit {
-				return m, tea.Quit
-			}
-			return m, tea.Batch(cmds...)
-		}
 
 			m.chat.submit(text)
 			m.chat.GotoBottom()
 			m.state = stateStreaming
 			cmds = append(cmds, m.startStream(text))
 		case "up":
+			if m.picker.visible {
+				m.picker.prev()
+				break
+			}
 			if m.autocomplete.visible {
 				m.autocomplete.prev()
 				break
 			}
 			m.chat.ScrollUp(1)
 		case "down":
+			if m.picker.visible {
+				m.picker.next()
+				break
+			}
 			if m.autocomplete.visible {
 				m.autocomplete.next()
 				break
@@ -266,6 +289,13 @@ case "enter":
 		m.err = msg.err
 		m.state = stateError
 		m.chat.appendError(msg.err.Error())
+
+	case sessionPickerMsg:
+		if len(msg.items) == 0 {
+			m.chat.appendSystem(systemPrefix.Render(" no saved sessions"))
+			break
+		}
+		m.picker.Show(msg.items)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -314,7 +344,9 @@ func (m *Model) View() tea.View {
 	}
 
 	popup := ""
-	if m.autocomplete.visible {
+	if m.picker.visible {
+		popup = m.picker.View()
+	} else if m.autocomplete.visible {
 		popup = m.autocomplete.View()
 	}
 	popupLineCount := 0
@@ -401,6 +433,7 @@ func NewModelForTest() *Model {
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
+		picker:       newSessionPickerModel(),
 		spinner:      newSpinner(),
 		help:         help.New(),
 		keys:         defaultKeys(),
@@ -413,6 +446,10 @@ func NewModelForTest() *Model {
 func (m *Model) ShowHelpForTest() bool { return m.showHelp }
 
 func (m *Model) AutocompleteVisibleForTest() bool { return m.autocomplete.visible }
+
+func (m *Model) PickerVisibleForTest() bool { return m.picker.visible }
+
+func (m *Model) PickerViewForTest() string { return m.picker.View() }
 
 func (m *Model) StateForTest() State { return m.state }
 

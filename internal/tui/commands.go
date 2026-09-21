@@ -47,16 +47,14 @@ var registry = []commandSpec{
 	},
 	{
 		Name:        "resume",
-		Description: "resume a previous session by id",
+		Description: "resume a previous session",
 		Category:    "session",
-		HasArg:      true,
-		Usage:       "/resume <session_id>",
+		Usage:       "/resume",
 		Run: func(m *Model, arg string) (bool, tea.Cmd) {
-			if strings.TrimSpace(arg) == "" {
-				m.chat.appendSystem(helpFooter.Render(" usage: /resume <session_id>"))
-				return false, nil
+			if strings.TrimSpace(arg) != "" {
+				return false, m.startResume(arg)
 			}
-			return false, m.startResume(arg)
+			return false, m.showSessionPicker()
 		},
 	},
 }
@@ -72,6 +70,32 @@ func (m *Model) startResume(sessionID string) tea.Cmd {
 	m.state = stateStreaming
 	m.events = events
 	return m.readNextEvent()
+}
+
+func (m *Model) showSessionPicker() tea.Cmd {
+	if m.conn == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		summaries, err := m.conn.ListSessions(context.Background())
+		if err != nil {
+			return errMsg{err}
+		}
+		items := make([]sessionItem, len(summaries))
+		for i, s := range summaries {
+			items[i] = sessionItem{
+				id:        s.SessionID,
+				model:     s.Model,
+				startedAt: s.StartedAt,
+				events:    s.Events,
+			}
+		}
+		return sessionPickerMsg{items: items}
+	}
+}
+
+type sessionPickerMsg struct {
+	items []sessionItem
 }
 
 func findCommand(name string) (commandSpec, bool) {

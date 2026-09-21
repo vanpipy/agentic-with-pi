@@ -133,6 +133,28 @@ func (c *Client) Cancel(ctx context.Context) error {
 	return nil
 }
 
+func (c *Client) ListSessions(ctx context.Context) ([]protocol.SessionSummary, error) {
+	req, _ := protocol.NewRequest("1", protocol.MethodListSessions, protocol.ListSessionsParams{})
+	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+		return nil, fmt.Errorf("send list_sessions: %w", err)
+	}
+	resp, err := protocol.ReadEvent(c.reader)
+	if err != nil {
+		return nil, fmt.Errorf("read list_sessions: %w", err)
+	}
+	if resp.Event == protocol.EventError {
+		return nil, fmt.Errorf("server error: %s", string(resp.Data))
+	}
+	if resp.Event != "sessions_list" {
+		return nil, fmt.Errorf("unexpected event: %s", resp.Event)
+	}
+	var out protocol.ListSessionsResult
+	if err := json.Unmarshal(resp.Data, &out); err != nil {
+		return nil, fmt.Errorf("decode list_sessions: %w", err)
+	}
+	return out.Sessions, nil
+}
+
 func (c *Client) Resume(ctx context.Context, sessionID string) (<-chan Event, error) {
 	req, err := protocol.NewRequest("1", protocol.MethodResume, protocol.ResumeParams{
 		SessionID: sessionID,

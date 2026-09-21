@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vanpiyp/awp/internal/agent"
@@ -25,6 +27,8 @@ func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol
 		s.handleResume(conn, req)
 	case protocol.MethodCancel:
 		s.handleCancel(conn, req)
+	case protocol.MethodListSessions:
+		s.handleListSessions(conn, req)
 	default:
 		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
 			"error": "unknown method: " + req.Method,
@@ -37,6 +41,62 @@ func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol
 func (s *Server) handlePing(conn io.Writer, req *protocol.Request) {
 	if err := protocol.MarshalEvent(conn, req.ID, "pong", nil); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "ping_pong", "err", err)
+	}
+}
+
+func (s *Server) handleListSessions(conn io.Writer, req *protocol.Request) {
+	summaries, err := s.collectSessionSummaries()
+	if err != nil {
+		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+			"error": "list sessions: " + err.Error(),
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "list_sessions_err", "err", mErr)
+		}
+		return
+	}
+	if err := protocol.MarshalEvent(conn, req.ID, "sessions_list", protocol.ListSessionsResult{
+		Sessions: summaries,
+	}); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "list_sessions", "err", err)
+	}
+}
+
+func (s *Server) collectSessionSummaries() ([]protocol.SessionSummary, error) {
+	entries, err := os.ReadDir(s.sessionsDir)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]protocol.SessionSummary, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".jsonl") {
+			continue
+		}
+		sessionID := strings.TrimSuffix(name, ".jsonl")
+		path := filepath.Join(s.sessionsDir, name)
+		loaded, err := Load(path)
+		if err != nil || loaded == nil {
+			continue
+		}
+		out = append(out, protocol.SessionSummary{
+			SessionID: sessionID,
+			Model:     loaded.Meta.Model,
+			StartedAt: loaded.Meta.StartedAt,
+			Events:    len(loaded.Events),
+		})
+	}
+	sortSummaries(out)
+	return out, nil
+}
+
+func sortSummaries(s []protocol.SessionSummary) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j].StartedAt > s[j-1].StartedAt; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
 	}
 }
 
