@@ -62,3 +62,7 @@ func (i *inputModel) SetValue(v string) {
 func (i *inputModel) SetWidth(w int) {
 	i.ta.SetWidth(w)
 }
+
+func (i *inputModel) Height() int {
+	return i.ta.Height()
+}

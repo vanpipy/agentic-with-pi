@@ -323,7 +323,7 @@ func (m *Model) layout() {
 	if m.showHelp {
 		footerLines = len(strings.Split(m.help.FullHelpView(m.keys.FullHelp()), "\n"))
 	}
-	reservedLines := 3 + footerLines + 5
+	reservedLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
 	bodyHeight := m.height - reservedLines
 	if bodyHeight < 1 {
 		bodyHeight = 1
