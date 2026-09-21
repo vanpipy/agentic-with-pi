@@ -383,6 +383,8 @@ func (m *Model) StateForTest() State { return m.state }
 
 func (m *Model) SetStateForTest(s State) { m.state = s }
 
+func (m *Model) InputValueForTest() string { return m.input.Value() }
+
 func (m *Model) shutdown() {
 	if m.conn != nil {
 		m.conn.Close()
