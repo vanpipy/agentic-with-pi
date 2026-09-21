@@ -178,28 +178,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
-		case "enter":
-			if m.state == stateStreaming {
-				break
-			}
-			text := m.input.Value()
-			if strings.TrimSpace(text) == "" {
-				break
-			}
-			m.input.Reset()
-			m.autocomplete.hide()
+case "enter":
+		if m.state == stateStreaming {
+			break
+		}
+		text := m.input.Value()
+		if strings.TrimSpace(text) == "" {
+			break
+		}
+		m.input.Reset()
+		m.autocomplete.hide()
 
-			if strings.HasPrefix(text, "/") {
-				shouldQuit, cmd := m.executeCommand(text)
-				m.layout()
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				if shouldQuit {
-					return m, tea.Quit
-				}
-				return m, tea.Batch(cmds...)
+		if strings.HasPrefix(text, "/") {
+			shouldQuit, cmd := m.executeCommand(text)
+			m.layout()
+			if cmd != nil {
+				cmds = append(cmds, cmd)
 			}
+			if shouldQuit {
+				return m, tea.Quit
+			}
+			return m, tea.Batch(cmds...)
+		}
 
 			m.chat.submit(text)
 			m.chat.GotoBottom()
@@ -280,13 +280,27 @@ func (m *Model) View() tea.View {
 
 	header := renderHeader(m.width, m.statusRender(), sessionLabel(m.session))
 
-	body := m.chat.View()
-
 	inputBox := m.input.View()
 
 	m.help.ShowAll = m.showHelp
-	footer := m.help.View(m.keys)
+	var footer string
+	if m.showHelp {
+		footer = ""
+	} else {
+		footer = m.help.ShortHelpView(m.keys.ShortHelp())
+	}
 
+	if m.showHelp {
+		helpText := systemPrefix.Render(" help") + "\n" +
+			m.help.FullHelpView(m.keys.FullHelp())
+		lines := []string{header, "", helpText, "", inputBox}
+		v := tea.NewView(strings.Join(lines, "\n"))
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion
+		return v
+	}
+
+	body := m.chat.View()
 	lines := []string{header, "", body, "", inputBox, "", footer}
 	if m.autocomplete.visible {
 		lines = append(lines, "", m.autocomplete.View())
@@ -301,11 +315,18 @@ func (m *Model) layout() {
 	if m.width == 0 || m.height == 0 {
 		return
 	}
-	bodyHeight := m.height - 5
+	footerLines := 1
+	if m.showHelp {
+		footerLines = len(strings.Split(m.help.FullHelpView(m.keys.FullHelp()), "\n"))
+	}
+	reservedLines := 3 + footerLines + 5
+	bodyHeight := m.height - reservedLines
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	m.chat.SetSize(m.width-4, bodyHeight)
+	if !m.showHelp {
+		m.chat.SetSize(m.width-4, bodyHeight)
+	}
 	m.help.SetWidth(m.width)
 	m.input.SetWidth(m.width - 2)
 }
