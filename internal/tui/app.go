@@ -61,7 +61,6 @@ type Model struct {
 	help         help.Model
 	keys         keyBindings
 	showHelp     bool
-	selecting    bool
 }
 
 type errMsg struct{ err error }
@@ -152,91 +151,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.layout()
 
-	case tea.MouseWheelMsg:
-		cmd, _ := m.chat.Update(msg)
-		cmds = append(cmds, cmd)
-
-	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft {
-			msgIdx, col := m.chat.HitTestForDrag(msg.X, msg.Y)
-			if msgIdx >= 0 {
-				m.chat.BeginSelection(msgIdx, col)
-				m.selecting = true
-			}
-		}
-
-	case tea.MouseMsg:
-		ms := msg.Mouse()
-		if ms.Button == tea.MouseLeft && m.chat.IsSelecting() {
-			edge := m.chat.DragEdgeForCoord(ms.Y)
-			msgIdx, col := m.chat.HitTestForDrag(ms.X, ms.Y)
-			if msgIdx >= 0 {
-				m.chat.ExtendSelection(msgIdx, col)
-			}
-			if edge == edgeNone {
-				m.selecting = true
-				break
-			}
-			m.chat.ScrollByEdge(edge)
-			if edge == edgeTop && !m.chat.AtTop() {
-				cmds = append(cmds, selectionTickCmd())
-			}
-			if edge == edgeBottom && !m.chat.AtBottom() {
-				cmds = append(cmds, selectionTickCmd())
-			}
-		}
-
-	case selectionTickMsg:
-		if m.chat.IsSelecting() {
-			m.chat.AdvanceEdgeScroll()
-			cmds = append(cmds, selectionTickCmd())
-		}
-
-	case tea.MouseReleaseMsg:
-		if m.chat.IsSelecting() {
-			text := m.chat.EndSelection()
-			m.selecting = false
-			if text != "" {
-				if err := CopyToClipboard(text); err != nil {
-					m.chat.appendSystem(systemPrefix.Render(" copy failed: ") + helpFooter.Render(err.Error()))
-				} else {
-					m.chat.appendSystem(systemPrefix.Render(" copied ") + helpFooter.Render("(" + fmt.Sprintf("%d chars", len(text)) + ")"))
-				}
-			} else {
-				m.chat.CancelSelection()
-			}
-		}
-
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+c":
-			if m.input.Value() == "" && !m.chat.IsSelecting() {
+			if m.input.Value() == "" {
 				m.shutdown()
 				return m, tea.Quit
-			}
-			if m.chat.IsSelecting() {
-				text := m.chat.EndSelection()
-				if text != "" {
-					if err := CopyToClipboard(text); err != nil {
-						m.chat.appendSystem(systemPrefix.Render(" copy failed: ") + helpFooter.Render(err.Error()))
-					} else {
-						m.chat.appendSystem(systemPrefix.Render(" copied ") + helpFooter.Render("(" + fmt.Sprintf("%d chars", len(text)) + ")"))
-					}
-				}
-				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
 		case "ctrl+d":
 			if m.input.Value() == "" {
 				m.shutdown()
 				return m, tea.Quit
-			}
-			cmds = append(cmds, m.input.Update(msg))
-		case "ctrl+a":
-			if m.input.Value() == "" {
-				m.chat.SelectAll()
-				m.selecting = true
-				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
 		case "?":
@@ -342,7 +268,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.appendError(msg.err.Error())
 			break
 		}
-		wasAtBottom := m.chat.AtBottom()
+		wasAtBottom := m.chat.AtBottomExisting()
 		handleServerEvent(m.chat, &m.session, msg.ev)
 		if wasAtBottom {
 			m.chat.GotoBottom()
@@ -412,7 +338,6 @@ func (m *Model) View() tea.View {
 		lines := []string{header, "", helpText, "", inputBox}
 		v := tea.NewView(strings.Join(lines, "\n"))
 		v.AltScreen = true
-		v.MouseMode = tea.MouseModeCellMotion
 		return v
 	}
 
@@ -451,7 +376,6 @@ func (m *Model) View() tea.View {
 
 	v := tea.NewView(strings.Join(lines, "\n"))
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -558,16 +482,6 @@ func (m *Model) submit(text string) tea.Cmd {
 
 type promptDoneMsg struct{}
 
-type selectionTickMsg struct{}
-
-const selectionTickInterval = 60 * time.Millisecond
-
-func selectionTickCmd() tea.Cmd {
-	return tea.Tick(selectionTickInterval, func(time.Time) tea.Msg {
-		return selectionTickMsg{}
-	})
-}
-
 var program *tea.Program
 
 
@@ -587,9 +501,6 @@ func sessionLabel(id string) string {
 }
 
 func (m *Model) statusRender() string {
-	if m.chat.IsSelecting() {
-		return statusWarn.Render("\u25a0 selecting")
-	}
 	switch m.state {
 	case stateStreaming:
 		return m.spinner.View() + " " + m.state.String()

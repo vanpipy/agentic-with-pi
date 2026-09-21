@@ -41,16 +41,6 @@ type chatMsg struct {
 	collapsed bool
 }
 
-type msgRender struct {
-	wrappedLines []string
-	lineMap      []wrappedLine
-}
-
-type wrappedLine struct {
-	startCol int
-	endCol   int
-}
-
 type msgUsage struct {
 	prompt     int
 	completion int
