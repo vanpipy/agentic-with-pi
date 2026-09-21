@@ -162,3 +162,17 @@ func TestHitTestForDragClampsToLastLine(t *testing.T) {
 		t.Errorf("overshoot y=999 should clamp to last msg idx=0, got %d", msgIdx)
 	}
 }
+
+func TestExtractSelectionAcrossWrappedLines(t *testing.T) {
+	m := tui.NewChatModelForTest()
+	longText := "the quick brown fox jumps over the lazy dog every single day"
+	m.SubmitForTest(longText)
+	m.SetSizeForTest(20, 10)
+	m.BeginSelectionForTest(0, 4)
+	m.ExtendSelectionForTest(0, 49)
+	got := m.EndSelectionForTest()
+	want := "quick brown fox jumps over the lazy dog every"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

@@ -24,9 +24,9 @@ type chatModel struct {
 	promptNum                  int
 	selActive                  bool
 	selAnchorMsg               int
-	selAnchorCol               int
+	selAnchorRawCol            int
 	selEndMsg                  int
-	selEndCol                  int
+	selEndRawCol               int
 	dragEdgeFromLastSelection  dragEdge
 }
 
@@ -66,22 +66,22 @@ func (c *chatModel) refresh() {
 	}
 }
 
-func (c *chatModel) BeginSelection(msgIdx, col int) {
+func (c *chatModel) BeginSelection(msgIdx, rawCol int) {
 	c.selActive = true
 	c.selAnchorMsg = msgIdx
-	c.selAnchorCol = col
+	c.selAnchorRawCol = rawCol
 	c.selEndMsg = msgIdx
-	c.selEndCol = col
+	c.selEndRawCol = rawCol
 	c.refresh()
 }
 
-func (c *chatModel) ExtendSelection(msgIdx, col int) {
+func (c *chatModel) ExtendSelection(msgIdx, rawCol int) {
 	if !c.selActive {
-		c.BeginSelection(msgIdx, col)
+		c.BeginSelection(msgIdx, rawCol)
 		return
 	}
 	c.selEndMsg = msgIdx
-	c.selEndCol = col
+	c.selEndRawCol = rawCol
 	c.refresh()
 }
 
@@ -92,9 +92,9 @@ func (c *chatModel) EndSelection() string {
 	text := c.ExtractSelectionText()
 	c.selActive = false
 	c.selAnchorMsg = 0
-	c.selAnchorCol = 0
+	c.selAnchorRawCol = 0
 	c.selEndMsg = 0
-	c.selEndCol = 0
+	c.selEndRawCol = 0
 	c.refresh()
 	return text
 }
@@ -105,9 +105,9 @@ func (c *chatModel) CancelSelection() {
 	}
 	c.selActive = false
 	c.selAnchorMsg = 0
-	c.selAnchorCol = 0
+	c.selAnchorRawCol = 0
 	c.selEndMsg = 0
-	c.selEndCol = 0
+	c.selEndRawCol = 0
 	c.refresh()
 }
 
@@ -245,18 +245,16 @@ func (c *chatModel) SelectAll() {
 	}
 	c.selActive = true
 	c.selAnchorMsg = 0
-	c.selAnchorCol = 0
-	c.selEndMsg = len(c.messages) - 1
-	last := c.messages[len(c.messages)-1]
-	msgLines := renderMsg(last, c.viewport.Width())
-	lastLineWidth := 0
-	if len(msgLines) > 0 {
-		lastLineWidth = lipgloss.Width(msgLines[len(msgLines)-1])
-	}
-	layout := roleLayoutFor(last.role)
-	c.selEndCol = lastLineWidth - lipgloss.Width(glyphPrefix(layout, last.role, last.promptNum))
-	if c.selEndCol < 0 {
-		c.selEndCol = 0
+	c.selAnchorRawCol = 0
+	last := len(c.messages) - 1
+	c.selEndMsg = last
+	rendered := renderMsgMapped(c.messages[last], c.viewport.Width())
+	if len(rendered.wrappedLines) > 0 {
+		lastLine := rendered.wrappedLines[len(rendered.wrappedLines)-1]
+		plain := ansi.Strip(lastLine)
+		c.selEndRawCol = ansi.StringWidth(plain)
+	} else {
+		c.selEndRawCol = 0
 	}
 	c.refresh()
 }
@@ -265,60 +263,81 @@ func (c *chatModel) ExtractSelectionText() string {
 	if !c.selActive {
 		return ""
 	}
-	startMsg, startCol, endMsg, endCol, _ := c.selectionRange()
-	if startMsg == endMsg && startCol == endCol {
+	startMsg, startRawCol, endMsg, endRawCol, _ := c.selectionRange()
+	if startMsg == endMsg && startRawCol == endRawCol {
 		return ""
 	}
 	var parts []string
 	for idx := startMsg; idx <= endMsg && idx < len(c.messages); idx++ {
 		msg := c.messages[idx]
-		msgLines := renderMsg(msg, c.viewport.Width())
-		layout := roleLayoutFor(msg.role)
-		glyph := glyphPrefix(layout, msg.role, msg.promptNum)
-		glyphWidth := lipgloss.Width(glyph)
-		for lineIdx, line := range msgLines {
-			ls := glyphWidth
-			le := textWidth(line)
-			if idx == startMsg {
-				ls = glyphWidth + startCol
+		rawLines := rawLinesForMessage(msg)
+		if len(rawLines) == 0 {
+			continue
+		}
+		for rawIdx, raw := range rawLines {
+			rs := 0
+			re := ansi.StringWidth(raw)
+			if idx == startMsg && rawIdx == 0 {
+				rs = startRawCol
 			}
-			if idx == endMsg {
-				le = glyphWidth + endCol
-			}
-			if ls >= le {
+			if idx == startMsg && rawIdx > 0 {
 				continue
 			}
-			prefix := truncateToCol(line, ls)
-			fullEnd := truncateToCol(line, le)
-			mid := fullEnd[len(prefix):]
-			if lineIdx == 0 {
-				mid = ansi.Strip(mid)
+			if idx == endMsg && rawIdx != len(rawLines)-1 && len(rawLines) > 1 {
+				continue
 			}
-			parts = append(parts, strings.TrimRight(mid, " "))
+			if idx == endMsg {
+				re = endRawCol
+				if rawIdx < len(rawLines)-1 {
+					continue
+				}
+			}
+			if rs >= re {
+				continue
+			}
+			prefix := truncateToCol(raw, rs)
+			suffix := truncateToCol(raw, re)[len(prefix):]
+			parts = append(parts, strings.TrimRight(suffix, " "))
 		}
 	}
 	return strings.Join(parts, "\n")
 }
 
-func (c *chatModel) selectionRange() (startMsg, startCol, endMsg, endCol int, ok bool) {
+func rawLinesForMessage(m chatMsg) []string {
+	if m.role == roleAssistant {
+		plain := ansi.Strip(renderMarkdownBody(m.text, 10000))
+		return splitLogicalLines(plain)
+	}
+	return splitLogicalLines(m.text)
+}
+
+func splitLogicalLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	return strings.Split(text, "\n")
+}
+
+func (c *chatModel) selectionRange() (startMsg, startRawCol, endMsg, endRawCol int, ok bool) {
 	if !c.selActive {
 		return 0, 0, 0, 0, false
 	}
 	if c.selAnchorMsg < c.selEndMsg ||
-		(c.selAnchorMsg == c.selEndMsg && c.selAnchorCol <= c.selEndCol) {
-		return c.selAnchorMsg, c.selAnchorCol, c.selEndMsg, c.selEndCol, true
+		(c.selAnchorMsg == c.selEndMsg && c.selAnchorRawCol <= c.selEndRawCol) {
+		return c.selAnchorMsg, c.selAnchorRawCol, c.selEndMsg, c.selEndRawCol, true
 	}
-	return c.selEndMsg, c.selEndCol, c.selAnchorMsg, c.selAnchorCol, true
+	return c.selEndMsg, c.selEndRawCol, c.selAnchorMsg, c.selAnchorRawCol, true
 }
 
 func (c *chatModel) buildContent() string {
 	var lines []string
 	for idx, m := range c.messages {
-		msgLines := renderMsg(m, c.viewport.Width())
+		rendered := renderMsgMapped(m, c.viewport.Width())
+		msgLines := rendered.wrappedLines
 		if c.selActive {
 			startMsg, startCol, endMsg, endCol, _ := c.selectionRange()
 			if idx >= startMsg && idx <= endMsg {
-				msgLines = applyHighlight(msgLines, idx, m, startMsg, startCol, endMsg, endCol)
+				msgLines = applyHighlightMapped(msgLines, rendered.lineMap, idx, m, startMsg, startCol, endMsg, endCol)
 			}
 		}
 		lines = append(lines, msgLines...)
@@ -409,6 +428,77 @@ func truncateToCol(s string, col int) string {
 
 var selectionStyle = lipgloss.NewStyle().Reverse(true)
 
+func applyHighlightMapped(msgLines []string, lineMap []wrappedLine, idx int, m chatMsg, startMsg, startRawCol, endMsg, endRawCol int) []string {
+	out := make([]string, len(msgLines))
+	for i, line := range msgLines {
+		if i >= len(lineMap) {
+			out[i] = line
+			continue
+		}
+		mapping := lineMap[i]
+		lineStartRaw := mapping.startCol
+		lineEndRaw := mapping.endCol
+		if idx == startMsg && lineStartRaw < startRawCol {
+			lineStartRaw = startRawCol
+		}
+		if idx == endMsg && lineEndRaw > endRawCol {
+			lineEndRaw = endRawCol
+		}
+		if lineStartRaw >= lineEndRaw {
+			out[i] = line
+			continue
+		}
+		colOffsetInLine := lineStartRaw - mapping.startCol
+		colEndInLine := lineEndRaw - mapping.startCol
+		plain := ansi.Strip(line)
+		if colOffsetInLine >= len(plain) {
+			out[i] = line
+			continue
+		}
+		prefix := truncateToCol(plain, colOffsetInLine)
+		mid := truncateToCol(plain, colEndInLine)[len(prefix):]
+		plainStart := ansi.Strip(prefix)
+		rest := plain[len(plainStart):]
+		prefixStyled := line[:0]
+		_ = prefixStyled
+		prefixStyled = slicePlainText(line, plainStart)
+		midStyled := slicePlainText(line, mid)
+		out[i] = prefixStyled + selectionStyle.Render(midStyled) + slicePlainText(rest, "")
+	}
+	return out
+}
+
+func slicePlainText(s string, plain string) string {
+	if plain == "" {
+		return ""
+	}
+	idx := -1
+	pi := 0
+	for i := 0; i < len(s); {
+		if pi >= len(plain) {
+			break
+		}
+		if plain[pi] == s[i] {
+			pi++
+			i++
+			if pi == len(plain) {
+				idx = i
+				break
+			}
+			continue
+		}
+		if i+1 < len(s) && plain[pi] == s[i+1] {
+			i++
+			continue
+		}
+		i++
+	}
+	if idx < 0 {
+		return ""
+	}
+	return s[:idx]
+}
+
 type roleLayout struct {
 	body  lipgloss.Style
 	glyph string
@@ -464,6 +554,29 @@ func renderMsg(g chatMsg, width int) []string {
 	return indented
 }
 
+func renderMsgMapped(g chatMsg, width int) msgRender {
+	layout := roleLayoutFor(g.role)
+	glyph := glyphPrefix(layout, g.role, g.promptNum)
+	if width <= 0 {
+		width = 80
+	}
+	glyphWidth := lipgloss.Width(glyph)
+	bodyWidth := width - glyphWidth
+	if bodyWidth < 8 {
+		bodyWidth = 8
+	}
+	body := g.body(layout, bodyWidth)
+	if len(body) == 0 {
+		return msgRender{}
+	}
+	indented := prependPrefixAndIndent(body, glyph)
+	hints := hintLines(g)
+	if len(hints) > 0 {
+		indented = append(indented, hints...)
+	}
+	return msgRender{wrappedLines: indented}
+}
+
 func (g chatMsg) body(layout roleLayout, width int) []string {
 	if g.role == roleAssistant {
 		return wrapRender(layout.body.Width(width), renderMarkdownBody(g.text, width))
@@ -484,6 +597,38 @@ func wrapRender(style lipgloss.Style, text string) []string {
 		return nil
 	}
 	return strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+}
+
+type wrappedSegment struct {
+	lines   []string
+	lineMap []wrappedLine
+	plain   []string
+}
+
+func wrapWithMap(style lipgloss.Style, text string) wrappedSegment {
+	if text == "" {
+		return wrappedSegment{}
+	}
+	rendered := wrapRender(style, text)
+	if len(rendered) == 0 {
+		return wrappedSegment{}
+	}
+	plain := make([]string, len(rendered))
+	plainWidths := make([]int, len(rendered))
+	for i, line := range rendered {
+		p := ansi.Strip(line)
+		plain[i] = p
+		plainWidths[i] = ansi.StringWidth(p)
+	}
+	mapLines := make([]wrappedLine, len(rendered))
+	col := 0
+	for i, w := range plainWidths {
+		startCol := col
+		endCol := col + w
+		mapLines[i] = wrappedLine{startCol: startCol, endCol: endCol}
+		col = endCol
+	}
+	return wrappedSegment{lines: rendered, lineMap: mapLines, plain: plain}
 }
 
 func renderThinking(text string, width int, collapsed bool) []string {
