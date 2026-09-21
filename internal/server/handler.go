@@ -90,6 +90,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	}()
 
 	headerWritten := false
+	cancelled := false
 	for ev := range events {
 		if !headerWritten {
 			meta := SessionMeta{
@@ -114,6 +115,22 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 
 		if writeErr := store.WriteEvent(eventName, data); writeErr != nil {
 			slog.Debug("server: session write failed", "err", writeErr)
+		}
+
+		if runCtx.Err() != nil {
+			cancelled = true
+			break
+		}
+	}
+
+	if cancelled {
+		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, map[string]string{
+			"reason": "user_cancelled",
+		}); err != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack_stream", "err", err)
+		}
+		if writeErr := store.WriteEvent(protocol.EventCancelAck, map[string]string{"reason": "user_cancelled"}); writeErr != nil {
+			slog.Debug("server: cancel session write failed", "err", writeErr)
 		}
 	}
 

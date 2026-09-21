@@ -24,6 +24,14 @@ var (
 	roleThinking  = RoleThinking
 )
 
+const (
+	StateReady State = iota
+	StateStreaming
+	StateError
+)
+
+func StateStreamingForTestValue() State { return StateStreaming }
+
 type chatMsg struct {
 	role      role
 	text      string

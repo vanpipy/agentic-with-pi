@@ -99,5 +99,12 @@ func handleServerEvent(c *chatModel, sessionID *string, ev client_sdk.Event) {
 		}
 		json.Unmarshal(ev.Data, &d)
 		c.appendError(d.Error)
+	case "cancelled":
+		c.commitStream()
+		var d struct {
+			Reason string `json:"reason"`
+		}
+		json.Unmarshal(ev.Data, &d)
+		c.appendSystem(systemPrefix.Render(" cancelled") + helpFooter.Render(" ("+d.Reason+")"))
 	}
 }

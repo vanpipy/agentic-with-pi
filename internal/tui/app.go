@@ -171,6 +171,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showHelp = false
 				break
 			}
+			if m.state == stateStreaming {
+				m.cancel()
+				break
+			}
 			cmds = append(cmds, m.input.Update(msg))
 		case "tab":
 			if m.autocomplete.visible {
@@ -375,10 +379,25 @@ func (m *Model) ShowHelpForTest() bool { return m.showHelp }
 
 func (m *Model) AutocompleteVisibleForTest() bool { return m.autocomplete.visible }
 
+func (m *Model) StateForTest() State { return m.state }
+
+func (m *Model) SetStateForTest(s State) { m.state = s }
+
 func (m *Model) shutdown() {
 	if m.conn != nil {
 		m.conn.Close()
 	}
+}
+
+func (m *Model) cancel() {
+	if m.conn != nil {
+		if err := m.conn.Cancel(context.Background()); err != nil {
+			m.chat.appendError("cancel: " + err.Error())
+		}
+	}
+	m.chat.appendSystem(systemPrefix.Render(" cancelled by user"))
+	m.state = stateReady
+	m.events = nil
 }
 
 func (m *Model) submit(text string) tea.Cmd {

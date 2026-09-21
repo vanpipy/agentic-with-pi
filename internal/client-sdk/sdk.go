@@ -125,6 +125,14 @@ func ParseEventData(data []byte, dst any) error {
 	return json.Unmarshal(data, dst)
 }
 
+func (c *Client) Cancel(ctx context.Context) error {
+	req, _ := protocol.NewRequest("1", protocol.MethodCancel, nil)
+	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+		return fmt.Errorf("send cancel: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) Resume(ctx context.Context, sessionID string) (<-chan Event, error) {
 	req, err := protocol.NewRequest("1", protocol.MethodResume, protocol.ResumeParams{
 		SessionID: sessionID,
