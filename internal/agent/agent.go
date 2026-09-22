@@ -50,24 +50,25 @@ type Tool struct {
 }
 
 type Agent struct {
-	core                    llm.Core
-	SafetyNet               int
-	Model                   llm.Model
-	SystemPrompts           string
-	Tools                   []Tool
-	LogWriter               io.Writer
-	logMu                   sync.Mutex
-	logBuf                  *bufio.Writer
-	logSeq                  int
-	compaction              CompactionSettings
-	repeatedToolErrorLimit  int
+	core                   llm.Core
+	SafetyNet              int
+	Model                  llm.Model
+	SystemPrompts          string
+	toolList               []Tool
+	toolsByID              map[string]int
+	LogWriter              io.Writer
+	logMu                  sync.Mutex
+	logBuf                 *bufio.Writer
+	logSeq                 int
+	compaction             CompactionSettings
+	repeatedToolErrorLimit int
 }
 
 func NewAgent(llmCore llm.Core) *Agent {
 	return &Agent{
-		core:                   llmCore,
-		SafetyNet:               200,
-		SystemPrompts:          "You are a helpful coding assistant",
+		core:          llmCore,
+		SafetyNet:     200,
+		SystemPrompts: "You are a helpful coding assistant",
 		compaction: CompactionSettings{
 			Enabled:         true,
 			ReserveTokens:   16384,
@@ -101,7 +102,18 @@ func (a *Agent) WithRepeatedToolErrorLimit(n int) *Agent {
 func AgentRepeatedToolErrorLimitForTest(a *Agent) int {
 	return a.repeatedToolErrorLimit
 }
-func (a *Agent) WithTool(t Tool) *Agent           { a.Tools = append(a.Tools, t); return a }
+func (a *Agent) WithTool(t Tool) *Agent {
+	if a.toolsByID == nil {
+		a.toolsByID = make(map[string]int)
+	}
+	if i, exists := a.toolsByID[t.Name]; exists {
+		a.toolList[i] = t
+		return a
+	}
+	a.toolsByID[t.Name] = len(a.toolList)
+	a.toolList = append(a.toolList, t)
+	return a
+}
 func (a *Agent) WithLogWriter(w io.Writer) *Agent { a.LogWriter = w; return a }
 func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }
 
@@ -325,9 +337,9 @@ func preSizedHistory(a *Agent, userMsg string) []llm.Message {
 
 func buildRequest(a *Agent, msgs []llm.Message) *llm.ChatRequest {
 	req := &llm.ChatRequest{Model: a.Model.ID, Messages: msgs}
-	if len(a.Tools) > 0 {
-		req.Tools = make([]llm.ToolDef, 0, len(a.Tools))
-		for _, t := range a.Tools {
+	if len(a.toolList) > 0 {
+		req.Tools = make([]llm.ToolDef, 0, len(a.toolList))
+		for _, t := range a.toolList {
 			req.Tools = append(req.Tools, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name, Description: t.Description, Parameters: t.Parameters}})
 		}
 	}
@@ -527,12 +539,15 @@ func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message
 }
 
 func (a *Agent) findTool(name string) (Tool, bool) {
-	for _, t := range a.Tools {
-		if t.Name == name {
-			return t, true
-		}
+	i, ok := a.toolsByID[name]
+	if !ok {
+		return Tool{}, false
 	}
-	return Tool{}, false
+	return a.toolList[i], true
+}
+
+func AgentFindToolForTest(a *Agent, name string) (Tool, bool) {
+	return a.findTool(name)
 }
 
 func (a *Agent) emit(ctx context.Context, ch chan<- Event, ev Event) bool {

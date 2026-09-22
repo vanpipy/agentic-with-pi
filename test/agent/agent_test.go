@@ -176,7 +176,8 @@ func TestNewAgentSafetyNetMatchesPiDefault(t *testing.T) {
 	}
 }
 
-func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {	callIDs := make([]string, 7)
+func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {
+	callIDs := make([]string, 7)
 	for i := range callIDs {
 		callIDs[i] = fmt.Sprintf("call_%d", i)
 	}
@@ -346,7 +347,7 @@ func TestAgentSafetyNetReached(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	_ = core  // legacy streamChunks (unused)
+	_ = core // legacy streamChunks (unused)
 	ag := newTestAgent(core, "test-model").WithSafetyNet(2)
 	ag.WithTool(agent.Tool{
 		Name:    "loop",
@@ -723,7 +724,7 @@ func TestAgentDefensiveMaxTurnsClamp(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}
-	_ = repeat  // keep tests clean
+	_ = repeat // keep tests clean
 	chunksList := make([][]llm.StreamEvent, 10)
 	for i := range chunksList {
 		chunksList[i] = repeat
@@ -968,3 +969,38 @@ func TestAgentFinalAnswerDoesNotDuplicateReasoning(t *testing.T) {
 	}
 }
 
+func TestAgentFindToolByName(t *testing.T) {
+	ag := agent.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m", SupportsTool: true})
+	ag.WithTool(agent.Tool{Name: "alpha", Execute: func(context.Context, string) (string, error) { return "a", nil }})
+	ag.WithTool(agent.Tool{Name: "beta", Execute: func(context.Context, string) (string, error) { return "b", nil }})
+
+	got, ok := agent.AgentFindToolForTest(ag, "beta")
+	if !ok {
+		t.Fatal("findTool(beta) = !ok, want true")
+	}
+	if got.Name != "beta" {
+		t.Errorf("got Name = %q, want beta", got.Name)
+	}
+
+	if _, ok := agent.AgentFindToolForTest(ag, "missing"); ok {
+		t.Error("findTool(missing) = ok, want false")
+	}
+}
+
+func TestAgentFindTool_DoubleRegisterOverwrites(t *testing.T) {
+	ag := agent.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m", SupportsTool: true})
+	ag.WithTool(agent.Tool{Name: "alpha", Execute: func(context.Context, string) (string, error) { return "first", nil }})
+	ag.WithTool(agent.Tool{Name: "alpha", Execute: func(context.Context, string) (string, error) { return "second", nil }})
+
+	got, ok := agent.AgentFindToolForTest(ag, "alpha")
+	if !ok {
+		t.Fatal("findTool(alpha) = !ok, want true")
+	}
+	out, err := got.Execute(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out != "second" {
+		t.Errorf("Execute output = %q, want second (overwrite)", out)
+	}
+}
