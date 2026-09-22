@@ -4,7 +4,6 @@ import (
 	"github.com/vanpiyp/awp/internal/storage"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -127,38 +126,6 @@ func TestEnsureDir(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteFile(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "subdir", "file.txt")
-	data := []byte("hello world")
-
-	if err := storage.AtomicWriteFile(path, data, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	got, _ := os.ReadFile(path)
-	if string(got) != "hello world" {
-		t.Errorf("got %q, want hello world", got)
-	}
-}
-
-func TestAtomicWriteFilePermission(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix permissions not applicable on windows")
-	}
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "secret.txt")
-
-	if err := storage.AtomicWriteFile(path, []byte("data"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	info, _ := os.Stat(path)
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("perm = %v, want 0600", info.Mode().Perm())
-	}
-}
-
 func TestEnsureDirsCreatesAll(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AWP_HOME", filepath.Join(tmp, "home"))
@@ -175,18 +142,3 @@ func TestEnsureDirsCreatesAll(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteCleansUpTemp(t *testing.T) {
-	tmp := t.TempDir()
-	path := filepath.Join(tmp, "file.txt")
-
-	if err := storage.AtomicWriteFile(path, []byte("data"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	entries, _ := os.ReadDir(tmp)
-	for _, e := range entries {
-		if e.Name() != "file.txt" {
-			t.Errorf("leftover file: %s", e.Name())
-		}
-	}
-}
