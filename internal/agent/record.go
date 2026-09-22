@@ -2,8 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -40,11 +38,6 @@ type sessionEvent struct {
 }
 
 func (a *Agent) writeHeaderLocked() {
-	id, err := randomID()
-	if err != nil {
-		slog.Debug("agent: header id gen failed", "err", err)
-		return
-	}
 	system := a.SystemPrompts
 	if len(system) > 200 {
 		system = system[:200] + "..."
@@ -53,7 +46,16 @@ func (a *Agent) writeHeaderLocked() {
 	for _, t := range a.toolList {
 		tools = append(tools, t.Name())
 	}
-	header := sessionHeader{Kind: "session", Version: 1, ID: id, Model: a.Model.ID, MaxTurns: a.SafetyNet, System: system, Tools: tools, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	header := sessionHeader{
+		Kind:      "session",
+		Version:   1,
+		ID:        a.sessionID,
+		Model:     a.Model.ID,
+		MaxTurns:  a.SafetyNet,
+		System:    system,
+		Tools:     tools,
+		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
 	if err := writeJSONLine(a.logBuf, header); err != nil {
 		slog.Debug("agent: header write failed", "err", err)
 	}
@@ -180,12 +182,4 @@ func defaultSessionLogPath(sessionID string) (string, error) {
 		sessionID = "orphan-" + time.Now().UTC().Format("20060102T150405")
 	}
 	return filepath.Join(dir, sessionID+".jsonl"), nil
-}
-
-func randomID() (string, error) {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b[:]), nil
 }

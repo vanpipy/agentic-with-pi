@@ -24,13 +24,18 @@ type SessionMeta struct {
 }
 
 type Entry struct {
-	Kind    string          `json:"kind"`
-	ID      string          `json:"id,omitempty"`
-	Version int             `json:"version,omitempty"`
-	At      string          `json:"at"`
-	Session SessionMeta     `json:"session,omitempty"`
-	Event   string          `json:"event,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
+	Kind      string          `json:"kind"`
+	ID        string          `json:"id,omitempty"`
+	Version   int             `json:"version,omitempty"`
+	At        string          `json:"at"`
+	Session   SessionMeta     `json:"session,omitempty"`
+	Event     string          `json:"event,omitempty"`
+	Data      json.RawMessage `json:"data,omitempty"`
+	Model     string          `json:"model,omitempty"`
+	MaxTurns  int             `json:"max_turns,omitempty"`
+	System    string          `json:"system,omitempty"`
+	Tools     []string        `json:"tools,omitempty"`
+	StartedAt string          `json:"started_at,omitempty"`
 }
 
 type Store struct {
@@ -150,7 +155,18 @@ func Load(path string) (*Loaded, error) {
 
 		switch e.Kind {
 		case "session":
-			loaded.Meta = e.Session
+			if e.Session.SessionID != "" {
+				loaded.Meta = e.Session
+			} else if e.ID != "" {
+				loaded.Meta = SessionMeta{
+					SessionID: e.ID,
+					Model:     e.Model,
+					MaxTurns:  e.MaxTurns,
+					System:    e.System,
+					Tools:     e.Tools,
+					StartedAt: e.StartedAt,
+				}
+			}
 		case "event":
 			loaded.Events = append(loaded.Events, EventRecord{
 				Kind: e.Event,
