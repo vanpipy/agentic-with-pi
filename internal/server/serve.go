@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"context"
-	"io"
 	"log/slog"
 	"net"
 
@@ -72,25 +71,6 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 
 		s.dispatch(conn, connCtx, req)
-	}
-}
-
-func (s *Server) dispatchRun(conn io.Writer, connCtx context.Context, req *json_rpc.Request) {
-	switch req.Method {
-	case json_rpc.MethodPing:
-		s.handlePing(conn, req)
-	case json_rpc.MethodPrompt:
-		s.handlePrompt(conn, connCtx, req)
-	case json_rpc.MethodResume:
-		s.handleResume(conn, req)
-	case json_rpc.MethodCancel:
-		s.handleCancel(conn, req)
-	default:
-		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
-			"error": "unknown method: " + req.Method,
-		}); err != nil {
-			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "default_error", "err", err)
-		}
 	}
 }
 
