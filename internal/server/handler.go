@@ -17,6 +17,16 @@ import (
 	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 )
 
+func extractIntent(argsJSON string) string {
+	var args struct {
+		Intent string `json:"intent"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(args.Intent)
+}
+
 func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *json_rpc.Request) {
 	switch req.Method {
 	case json_rpc.MethodPing:
@@ -302,10 +312,14 @@ func mapAgentEvent(ev agent.Event) (string, any) {
 		}
 		return json_rpc.EventThoughtEnd, data
 	case agent.EventTool:
-		return json_rpc.EventTool, map[string]string{
+		payload := map[string]string{
 			"name": ev.ToolName,
 			"args": ev.ToolArgs,
 		}
+		if intent := extractIntent(ev.ToolArgs); intent != "" {
+			payload["intent"] = intent
+		}
+		return json_rpc.EventTool, payload
 	case agent.EventObserve:
 		return json_rpc.EventObserve, map[string]string{
 			"tool_name": ev.ToolName,

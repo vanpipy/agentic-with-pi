@@ -381,11 +381,12 @@ func (c *chatModel) appendReasoning(text string) {
 	c.refresh()
 }
 
-func (c *chatModel) appendTool(name, args, result string) {
+func (c *chatModel) appendTool(name, args, intent, result string) {
+	prefix := intentPrefix(intent)
 	if result == "" {
 		c.messages = append(c.messages, chatMsg{
 			role: roleTool,
-			text: fmt.Sprintf("%s(%s)", name, args),
+			text: fmt.Sprintf("%s%s(%s)", prefix, name, args),
 		})
 		c.refresh()
 		return
@@ -394,7 +395,7 @@ func (c *chatModel) appendTool(name, args, result string) {
 		if summary, ok := tools.ConciseToolErrorSummary(result); ok {
 			c.messages = append(c.messages, chatMsg{
 				role: roleTool,
-				text: fmt.Sprintf("%s(%s) → %s", name, args, summary),
+				text: fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, summary),
 			})
 			c.refresh()
 			return
@@ -403,9 +404,16 @@ func (c *chatModel) appendTool(name, args, result string) {
 	preview := tools.TruncateMiddle(result, 120)
 	c.messages = append(c.messages, chatMsg{
 		role: roleTool,
-		text: fmt.Sprintf("%s(%s) → %s", name, args, preview),
+		text: fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, preview),
 	})
 	c.refresh()
+}
+
+func intentPrefix(intent string) string {
+	if intent == "" {
+		return ""
+	}
+	return intent + " · "
 }
 
 func (c *chatModel) appendObserve(text string) {
