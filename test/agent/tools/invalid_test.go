@@ -10,7 +10,7 @@ import (
 
 func TestInvalidTool(t *testing.T) {
 	tool := tools.InvalidTool()
-	out, err := tool.Execute(context.Background(), `{"tool":"read","reason":"no path argument","intent":"fix my own bad call"}`)
+	out, err := tool.Invoke(context.Background(), `{"tool":"read","reason":"no path argument","intent":"fix my own bad call"}`)
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestInvalidTool(t *testing.T) {
 
 func TestInvalidToolMissingIntent(t *testing.T) {
 	tool := tools.InvalidTool()
-	_, err := tool.Execute(context.Background(), `{"tool":"read","reason":"oops"}`)
+	_, err := tool.Invoke(context.Background(), `{"tool":"read","reason":"oops"}`)
 	if err == nil {
 		t.Fatal("expected error for missing intent")
 	}
@@ -35,7 +35,7 @@ func TestInvalidToolMissingIntent(t *testing.T) {
 
 func TestInvalidToolMissingReason(t *testing.T) {
 	tool := tools.InvalidTool()
-	_, err := tool.Execute(context.Background(), `{"tool":"read","intent":"x"}`)
+	_, err := tool.Invoke(context.Background(), `{"tool":"read","intent":"x"}`)
 	if err == nil {
 		t.Fatal("expected error for missing reason")
 	}

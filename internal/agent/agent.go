@@ -42,11 +42,54 @@ type Event struct {
 	Usage      *llm.Usage
 }
 
-type Tool struct {
-	Name        string
-	Description string
-	Parameters  any
-	Execute     func(ctx context.Context, argsJSON string) (string, error)
+type Tool interface {
+	Name() string
+	Description() string
+	Parameters() map[string]any
+	Invoke(ctx context.Context, argsJSON string) (string, error)
+}
+
+type ToolFunc struct {
+	N  string
+	D  string
+	P  map[string]any
+	Fn func(context.Context, string) (string, error)
+}
+
+func (t ToolFunc) Name() string               { return t.N }
+func (t ToolFunc) Description() string        { return t.D }
+func (t ToolFunc) Parameters() map[string]any { return t.P }
+func (t ToolFunc) Invoke(ctx context.Context, argsJSON string) (string, error) {
+	return t.Fn(ctx, argsJSON)
+}
+
+const (
+	IntentField       = "intent"
+	IntentDescription = "Required short label shown in the UI: why this call is being made."
+)
+
+func RequireIntent(argsJSON string) error {
+	var a struct {
+		Intent string `json:"intent"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
+		return fmt.Errorf("invalid args: %w", err)
+	}
+	if strings.TrimSpace(a.Intent) == "" {
+		return fmt.Errorf("%s is required (%s)", IntentField, IntentDescription)
+	}
+	return nil
+}
+
+func RunTool[T any](ctx context.Context, argsJSON string, fn func(context.Context, T) (string, error)) (string, error) {
+	if err := RequireIntent(argsJSON); err != nil {
+		return "", err
+	}
+	var args T
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("invalid args: %w", err)
+	}
+	return fn(ctx, args)
 }
 
 type Agent struct {
@@ -309,11 +352,11 @@ func (a *Agent) WithTool(t Tool) *Agent {
 	if a.toolsByID == nil {
 		a.toolsByID = make(map[string]int)
 	}
-	if i, exists := a.toolsByID[t.Name]; exists {
+	if i, exists := a.toolsByID[t.Name()]; exists {
 		a.toolList[i] = t
 		return a
 	}
-	a.toolsByID[t.Name] = len(a.toolList)
+	a.toolsByID[t.Name()] = len(a.toolList)
 	a.toolList = append(a.toolList, t)
 	return a
 }
@@ -522,7 +565,7 @@ func buildRequest(a *Agent, msgs []llm.Message) *llm.ChatRequest {
 	if len(a.toolList) > 0 {
 		req.Tools = make([]llm.ToolDef, 0, len(a.toolList))
 		for _, t := range a.toolList {
-			req.Tools = append(req.Tools, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name, Description: t.Description, Parameters: t.Parameters}})
+			req.Tools = append(req.Tools, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name(), Description: t.Description(), Parameters: t.Parameters()}})
 		}
 	}
 	return req
@@ -534,7 +577,7 @@ func (a *Agent) toolDefsForStrategy() []llm.ToolDef {
 	}
 	defs := make([]llm.ToolDef, 0, len(a.toolList))
 	for _, t := range a.toolList {
-		defs = append(defs, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name, Description: t.Description, Parameters: t.Parameters}})
+		defs = append(defs, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name(), Description: t.Description(), Parameters: t.Parameters()}})
 	}
 	return defs
 }
@@ -550,7 +593,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}) {
 			return msgs, false
 		}
-		result, err := tool.Execute(ctx, tc.Function.Arguments)
+		result, err := tool.Invoke(ctx, tc.Function.Arguments)
 		observe := Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: result}
 		if err != nil {
 			observe.ToolError = err.Error()
@@ -635,7 +678,7 @@ func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message
 func (a *Agent) findTool(name string) (Tool, bool) {
 	i, ok := a.toolsByID[name]
 	if !ok {
-		return Tool{}, false
+		return nil, false
 	}
 	return a.toolList[i], true
 }

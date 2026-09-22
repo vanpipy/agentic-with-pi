@@ -2,13 +2,18 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/vanpiyp/awp/internal/agent"
 )
+
+type readArgs struct {
+	Path   string `json:"path"`
+	Offset int    `json:"offset,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+}
 
 func ReadFile(cwd string, opts FileOptions) agent.Tool {
 	maxBytes := opts.MaxBytes
@@ -19,10 +24,10 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 	if maxLines <= 0 {
 		maxLines = defaultReadMaxLines
 	}
-	return agent.Tool{
-		Name:        "read",
-		Description: fmt.Sprintf("Read file contents. Output is truncated to %d lines or %dKB (whichever hits first). Use offset/limit for large files. REQUIRED: the 'path' argument must always be provided.", maxLines, maxBytes/1024),
-		Parameters: requireIntentSchema("read", map[string]any{
+	return agent.ToolFunc{
+		N: "read",
+		D: fmt.Sprintf("Read file contents. Output is truncated to %d lines or %dKB (whichever hits first). Use offset/limit for large files. REQUIRED: the 'path' argument must always be provided.", maxLines, maxBytes/1024),
+		P: requireIntentSchema("read", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path":   map[string]any{"type": "string", "description": "REQUIRED. Path to file (relative or absolute). Omit only if you intentionally want to discover the working directory."},
@@ -31,55 +36,45 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 			},
 			"required": []string{"path"},
 		}),
-		Execute: func(_ context.Context, argsJSON string) (string, error) {
-			if err := requireIntentOrError(argsJSON); err != nil {
-				return "", err
-			}
-			var args struct {
-				Path   string `json:"path"`
-				Offset int    `json:"offset,omitempty"`
-				Limit  int    `json:"limit,omitempty"`
-				Intent string `json:"intent"`
-			}
-			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-				return "", fmt.Errorf("invalid args: %w", err)
-			}
-			if trimSpace(args.Path) == "" {
-				return "", fmt.Errorf("path is required (use the ls tool to discover files in a directory)")
-			}
-			if args.Limit <= 0 {
-				args.Limit = maxLines
-			}
-			fullPath := absPath(cwd, args.Path)
-			info, err := os.Stat(fullPath)
-			if err != nil {
-				return "", err
-			}
-			if info.IsDir() {
-				return "", fmt.Errorf("%s is a directory (use the ls tool to list its contents, not read)", fullPath)
-			}
-			data, err := os.ReadFile(fullPath)
-			if err != nil {
-				return "", err
-			}
-			content := string(data)
-			if args.Offset > 0 || len(content) > maxBytes {
-				lines := strings.Split(content, "\n")
-				start := args.Offset
-				if start < 1 {
-					start = 1
+		Fn: func(_ context.Context, argsJSON string) (string, error) {
+			return agent.RunTool(context.TODO(), argsJSON, func(_ context.Context, args readArgs) (string, error) {
+				if trimSpace(args.Path) == "" {
+					return "", fmt.Errorf("path is required (use the ls tool to discover files in a directory)")
 				}
-				if start > len(lines) {
-					return fmt.Sprintf("(file has only %d lines)", len(lines)), nil
+				if args.Limit <= 0 {
+					args.Limit = maxLines
 				}
-				end := start + args.Limit - 1
-				if end > len(lines) {
-					end = len(lines)
+				fullPath := absPath(cwd, args.Path)
+				info, err := os.Stat(fullPath)
+				if err != nil {
+					return "", err
 				}
-				content = strings.Join(lines[start-1:end], "\n")
-			}
-			out, _ := truncate(content, maxBytes)
-			return out, nil
+				if info.IsDir() {
+					return "", fmt.Errorf("%s is a directory (use the ls tool to list its contents, not read)", fullPath)
+				}
+				data, err := os.ReadFile(fullPath)
+				if err != nil {
+					return "", err
+				}
+				content := string(data)
+				if args.Offset > 0 || len(content) > maxBytes {
+					lines := strings.Split(content, "\n")
+					start := args.Offset
+					if start < 1 {
+						start = 1
+					}
+					if start > len(lines) {
+						return fmt.Sprintf("(file has only %d lines)", len(lines)), nil
+					}
+					end := start + args.Limit - 1
+					if end > len(lines) {
+						end = len(lines)
+					}
+					content = strings.Join(lines[start-1:end], "\n")
+				}
+				out, _ := truncate(content, maxBytes)
+				return out, nil
+			})
 		},
 	}
 }

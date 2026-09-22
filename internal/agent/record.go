@@ -48,7 +48,7 @@ func (a *Agent) writeHeaderLocked() {
 	}
 	tools := make([]string, 0, len(a.toolList))
 	for _, t := range a.toolList {
-		tools = append(tools, t.Name)
+		tools = append(tools, t.Name())
 	}
 	header := sessionHeader{Kind: "session", Version: 1, ID: id, Model: a.Model.ID, MaxTurns: a.SafetyNet, System: system, Tools: tools, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if err := writeJSONLine(a.logBuf, header); err != nil {
