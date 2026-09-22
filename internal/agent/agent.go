@@ -62,10 +62,208 @@ type Agent struct {
 	logSeq                 int
 	compaction             CompactionSettings
 	repeatedToolErrorLimit int
+	strategy               Strategy
+}
+
+type Strategy interface {
+	Name() string
+	Step(ctx context.Context, msgs []llm.Message, emit func(context.Context, Event) bool) (Step, error)
+	ShouldAbort(msgs []llm.Message, lastFailedToolError string) error
+}
+
+type StepKind int
+
+const (
+	StepContinue StepKind = iota
+	StepFinal
+)
+
+type Step struct {
+	Kind         StepKind
+	Content      string
+	Reasoning    string
+	ReasoningSig string
+	ToolCalls    []llm.ToolCall
+	Usage        *llm.Usage
+}
+
+type ReActStrategy struct {
+	core                   llm.Core
+	model                  llm.Model
+	toolDefsGetter         func() []llm.ToolDef
+	maxToolsPerTurn        int
+	repeatedToolErrorLimit int
+}
+
+func NewReActStrategy(core llm.Core, model llm.Model, toolDefsGetter func() []llm.ToolDef) *ReActStrategy {
+	return &ReActStrategy{
+		core:                   core,
+		model:                  model,
+		toolDefsGetter:         toolDefsGetter,
+		maxToolsPerTurn:        6,
+		repeatedToolErrorLimit: 3,
+	}
+}
+
+func (r *ReActStrategy) Name() string { return "react" }
+
+func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(context.Context, Event) bool) (Step, error) {
+	if !emit(ctx, Event{Category: EventThoughtStart}) {
+		return Step{}, ctx.Err()
+	}
+	req := &llm.ChatRequest{Model: r.model.ID, Messages: msgs}
+	if r.toolDefsGetter != nil {
+		req.Tools = r.toolDefsGetter()
+	}
+	raw, err := r.core.StreamChat(ctx, req)
+	if err != nil {
+		if isCtxErr(err) {
+			return Step{}, err
+		}
+		emit(ctx, Event{Category: EventError, ToolError: err.Error()})
+		emit(ctx, Event{Category: EventThoughtEnd})
+		return Step{}, nil
+	}
+	var result turnResult
+	var contentBuf, reasoningBuf strings.Builder
+	contentBuf.Grow(2048)
+	reasoningBuf.Grow(2048)
+	for ev := range raw {
+		if ctx.Err() != nil {
+			return Step{}, ctx.Err()
+		}
+		if !r.processStreamEvent(ctx, ev, &result, &contentBuf, &reasoningBuf, emit) {
+			return Step{}, ctx.Err()
+		}
+	}
+	result.content = contentBuf.String()
+	result.reasoning = reasoningBuf.String()
+	if !emit(ctx, Event{
+		Category:  EventThoughtEnd,
+		Content:   result.content,
+		Reasoning: result.reasoning,
+		ToolCalls: result.toolCalls,
+		Usage:     result.usage,
+	}) {
+		return Step{}, ctx.Err()
+	}
+	switch {
+	case result.finishReason == llm.FinishReasonLength && len(result.toolCalls) > 0:
+		emit(ctx, Event{Category: EventError, ToolError: "response truncated mid tool call, refusing"})
+		return Step{}, nil
+	case result.finishReason == llm.FinishReasonLength && result.content == "":
+		emit(ctx, Event{Category: EventError, ToolError: "response truncated with no content"})
+		return Step{}, nil
+	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0 && allToolCallsEmpty(result.toolCalls):
+		emit(ctx, Event{Category: EventError, ToolError: "empty tool calls, refusing"})
+		return Step{}, nil
+	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0:
+		return Step{
+			Kind:         StepContinue,
+			Content:      result.content,
+			Reasoning:    result.reasoning,
+			ReasoningSig: result.reasoningSig,
+			ToolCalls:    result.toolCalls,
+			Usage:        result.usage,
+		}, nil
+	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) == 0:
+		emit(ctx, Event{Category: EventError, ToolError: "tool_use finish reason with no tool calls"})
+		return Step{}, nil
+	case (result.finishReason == llm.FinishReasonStop || (result.finishReason == llm.FinishReasonLength && result.content != "")) && len(result.toolCalls) == 0:
+		emit(ctx, Event{Category: EventFinalAnswer, Content: result.content, Usage: result.usage})
+		return Step{
+			Kind:    StepFinal,
+			Content: result.content,
+			Usage:   result.usage,
+		}, nil
+	}
+	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.finishReason, len(result.toolCalls))
+}
+
+func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.StreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
+	if ev.Err != nil {
+		if isCtxErr(ev.Err) {
+			return false
+		}
+		emit(ctx, Event{Category: EventError, ToolError: ev.Err.Error()})
+		emit(ctx, Event{Category: EventThoughtEnd})
+		return false
+	}
+	if ev.Chunk == nil {
+		return true
+	}
+	for _, c := range ev.Chunk.Choices {
+		if c.Delta.Reasoning != "" {
+			reasoningBuf.WriteString(c.Delta.Reasoning)
+			if !emit(ctx, Event{Category: EventThoughtChunk, Reasoning: c.Delta.Reasoning}) {
+				return false
+			}
+		}
+		if c.Delta.ReasoningSig != "" {
+			result.reasoningSig = c.Delta.ReasoningSig
+		}
+		if c.Delta.Content != "" {
+			contentBuf.WriteString(c.Delta.Content)
+			if !emit(ctx, Event{Category: EventThoughtChunk, Content: c.Delta.Content}) {
+				return false
+			}
+		}
+		if c.FinishReason != llm.FinishReasonUnknown {
+			result.finishReason = c.FinishReason
+		}
+		if len(c.Delta.ToolCalls) > 0 {
+			result.toolCalls = append(result.toolCalls, c.Delta.ToolCalls...)
+		}
+	}
+	if ev.Chunk.Usage != nil {
+		result.usage = ev.Chunk.Usage
+	}
+	return true
+}
+
+func (r *ReActStrategy) ShouldAbort(msgs []llm.Message, lastFailedToolError string) error {
+	const maxConsecutiveRepeats = 3
+	recentCalls := []string{}
+	for _, m := range msgs {
+		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
+			sig := toolCallSignature(m.ToolCalls)
+			recentCalls = append(recentCalls, sig)
+			if len(recentCalls) > maxConsecutiveRepeats {
+				recentCalls = recentCalls[1:]
+			}
+			if len(recentCalls) >= maxConsecutiveRepeats && allEqual(recentCalls) {
+				return fmt.Errorf("tool calls repeated %d times, aborting", maxConsecutiveRepeats+1)
+			}
+		}
+	}
+	if lastFailedToolError == "" {
+		return nil
+	}
+	consecutiveTurns := 0
+	i := len(msgs) - 1
+	for i >= 0 {
+		m := msgs[i]
+		if !(m.Role == "tool" && m.Content == lastFailedToolError) {
+			break
+		}
+		consecutiveTurns++
+		i--
+		for i >= 0 && msgs[i].Role == "tool" {
+			i--
+		}
+		for i >= 0 && msgs[i].Role != "assistant" {
+			i--
+		}
+		i--
+	}
+	if consecutiveTurns >= r.repeatedToolErrorLimit {
+		return fmt.Errorf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", consecutiveTurns, lastFailedToolError)
+	}
+	return nil
 }
 
 func NewAgent(llmCore llm.Core) *Agent {
-	return &Agent{
+	a := &Agent{
 		core:          llmCore,
 		SafetyNet:     200,
 		SystemPrompts: "You are a helpful coding assistant",
@@ -76,6 +274,8 @@ func NewAgent(llmCore llm.Core) *Agent {
 		},
 		repeatedToolErrorLimit: 3,
 	}
+	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
+	return a
 }
 
 func (a *Agent) WithSafetyNet(n int) *Agent {
@@ -88,6 +288,9 @@ func (a *Agent) WithSafetyNet(n int) *Agent {
 
 func (a *Agent) WithModel(model llm.Model) *Agent {
 	a.Model = model
+	if rs, ok := a.strategy.(*ReActStrategy); ok && rs != nil {
+		rs.model = model
+	}
 	return a
 }
 
@@ -171,11 +374,8 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 }
 
 func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
-	const maxConsecutiveRepeats = 3
 	const maxToolsPerTurn = 6
-	recentCalls := []string{}
-	recentToolErrors := []string{}
-
+	emit := a.bindEmit(ch)
 	for turn := 0; turn < a.SafetyNet; turn++ {
 		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
 			previousSummary := ExtractPreviousSummary(msgs)
@@ -186,64 +386,46 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 			}
 			msgs = compacted
 		}
-		result, ok := a.runTurn(ctx, msgs, ch)
-		if !ok {
+		step, err := a.strategy.Step(ctx, msgs, emit)
+		if err != nil {
 			return
 		}
-		if len(result.toolCalls) == 0 {
-			msgs = append(msgs, result.toAssistantMessage())
+		if step.Kind == StepFinal {
 			return
 		}
-
-		toolCalls := result.toolCalls
+		toolCalls := step.ToolCalls
 		if len(toolCalls) > maxToolsPerTurn {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
 			toolCalls = toolCalls[:maxToolsPerTurn]
-			result.toolCalls = toolCalls
 		}
-		msgs = append(msgs, result.toAssistantMessage())
-
-		signature := toolCallSignature(toolCalls)
-		remaining := a.SafetyNet - turn - 1
-		if remaining > maxConsecutiveRepeats*2 && len(recentCalls) >= maxConsecutiveRepeats &&
-			allEqual(append(recentCalls, signature)) {
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("tool calls repeated %d times, aborting", maxConsecutiveRepeats+1)})
-			return
-		}
-		_ = maxConsecutiveRepeats
-		recentCalls = append(recentCalls, signature)
-		if len(recentCalls) > maxConsecutiveRepeats {
-			recentCalls = recentCalls[1:]
-		}
-
+		msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
+		var ok bool
 		msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
 		if !ok {
 			return
 		}
-
-		lastFailed := ""
-		for _, m := range msgs {
-			if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
-				lastFailed = m.Content
-				break
-			}
-		}
-		if lastFailed != "" {
-			if len(recentToolErrors) > 0 && recentToolErrors[len(recentToolErrors)-1] == lastFailed {
-				recentToolErrors[len(recentToolErrors)-1] = lastFailed
-			} else {
-				recentToolErrors = append(recentToolErrors, lastFailed)
-			}
-			if len(recentToolErrors) > a.repeatedToolErrorLimit {
-				recentToolErrors = recentToolErrors[len(recentToolErrors)-a.repeatedToolErrorLimit:]
-			}
-			if len(recentToolErrors) == a.repeatedToolErrorLimit && allSameRecent(recentToolErrors) {
-				a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("aborting: tool failed %d times in a row with the same error: %s. Stop and report to the user instead of retrying.", a.repeatedToolErrorLimit, lastFailed)})
-				return
-			}
+		lastFailed := lastFailedToolError(msgs)
+		if abortErr := a.strategy.ShouldAbort(msgs, lastFailed); abortErr != nil {
+			a.emit(ctx, ch, Event{Category: EventError, ToolError: abortErr.Error()})
+			return
 		}
 	}
 	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet)})
+}
+
+func (a *Agent) bindEmit(ch chan<- Event) func(context.Context, Event) bool {
+	return func(ctx context.Context, ev Event) bool {
+		return a.emit(ctx, ch, ev)
+	}
+}
+
+func lastFailedToolError(msgs []llm.Message) string {
+	for _, m := range msgs {
+		if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
+			return m.Content
+		}
+	}
+	return ""
 }
 
 func (a *Agent) openLogLocked() {
@@ -346,103 +528,15 @@ func buildRequest(a *Agent, msgs []llm.Message) *llm.ChatRequest {
 	return req
 }
 
-func (a *Agent) runTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event) (turnResult, bool) {
-	if !a.emit(ctx, ch, Event{Category: EventThoughtStart}) {
-		return turnResult{}, false
+func (a *Agent) toolDefsForStrategy() []llm.ToolDef {
+	if len(a.toolList) == 0 {
+		return nil
 	}
-	raw, err := a.core.StreamChat(ctx, buildRequest(a, msgs))
-	if err != nil {
-		if isCtxErr(err) {
-			return turnResult{}, false
-		}
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: err.Error()})
-		a.emit(ctx, ch, Event{Category: EventThoughtEnd})
-		return turnResult{}, false
+	defs := make([]llm.ToolDef, 0, len(a.toolList))
+	for _, t := range a.toolList {
+		defs = append(defs, llm.ToolDef{Type: "function", Function: llm.FunctionDef{Name: t.Name, Description: t.Description, Parameters: t.Parameters}})
 	}
-	var result turnResult
-	var contentBuf, reasoningBuf strings.Builder
-	contentBuf.Grow(2048)
-	reasoningBuf.Grow(2048)
-	for ev := range raw {
-		if ctx.Err() != nil {
-			return turnResult{}, false
-		}
-		if !a.processStreamEvent(ctx, ch, ev, &result, &contentBuf, &reasoningBuf) {
-			return turnResult{}, false
-		}
-	}
-	result.content = contentBuf.String()
-	result.reasoning = reasoningBuf.String()
-	if !a.emit(ctx, ch, Event{
-		Category:  EventThoughtEnd,
-		Content:   result.content,
-		Reasoning: result.reasoning,
-		ToolCalls: result.toolCalls,
-		Usage:     result.usage,
-	}) {
-		return turnResult{}, false
-	}
-	switch {
-	case result.finishReason == llm.FinishReasonLength && len(result.toolCalls) > 0:
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "response truncated mid tool call, refusing"})
-		return turnResult{}, false
-	case result.finishReason == llm.FinishReasonLength && result.content == "":
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "response truncated with no content"})
-		return turnResult{}, false
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0 && allToolCallsEmpty(result.toolCalls):
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "empty tool calls, refusing"})
-		return turnResult{}, false
-
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0:
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) == 0:
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: "tool_use finish reason with no tool calls"})
-		return turnResult{}, false
-	case (result.finishReason == llm.FinishReasonStop || (result.finishReason == llm.FinishReasonLength && result.content != "")) && len(result.toolCalls) == 0:
-		a.emit(ctx, ch, Event{Category: EventFinalAnswer, Content: result.content, Usage: result.usage})
-		return turnResult{}, false
-	}
-	return result, true
-}
-
-func (a *Agent) processStreamEvent(ctx context.Context, ch chan<- Event, ev llm.StreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder) bool {
-	if ev.Err != nil {
-		if isCtxErr(ev.Err) {
-			return false
-		}
-		a.emit(ctx, ch, Event{Category: EventError, ToolError: ev.Err.Error()})
-		a.emit(ctx, ch, Event{Category: EventThoughtEnd})
-		return false
-	}
-	if ev.Chunk == nil {
-		return true
-	}
-	for _, c := range ev.Chunk.Choices {
-		if c.Delta.Reasoning != "" {
-			reasoningBuf.WriteString(c.Delta.Reasoning)
-			if !a.emit(ctx, ch, Event{Category: EventThoughtChunk, Reasoning: c.Delta.Reasoning}) {
-				return false
-			}
-		}
-		if c.Delta.ReasoningSig != "" {
-			result.reasoningSig = c.Delta.ReasoningSig
-		}
-		if c.Delta.Content != "" {
-			contentBuf.WriteString(c.Delta.Content)
-			if !a.emit(ctx, ch, Event{Category: EventThoughtChunk, Content: c.Delta.Content}) {
-				return false
-			}
-		}
-		if c.FinishReason != llm.FinishReasonUnknown {
-			result.finishReason = c.FinishReason
-		}
-		if len(c.Delta.ToolCalls) > 0 {
-			result.toolCalls = append(result.toolCalls, c.Delta.ToolCalls...)
-		}
-	}
-	if ev.Chunk.Usage != nil {
-		result.usage = ev.Chunk.Usage
-	}
-	return true
+	return defs
 }
 
 func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {

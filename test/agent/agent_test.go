@@ -1004,3 +1004,102 @@ func TestAgentFindTool_DoubleRegisterOverwrites(t *testing.T) {
 		t.Errorf("Execute output = %q, want second (overwrite)", out)
 	}
 }
+
+func TestReActStrategyStep_ContinuesOnToolCalls(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		toolUseStartChunk("c1", "ls"),
+		textDeltaChunk("thinking..."),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}}
+	strat := agent.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	noop := func(context.Context, agent.Event) bool { return true }
+
+	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "explore"}}, noop)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if step.Kind != agent.StepContinue {
+		t.Errorf("Kind = %v, want StepContinue", step.Kind)
+	}
+	if len(step.ToolCalls) != 1 {
+		t.Errorf("len(ToolCalls) = %d, want 1", len(step.ToolCalls))
+	}
+	if step.ToolCalls[0].Function.Name != "ls" {
+		t.Errorf("ToolCalls[0].Name = %q, want ls", step.ToolCalls[0].Function.Name)
+	}
+	if step.Content != "thinking..." {
+		t.Errorf("Content = %q, want %q", step.Content, "thinking...")
+	}
+}
+
+func TestReActStrategyStep_FinalAnswer(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("the answer"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	strat := agent.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	noop := func(context.Context, agent.Event) bool { return true }
+
+	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "?"}}, noop)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if step.Kind != agent.StepFinal {
+		t.Errorf("Kind = %v, want StepFinal", step.Kind)
+	}
+	if step.Content != "the answer" {
+		t.Errorf("Content = %q, want %q", step.Content, "the answer")
+	}
+	if len(step.ToolCalls) != 0 {
+		t.Errorf("len(ToolCalls) = %d, want 0", len(step.ToolCalls))
+	}
+}
+
+func TestReActStrategyShouldAbort_RepeatedCalls(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
+	msgs := []llm.Message{
+		{Role: "user", Content: "explore"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+	if err := strat.ShouldAbort(msgs, ""); err == nil {
+		t.Error("ShouldAbort returned nil, want non-nil for repeated identical tool calls")
+	}
+}
+
+func TestReActStrategyShouldAbort_RepeatedErrors(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	errMsg := "Tool ls failed: kaboom"
+	msgs := []llm.Message{
+		{Role: "user", Content: "ls"},
+		{Role: "tool", Content: errMsg},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}}},
+		{Role: "tool", Content: errMsg},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}}},
+		{Role: "tool", Content: errMsg},
+	}
+	if err := strat.ShouldAbort(msgs, errMsg); err == nil {
+		t.Error("ShouldAbort returned nil, want non-nil for repeated identical errors")
+	}
+}
+
+func TestReActStrategyShouldAbort_NormalHistory(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	msgs := []llm.Message{
+		{Role: "user", Content: "explore"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "a.txt\nb.txt"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c2", Function: llm.FunctionCall{Name: "grep", Arguments: `{"pattern":"x"}`}}}},
+		{Role: "tool", ToolCallID: "c2", Content: "match"},
+	}
+	if err := strat.ShouldAbort(msgs, ""); err != nil {
+		t.Errorf("ShouldAbort returned %v, want nil for varied history", err)
+	}
+}
