@@ -12,7 +12,7 @@ import (
 
 const socketPerm os.FileMode = 0o660
 
-func Listen(path string) (Listener, error) {
+func Listen(path string) (net.Listener, error) {
 	if path == "" {
 		return nil, errors.New("transport: empty socket path")
 	}

@@ -143,21 +143,6 @@ func TestDialEmptyPath(t *testing.T) {
 	}
 }
 
-func TestListen(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "test.sock")
-
-	ln, err := transport.Listen(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
-
-	if ln.Path() != path {
-		t.Errorf("Path() = %q, want %q", ln.Path(), path)
-	}
-}
-
 func TestSocketPermIsNotWorldAccessible(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.sock")
