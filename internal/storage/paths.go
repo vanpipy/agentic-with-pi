@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,11 +43,20 @@ func SessionsDir() string {
 	return filepath.Join(LogsDir(), "sessions")
 }
 
-func SocketPath() string {
-	if env := os.Getenv("AWP_SOCKET"); env != "" {
-		return env
-	}
-	return filepath.Join(RuntimeDir(), "awp.sock")
+func ServerLogDir() string {
+	return filepath.Join(LogsDir(), "server")
+}
+
+func ClientSocketPath(clientPID int) string {
+	return filepath.Join(RuntimeDir(), fmt.Sprintf("awp.sock.%d", clientPID))
+}
+
+func ServerPidPath(clientPID int) string {
+	return filepath.Join(RuntimeDir(), fmt.Sprintf("awp.tui.%d.pid", clientPID))
+}
+
+func ServerLogPath(clientPID int) string {
+	return filepath.Join(ServerLogDir(), fmt.Sprintf("awp.server.%d.log", clientPID))
 }
 
 func ConfigPath() string {

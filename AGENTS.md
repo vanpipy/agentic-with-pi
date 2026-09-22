@@ -17,9 +17,10 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 ## Commands
 
 - `awp` — TUI (default, requires terminal).
-- `awp serve` — background server on `$AWP_SOCKET` (default `~/.awp/runtime/awp.sock`).
-- `awp connect <prompt>` — spawn server + send prompt + print events.
-- `awp resume <session_id>` — replay session events from JSONL.
+- `awp serve --socket <path>` — background server on a per-instance socket (default `~/.awp/runtime/awp.sock.<serve_pid>`).
+- `awp connect --connect-pid <pid> <prompt>` — send prompt to an existing instance (TUI or `awp serve`) identified by PID; no own server.
+- `awp resume --connect-pid <pid> <session_id> [new_prompt]` — replay or extend a session on an existing instance; no own server.
+- Each `awp` TUI spawns its own server and tracks it via `~/.awp/runtime/awp.tui.<tui_pid>.pid`. TUI shutdown SIGTERMs the server.
 - `awp demo` — in-process demo (no server).
 
 ## Build & verify

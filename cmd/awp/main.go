@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -28,26 +29,23 @@ import (
 const usage = `awp — agent with pi
 
 Usage:
-  awp                              launch TUI (recommended, requires terminal)
-  awp serve                        run as background server (Unix socket)
-  awp connect <prompt>             spawn server + send prompt + print events
-  awp resume <session_id> [new_prompt]   resume session; with new_prompt,
-                                          picks up the last compaction summary.
-                                          State is held in the server, so
-                                          multiple prompts on the same
-                                          session_id accumulate messages and
-                                          slide the context window via
-                                          compaction (see docs/compaction).
-  awp help                         show this message
+  awp                                              launch TUI (recommended, requires terminal)
+  awp serve --socket <path>                        run as background server on a per-client socket
+  awp connect --connect-pid <pid> <prompt>         send prompt to a running TUI/server instance
+  awp resume --connect-pid <pid> <session_id> [new_prompt]
+                                                  resume session on a running instance
+  awp help                                         show this message
 
-Server socket: $AWP_SOCKET (default ~/.awp/runtime/awp.sock)
+Process model: each awp instance owns its own socket and (for TUI) the
+server it spawned. Use --connect-pid to attach awp connect/awp resume
+to an existing instance. The PID is printed by 'awp' on startup.
 `
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "serve":
-			runServe()
+			runServe(os.Args[2:])
 			return
 		case "connect":
 			runConnect(os.Args[2:])
@@ -130,11 +128,14 @@ Planning rules:
 	return ag
 }
 
-func runServe() {
+func runServe(args []string) {
+	socket := parseSocketFlag(args)
+	if socket == "" {
+		socket = storage.ClientSocketPath(os.Getpid())
+	}
 	setupLog()
 	ag := loadAgent()
 
-	socket := storage.SocketPath()
 	srv, err := server.New(ag, socket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "server start:", err)
@@ -151,33 +152,55 @@ func runServe() {
 		srv.Shutdown(ctx)
 	}()
 
-	fmt.Printf("awp-server listening on %s\n", socket)
+	fmt.Printf("awp-server pid=%d listening on %s\n", os.Getpid(), socket)
 	if err := srv.Serve(); err != nil {
 		fmt.Fprintln(os.Stderr, "serve:", err)
 		os.Exit(1)
 	}
 }
 
+func parseSocketFlag(args []string) string {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--socket" {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
+func parseConnectPIDFlag(args []string) (int, bool) {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == "--connect-pid" {
+			pid, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "invalid --connect-pid %q: %v\n", args[i+1], err)
+				os.Exit(1)
+			}
+			return pid, true
+		}
+	}
+	return 0, false
+}
+
 func runConnect(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: awp connect <prompt>")
+	connectPID, ok := parseConnectPIDFlag(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: awp connect --connect-pid <pid> <prompt>")
 		os.Exit(1)
 	}
-	prompt := args[0]
+	promptIdx := indexAfterFlag(args, "--connect-pid")
+	if promptIdx >= len(args) {
+		fmt.Fprintln(os.Stderr, "usage: awp connect --connect-pid <pid> <prompt>")
+		os.Exit(1)
+	}
+	prompt := strings.Join(args[promptIdx:], " ")
 
 	setupLog()
 
-	socket := storage.SocketPath()
+	socket := storage.ClientSocketPath(connectPID)
 	if !transport.IsRunning(socket) {
-		fmt.Fprintln(os.Stderr, "server not running, spawning...")
-		if err := spawnServer(); err != nil {
-			fmt.Fprintln(os.Stderr, "spawn failed:", err)
-			os.Exit(1)
-		}
-		if err := waitForServer(socket, 5*time.Second); err != nil {
-			fmt.Fprintln(os.Stderr, "wait failed:", err)
-			os.Exit(1)
-		}
+		fmt.Fprintf(os.Stderr, "no server on %s (connect-pid=%d)\n", socket, connectPID)
+		os.Exit(1)
 	}
 
 	fmt.Printf("=== awp connect ===\nsocket: %s\n\n", socket)
@@ -193,30 +216,38 @@ func runConnect(args []string) {
 	}
 }
 
+func indexAfterFlag(args []string, flag string) int {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return i + 1
+		}
+	}
+	return len(args)
+}
+
 func runResume(args []string) {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: awp resume <session_id> [new_prompt]")
+	connectPID, ok := parseConnectPIDFlag(args)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "usage: awp resume --connect-pid <pid> <session_id> [new_prompt]")
 		os.Exit(1)
 	}
-	sessionID := args[0]
+	sessionIDIdx := indexAfterFlag(args, "--connect-pid")
+	if sessionIDIdx >= len(args) {
+		fmt.Fprintln(os.Stderr, "usage: awp resume --connect-pid <pid> <session_id> [new_prompt]")
+		os.Exit(1)
+	}
+	sessionID := args[sessionIDIdx]
 	newPrompt := ""
-	if len(args) > 1 {
-		newPrompt = strings.Join(args[1:], " ")
+	if sessionIDIdx+1 < len(args) {
+		newPrompt = strings.Join(args[sessionIDIdx+1:], " ")
 	}
 
 	setupLog()
 
-	socket := storage.SocketPath()
+	socket := storage.ClientSocketPath(connectPID)
 	if !transport.IsRunning(socket) {
-		fmt.Fprintln(os.Stderr, "server not running, spawning...")
-		if err := spawnServer(); err != nil {
-			fmt.Fprintln(os.Stderr, "spawn failed:", err)
-			os.Exit(1)
-		}
-		if err := waitForServer(socket, 5*time.Second); err != nil {
-			fmt.Fprintln(os.Stderr, "wait failed:", err)
-			os.Exit(1)
-		}
+		fmt.Fprintf(os.Stderr, "no server on %s (connect-pid=%d)\n", socket, connectPID)
+		os.Exit(1)
 	}
 
 	c, err := client_sdk.Dial(socket)
@@ -251,17 +282,24 @@ func runResume(args []string) {
 	_ = c
 }
 
-func spawnServer() error {
+func spawnServer(socket string) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	cmd := exec.Command(exe, "serve")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd := exec.Command(exe, "serve", "--socket", socket)
 	cmd.Stdin = nil
+	cmd.Stdout = nil
+	if stderrFile, ferr := os.OpenFile(storage.ServerLogPath(os.Getpid()), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+		cmd.Stderr = stderrFile
+	} else {
+		cmd.Stderr = nil
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	return cmd.Process.Pid, nil
 }
 
 func waitForServer(socketPath string, timeout time.Duration) error {

@@ -50,6 +50,8 @@ type Model struct {
 	width        int
 	height       int
 	conn         *client_sdk.Client
+	serverPID    int
+	ownServer    bool
 	session      string
 	chat         *chatModel
 	input        *inputModel
@@ -88,13 +90,36 @@ func Run() error {
 		fmt.Fprintln(os.Stderr, "log setup:", err)
 	}
 
-	socket := storage.SocketPath()
-	if !transport.IsRunning(socket) {
-		fmt.Fprintln(os.Stderr, "server not running, spawning...")
-		if err := spawnServer(); err != nil {
+	clientPID := os.Getpid()
+	socket := storage.ClientSocketPath(clientPID)
+	pidFile := storage.ServerPidPath(clientPID)
+
+	ownServer := true
+	if pid, err := transport.ReadServerPID(pidFile); err == nil {
+		if transport.IsAlive(pid) {
+			ownServer = false
+			fmt.Fprintf(os.Stderr, "reusing server pid=%d from %s\n", pid, pidFile)
+		} else {
+			fmt.Fprintf(os.Stderr, "stale pidfile %s -> pid %d gone, cleaning\n", pidFile, pid)
+			transport.RemoveServerPID(pidFile)
+		}
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "warning: read pidfile %s: %v\n", pidFile, err)
+	}
+
+	if ownServer {
+		fmt.Fprintf(os.Stderr, "no server on %s, spawning...\n", socket)
+		serverPID, err := spawnServer(socket)
+		if err != nil {
 			return fmt.Errorf("spawn server: %w", err)
 		}
+		if err := transport.WriteServerPID(pidFile, serverPID); err != nil {
+			_ = syscall.Kill(serverPID, syscall.SIGTERM)
+			return fmt.Errorf("write pidfile: %w", err)
+		}
 		if err := waitForServer(socket, 5*time.Second); err != nil {
+			_ = syscall.Kill(serverPID, syscall.SIGTERM)
+			transport.RemoveServerPID(pidFile)
 			return fmt.Errorf("wait server: %w", err)
 		}
 	}
@@ -112,6 +137,8 @@ func Run() error {
 	m := &Model{
 		state:        stateReady,
 		conn:         conn,
+		serverPID:    ownServerPID(socket, pidFile),
+		ownServer:    ownServer,
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
@@ -129,6 +156,18 @@ func Run() error {
 	}
 
 	return conn.Close()
+}
+
+func ownServerPID(socket, pidFile string) int {
+	pid, err := transport.ReadServerPID(pidFile)
+	if err != nil {
+		return 0
+	}
+	if !transport.IsAlive(pid) {
+		_ = transport.RemoveServerPID(pidFile)
+		return 0
+	}
+	return pid
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -460,6 +499,17 @@ func (m *Model) shutdown() {
 	if m.conn != nil {
 		m.conn.Close()
 	}
+	if m.ownServer && m.serverPID > 0 {
+		_ = syscall.Kill(m.serverPID, syscall.SIGTERM)
+		deadline := time.Now().Add(2 * time.Second)
+		for transport.IsAlive(m.serverPID) && time.Now().Before(deadline) {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if transport.IsAlive(m.serverPID) {
+			_ = syscall.Kill(m.serverPID, syscall.SIGKILL)
+		}
+		transport.RemoveServerPID(storage.ServerPidPath(os.Getpid()))
+	}
 }
 
 func (m *Model) cancel() {
@@ -524,17 +574,24 @@ func renderHeader(width int, status, session string) string {
 	return left + headerTrack.Render(strings.Repeat(" ", gap)) + right
 }
 
-func spawnServer() error {
+func spawnServer(socket string) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	cmd := exec.Command(exe, "serve")
+	cmd := exec.Command(exe, "serve", "--socket", socket)
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	if stderrFile, ferr := os.OpenFile(storage.ServerLogPath(os.Getpid()), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
+		cmd.Stderr = stderrFile
+	} else {
+		cmd.Stderr = io.Discard
+	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	return cmd.Process.Pid, nil
 }
 
 func waitForServer(socketPath string, timeout time.Duration) error {

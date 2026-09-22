@@ -1,10 +1,12 @@
 package storage_test
 
 import (
-	"github.com/vanpiyp/awp/internal/storage"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/vanpiyp/awp/internal/storage"
 )
 
 func TestHomeRespectsEnv(t *testing.T) {
@@ -83,17 +85,30 @@ func TestSessionsDirUnderLogs(t *testing.T) {
 	}
 }
 
-func TestSocketPathRespectsEnv(t *testing.T) {
-	t.Setenv("AWP_SOCKET", "/custom/awp.sock")
-	if got := storage.SocketPath(); got != "/custom/awp.sock" {
-		t.Errorf("got %q", got)
+func TestClientSocketPathIncludesPID(t *testing.T) {
+	got := storage.ClientSocketPath(1234)
+	wantSuffix := "/awp.sock.1234"
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("got %q, want suffix %q", got, wantSuffix)
 	}
 }
 
-func TestSocketPathDefault(t *testing.T) {
-	t.Setenv("AWP_SOCKET", "")
-	if got := storage.SocketPath(); got == "" {
-		t.Errorf("SocketPath returned empty")
+func TestServerPidPathIncludesPID(t *testing.T) {
+	got := storage.ServerPidPath(1234)
+	wantSuffix := "/awp.tui.1234.pid"
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("got %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestServerLogPathIncludesPID(t *testing.T) {
+	got := storage.ServerLogPath(1234)
+	wantSuffix := "/awp.server.1234.log"
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Errorf("got %q, want suffix %q", got, wantSuffix)
+	}
+	if !strings.Contains(got, "/server/") {
+		t.Errorf("got %q, want path under server/ subdir", got)
 	}
 }
 
