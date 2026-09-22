@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/vanpiyp/awp/internal/agent/tools"
 )
 
 type chatModel struct {
@@ -380,17 +382,29 @@ func (c *chatModel) appendReasoning(text string) {
 }
 
 func (c *chatModel) appendTool(name, args, result string) {
-	if result != "" {
-		c.messages = append(c.messages, chatMsg{
-			role: roleTool,
-			text: fmt.Sprintf("%s(%s) → %s", name, args, result),
-		})
-	} else {
+	if result == "" {
 		c.messages = append(c.messages, chatMsg{
 			role: roleTool,
 			text: fmt.Sprintf("%s(%s)", name, args),
 		})
+		c.refresh()
+		return
 	}
+	if tools.ToolOutputLooksFailed(result) {
+		if summary, ok := tools.ConciseToolErrorSummary(result); ok {
+			c.messages = append(c.messages, chatMsg{
+				role: roleTool,
+				text: fmt.Sprintf("%s(%s) → %s", name, args, summary),
+			})
+			c.refresh()
+			return
+		}
+	}
+	preview := tools.TruncateMiddle(result, 120)
+	c.messages = append(c.messages, chatMsg{
+		role: roleTool,
+		text: fmt.Sprintf("%s(%s) → %s", name, args, preview),
+	})
 	c.refresh()
 }
 
