@@ -180,13 +180,6 @@ func TestDefaultConfigEnvOverride(t *testing.T) {
 	}
 }
 
-func TestDefaultHomeRespectsEnv(t *testing.T) {
-	t.Setenv("AWP_HOME", "/custom/home")
-	if got := log.DefaultHome(); got != "/custom/home" {
-		t.Errorf("defaultHome = %q, want /custom/home", got)
-	}
-}
-
 func TestMultiHandlerDispatchesToBoth(t *testing.T) {
 	resetGlobalLogger(t)
 	tmp1 := t.TempDir()

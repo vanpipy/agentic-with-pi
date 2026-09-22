@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -219,10 +218,8 @@ func (s *Server) loadResumeHistory(sessionID string) ([]llm.Message, bool) {
 	path := DefaultPath(s.sessionsDir, sessionID)
 	loaded, err := Load(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "DEBUG loadResumeHistory no file path=%s err=%v\n", path, err)
 		return nil, false
 	}
-	fmt.Fprintf(os.Stderr, "DEBUG loadResumeHistory loaded path=%s compactions=%d events=%d\n", path, len(loaded.Compactions), len(loaded.Events))
 	if len(loaded.Compactions) == 0 {
 		return nil, false
 	}

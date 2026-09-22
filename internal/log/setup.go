@@ -76,11 +76,3 @@ func DefaultLogFile() string {
 	}
 	return filepath.Join(storage.Home(), "logs", "awp.log")
 }
-
-func DefaultHome() string {
-	if env := os.Getenv("AWP_HOME"); env != "" {
-		return env
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".awp")
-}

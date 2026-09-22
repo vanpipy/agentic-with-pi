@@ -126,19 +126,3 @@ func TestEnsureDir(t *testing.T) {
 	}
 }
 
-func TestEnsureDirsCreatesAll(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("AWP_HOME", filepath.Join(tmp, "home"))
-	t.Setenv("AWP_CONFIG_HOME", filepath.Join(tmp, "config"))
-
-	if err := storage.EnsureDirs(); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, dir := range []string{storage.Home(), storage.LogsDir(), storage.SessionsDir(), storage.ConfigDir()} {
-		if _, err := os.Stat(dir); err != nil {
-			t.Errorf("dir not created: %s: %v", dir, err)
-		}
-	}
-}
-

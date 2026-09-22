@@ -20,7 +20,7 @@ func (s *Server) Serve() error {
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {
-			if s.ctx.Err() != nil {
+			if s.shuttingDown.Load() {
 				return nil
 			}
 			slog.Debug("server: accept error", "err", err)
@@ -35,8 +35,9 @@ func (s *Server) Serve() error {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.cancel()
+	s.shuttingDown.Store(true)
 	s.listener.Close()
+	s.cancel()
 
 	done := make(chan struct{})
 	go func() {

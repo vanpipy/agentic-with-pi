@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/storage"
@@ -13,14 +14,15 @@ import (
 )
 
 type Server struct {
-	listener    net.Listener
-	stores      map[string]*Store
-	storesMu    sync.RWMutex
-	agent       *agent.Agent
-	sessionsDir string
-	ctx         context.Context
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
+	listener     net.Listener
+	shuttingDown atomic.Bool
+	stores       map[string]*Store
+	storesMu     sync.RWMutex
+	agent        *agent.Agent
+	sessionsDir  string
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
 
 	connCancels   map[string]context.CancelFunc
 	connCancelsMu sync.Mutex

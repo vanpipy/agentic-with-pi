@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,20 +51,6 @@ func SocketPath() string {
 
 func ConfigPath() string {
 	return filepath.Join(Home(), "config.yaml")
-}
-
-func EnsureDirs() error {
-	for _, dir := range []string{
-		Home(),
-		LogsDir(),
-		SessionsDir(),
-		ConfigDir(),
-	} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", dir, err)
-		}
-	}
-	return nil
 }
 
 func userDiscriminator() string {

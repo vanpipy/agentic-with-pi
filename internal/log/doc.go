@@ -20,13 +20,11 @@
 // # Path resolution
 //
 // DefaultLogFile delegates Home() to internal/storage, which is the
-// canonical path resolver in this codebase. DefaultHome() is a legacy
-// duplicate kept for compatibility with TestDefaultHomeRespectsEnv
-// and is not used by Setup or DefaultLogFile.
+// canonical path resolver in this codebase.
 //
 // # Layout
 //
 //   - setup.go     — printing: Config, Setup, DefaultConfig, openAppend,
-//                   DefaultLogFile, DefaultHome.
+//                   DefaultLogFile.
 //   - lifecycle.go — file lifecycle: Rotate, CleanupOld.
 package log

@@ -6,56 +6,47 @@ import (
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
-	"github.com/charmbracelet/x/ansi"
 )
 
 var (
-	mdRenderer   *glamour.TermRenderer
-	mdRendererMu sync.Mutex
+	mdRenderersMu sync.Mutex
+	mdRenderers   = make(map[int]*glamour.TermRenderer)
 )
 
-func getMdRenderer() *glamour.TermRenderer {
-	mdRendererMu.Lock()
-	defer mdRendererMu.Unlock()
-	if mdRenderer == nil {
-		r, err := glamour.NewTermRenderer(
-			glamour.WithStandardStyle(styles.NoTTYStyle),
-			glamour.WithWordWrap(0),
-			glamour.WithEmoji(),
-		)
-		if err == nil {
-			mdRenderer = r
-		}
+func getMdRenderer(width int) *glamour.TermRenderer {
+	mdRenderersMu.Lock()
+	defer mdRenderersMu.Unlock()
+	if r, ok := mdRenderers[width]; ok {
+		return r
 	}
-	return mdRenderer
+	options := []glamour.TermRendererOption{
+		glamour.WithStandardStyle(styles.NoTTYStyle),
+		glamour.WithEmoji(),
+	}
+	if width > 0 {
+		options = append(options, glamour.WithWordWrap(width))
+	}
+	r, err := glamour.NewTermRenderer(options...)
+	if err != nil {
+		return nil
+	}
+	mdRenderers[width] = r
+	return r
 }
 
 func renderMarkdownBody(text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return ""
 	}
-	r := getMdRenderer()
+	r := getMdRenderer(width)
 	if r == nil {
-		return softWrap(text, width)
-	}
-
-	out, err := r.Render(text)
-	if err != nil {
-		return softWrap(text, width)
-	}
-
-	out = strings.TrimRight(out, "\n")
-	if width <= 0 {
-		return out
-	}
-	return softWrap(out, width)
-}
-
-func softWrap(text string, width int) string {
-	if width <= 0 {
 		return text
 	}
-	return ansi.Wordwrap(text, width, "")
+	out, err := r.Render(text)
+	if err != nil {
+		return text
+	}
+	return strings.TrimRight(out, "\n")
 }
 
 func RenderMarkdownForTest(text string, width int) string {
