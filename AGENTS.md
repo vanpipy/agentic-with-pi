@@ -40,6 +40,17 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
   hashline byte verification, AST awareness via `oxc_engine`, callgraph,
   semantic search via ONNX embeddings, and a unified `tool_call` NDJSON
   protocol.
+- **Install paths** (any one works; pick the first one you have):
+  1. `npx @cortexkit/aft@latest setup` (npm wrapper, downloads binary,
+     registers with detected harnesses). The `@cortexkit/aft` npm package
+     re-exports a `aft` bin; platform binaries come from sibling packages
+     `@cortexkit/aft-{linux-x64,darwin-arm64,darwin-x64}`.
+  2. `cargo install --path <aft-repo>/crates/aft --locked` (source build).
+  3. Copy a pre-built binary to `~/.cargo/bin/aft` or anywhere on `PATH`.
+- **Verification**: `echo '{"id":"1","command":"echo","message":"hi"}' | aft`
+  should print `[aft] started, pid N` then
+  `{"id":"1","success":true,"message":"hi"}` then `[aft] stdin closed,
+  shutting down`.
 - **Detection**: `exec.LookPath("aft")` at first tool registration. If
   `AWP_NO_AFT=1`, force the Go path.
 - **Lifecycle**: one `aft` worker per AWP session. Worker is started when
@@ -53,6 +64,9 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
   serialize on a per-worker mutex).
 - **Subprocess args**: `aft` is invoked with no CLI args (NDJSON standalone
   mode). Stderr is captured to `$TMP/aft-<pid>.log` for crash triage.
+- **AFT persistent state**: `~/.local/share/cortexkit/aft/` (SQLite, callgraph,
+  checkpoints, cache). Created on first `aft` run, even `--help`. Owned by
+  AFT, not AWP — AWP never reads from or writes to this directory.
 - **Failure modes**:
   - `aft` not on `PATH` → silent fallback to Go.
   - `aft` crashes mid-session → the next tool call returns

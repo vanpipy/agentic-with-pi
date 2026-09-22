@@ -42,11 +42,12 @@ AWP silently falls back to the built-in Go implementations.
 Pick one of:
 
 ```bash
-# Option A — official installer (downloads a release binary into PATH,
-# also configures any detected harnesses). Recommended for end users.
+# Option A — official installer. Downloads a release binary into PATH,
+# registers with any detected harnesses, and initialises cortexkit storage
+# under ~/.local/share/cortexkit/aft/. Recommended for end users.
 npx @cortexkit/aft@latest setup
 
-# Option B — build from source (release build). Use this if you have the
+# Option B — build from source (release). Use this if you have the
 # aft repo checked out and want the latest source-tree changes.
 cargo install --path /path/to/aft/crates/aft --locked
 
@@ -59,10 +60,16 @@ Verify it works:
 ```bash
 which aft                          # should print a path
 echo '{"id":"1","command":"echo","message":"hi"}' | aft
-# expected: [aft] started, pid N
-#           {"id":"1","success":true,"message":"hi"}
-#           [aft] stdin closed, shutting down
+# expected:
+#   [aft] started, pid N
+#   {"id":"1","success":true,"message":"hi"}
+#   [aft] stdin closed, shutting down
 ```
+
+**Note**: `aft` keeps persistent state under `~/.local/share/cortexkit/aft/`
+(SQLite, callgraph, checkpoints, cache). The directory is created on first
+run, even for `aft --help`. Wipe it with `npx @cortexkit/aft@latest doctor
+--clear` or `rm -rf ~/.local/share/cortexkit`.
 
 To **disable** AFT integration entirely (always use Go impls), set
 `AWP_NO_AFT=1` in the environment.
@@ -84,6 +91,27 @@ To **disable** AFT integration entirely (always use Go impls), set
 ```
 
 ## Architecture
+
+```
+                 TUI (bubbletea v2)
+                      │  client-sdk
+                      ▼
+   ┌─────────────────────────────────────┐
+   │  awp (Go)                           │
+   │  ├─ server (JSON-RPC dispatch)      │
+   │  ├─ agent (ReAct loop)              │
+   │  │   └─ tools (registry)            │
+   │  │       ├─ built-in Go impls       │
+   │  │       └─ AFT wrappers ──┐        │
+   │  ├─ llm (provider/stream)   │        │
+   │  └─ storage/log/transport   │        │
+   └─────────────────────────────│────────┘
+                                 │ NDJSON over stdin/stdout
+                                 ▼
+                          aft (Rust, optional)
+                          └─ ~/.local/share/cortexkit/aft/
+                             (SQLite, callgraph, checkpoints)
+```
 
 - `cmd/awp` — entrypoint.
 - `internal/agent` + `internal/agent/tools/` — ReAct loop, tool registry.
