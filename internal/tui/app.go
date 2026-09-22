@@ -14,8 +14,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
-	"charm.land/lipgloss/v2"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/vanpiyp/awp/internal/client-sdk"
 	"github.com/vanpiyp/awp/internal/log"
@@ -45,24 +45,26 @@ func (s State) String() string {
 }
 
 type Model struct {
-	state        State
-	err          error
-	width        int
-	height       int
-	conn         *client_sdk.Client
-	serverPID    int
-	ownServer    bool
-	session      string
-	chat         *chatModel
-	input        *inputModel
-	autocomplete *autocompleteModel
-	picker       *sessionPickerModel
-	events       <-chan client_sdk.Event
-	lastKind     string
-	spinner      spinner.Model
-	help         help.Model
-	keys         keyBindings
-	showHelp     bool
+	state         State
+	err           error
+	width         int
+	height        int
+	conn          *client_sdk.Client
+	serverPID     int
+	ownServer     bool
+	session       string
+	lastPrompt    string
+	lastPromptNum int
+	chat          *chatModel
+	input         *inputModel
+	autocomplete  *autocompleteModel
+	picker        *sessionPickerModel
+	events        <-chan client_sdk.Event
+	lastKind      string
+	spinner       spinner.Model
+	help          help.Model
+	keys          keyBindings
+	showHelp      bool
 }
 
 type errMsg struct{ err error }
@@ -74,8 +76,8 @@ type promptSubmittedMsg struct {
 }
 
 type streamEventMsg struct {
-	ev  client_sdk.Event
-	err error
+	ev   client_sdk.Event
+	err  error
 	done bool
 }
 
@@ -210,7 +212,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showHelp {
 				m.showHelp = false
 				break
-}
+			}
 			if m.autocomplete.visible {
 				m.autocomplete.hide()
 				m.input.Reset()
@@ -265,6 +267,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			m.chat.submit(text)
 			m.chat.GotoBottom()
+			m.lastPrompt = text
+			m.lastPromptNum = m.chat.promptNum
 			m.state = stateStreaming
 			cmds = append(cmds, m.startStream(text))
 		case "up":
@@ -316,8 +320,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.done {
 			m.state = stateReady
 			m.events = nil
-		} else if msg.ev.Kind == "final_answer" || msg.ev.Kind == "error" {
+		} else if msg.ev.Kind == "final_answer" {
 			m.state = stateReady
+		} else if msg.ev.Kind == "error" {
+			m.state = stateError
 		}
 		if m.events != nil {
 			cmds = append(cmds, m.readNextEvent())
@@ -355,7 +361,7 @@ func (m *Model) View() tea.View {
 		return tea.NewView("initializing...")
 	}
 
-	header := renderHeader(m.width, m.statusRender(), m.session)
+	header := renderHeader(m.width, m.statusRender(), m.lastPrompt, m.session)
 
 	inputBox := m.input.View()
 
@@ -534,8 +540,6 @@ type promptDoneMsg struct{}
 
 var program *tea.Program
 
-
-
 func shortHelpBindings() []key.Binding {
 	return defaultKeys().ShortHelp()
 }
@@ -558,38 +562,80 @@ func SessionLabelForTest(id string, maxWidth int) string {
 }
 
 func RenderHeaderForTest(width int, status, sessionID string) string {
-	return renderHeader(width, status, sessionID)
+	return renderHeader(width, status, "", sessionID)
+}
+
+func RenderHeaderWithPromptForTest(width int, status, lastPrompt, sessionID string) string {
+	return renderHeader(width, status, lastPrompt, sessionID)
 }
 
 func (m *Model) statusRender() string {
 	switch m.state {
 	case stateStreaming:
 		return m.spinner.View() + " " + m.state.String()
+	case stateError:
+		return statusErr.Render("● ") + m.state.String()
 	default:
-		return m.state.String()
+		return statusOK.Render("● ") + m.state.String()
 	}
 }
 
-func renderHeader(width int, status, sessionID string) string {
+func renderHeader(width int, status, lastPrompt, sessionID string) string {
 	if width <= 0 {
 		return ""
 	}
-	left := headerBrand.Render("awp") +
-		headerSeparator.Render(" │ ") +
-		status
-	leftWidth := lipgloss.Width(left)
-	available := width - leftWidth - 1
-	if available < 1 {
-		available = 0
+	statusColumnWidth := statusFixedWidth()
+	statusPart := headerStatus.Width(statusColumnWidth).Render(status)
+	sessionIDContentWidth := headerSessionIDFixedWidth
+	sessionColumnWidth := sessionIDContentWidth + headerSessionID.GetHorizontalPadding()
+	if width < statusColumnWidth+sessionColumnWidth+4 {
+		sessionColumnWidth = width - statusColumnWidth
+		if sessionColumnWidth < 4 {
+			sessionColumnWidth = 4
+		}
+		sessionIDContentWidth = sessionColumnWidth - headerSessionID.GetHorizontalPadding()
+		if sessionIDContentWidth < 4 {
+			sessionIDContentWidth = 4
+		}
 	}
-	rightText := sessionLabel(sessionID, available)
-	right := headerSession.Render(rightText)
-	rightWidth := lipgloss.Width(right)
-	gap := width - leftWidth - rightWidth
-	if gap < 1 {
-		gap = 1
+	sessionText := sessionLabel(sessionID, sessionIDContentWidth)
+	sessionPart := headerSessionID.Width(sessionColumnWidth).Render(sessionText)
+	promptColumnWidth := width - statusColumnWidth - sessionColumnWidth
+	if promptColumnWidth < 4 {
+		promptColumnWidth = 4
 	}
-	return left + headerTrack.Render(strings.Repeat(" ", gap)) + right
+	promptContentWidth := promptColumnWidth - headerPrompt.GetHorizontalPadding()
+	if promptContentWidth < 1 {
+		promptContentWidth = 1
+	}
+	promptText := truncateWithEllipsis(lastPrompt, promptContentWidth)
+	promptPart := headerPrompt.Width(promptColumnWidth).Render(promptText)
+	return lipgloss.JoinHorizontal(lipgloss.Top, statusPart, promptPart, sessionPart)
+}
+
+func statusFixedWidth() int {
+	const widest = "● streaming"
+	return lipgloss.Width(widest) + headerStatus.GetHorizontalPadding()
+}
+
+func truncateWithEllipsis(s string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	if maxWidth <= 1 {
+		return "…"
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipgloss.Width(string(runes))+1 > maxWidth {
+		runes = runes[:len(runes)-1]
+	}
+	if len(runes) == 0 {
+		return "…"
+	}
+	return string(runes) + "…"
 }
 
 func spawnServer(socket string) (int, error) {

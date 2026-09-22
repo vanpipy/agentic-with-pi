@@ -73,6 +73,47 @@ func TestRenderHeaderTruncatesOnNarrowTerminal(t *testing.T) {
 	}
 }
 
+func TestRenderHeaderIncludesLastPromptWhenWide(t *testing.T) {
+	id := "115845c05e9754f4f3664bc71be621e6"
+	prompt := "refactor the auth middleware to use HS256"
+	view := tui.RenderHeaderWithPromptForTest(120, "ready", prompt, id)
+	stripped := stripANSI(view)
+	if !strings.Contains(stripped, prompt) {
+		t.Errorf("wide terminal should contain full prompt, got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, id) {
+		t.Errorf("wide terminal should still contain session id, got:\n%s", stripped)
+	}
+}
+
+func TestRenderHeaderTruncatesLongPromptOnNarrowTerminal(t *testing.T) {
+	id := "115845c05e9754f4f3664bc71be621e6"
+	prompt := "explain the difference between context cancellation and request cancellation in go http"
+	view := tui.RenderHeaderWithPromptForTest(40, "ready", prompt, id)
+	stripped := stripANSI(view)
+	if strings.Contains(stripped, prompt) {
+		t.Errorf("narrow terminal should truncate prompt, got full prompt in:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, "…") {
+		t.Errorf("narrow terminal should show ellipsis for truncated prompt, got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, id[:8]) {
+		t.Errorf("narrow terminal should preserve id prefix, got:\n%s", stripped)
+	}
+}
+
+func TestRenderHeaderEmptyPromptStillRenders(t *testing.T) {
+	id := "115845c05e9754f4f3664bc71be621e6"
+	view := tui.RenderHeaderWithPromptForTest(120, "ready", "", id)
+	stripped := stripANSI(view)
+	if !strings.Contains(stripped, "ready") {
+		t.Errorf("empty prompt should still render status, got:\n%s", stripped)
+	}
+	if !strings.Contains(stripped, id) {
+		t.Errorf("empty prompt should still render session id, got:\n%s", stripped)
+	}
+}
+
 func stripANSI(s string) string {
 	var b strings.Builder
 	inEsc := false

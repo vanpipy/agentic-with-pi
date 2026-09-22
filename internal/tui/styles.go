@@ -43,53 +43,44 @@ var c = palette{
 }
 
 var (
-	headerBrand = lipgloss.NewStyle().
-			Background(c.accent).
-			Foreground(lipgloss.Color("#000000")).
-			Bold(true).
+	headerStatus = lipgloss.NewStyle().Padding(0, 1)
+
+	headerPrompt = lipgloss.NewStyle().
+			Foreground(c.dim).
 			Padding(0, 1)
 
-	headerSeparator = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#000000")).
-				Background(c.accent)
+	headerSessionID = lipgloss.NewStyle().
+			Foreground(c.dim).
+			Padding(0, 1)
 
-	headerSession = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#000000")).
-			Background(c.accent).
-			Align(lipgloss.Right)
+	headerSessionIDFixedWidth = 32
 
-	headerTrack = lipgloss.NewStyle()
-
-	statusOK = lipgloss.NewStyle().Foreground(c.success)
-	statusErr = lipgloss.NewStyle().Foreground(c.error).Bold(true)
+	statusOK   = lipgloss.NewStyle().Foreground(c.success)
+	statusErr  = lipgloss.NewStyle().Foreground(c.error).Bold(true)
 	statusWarn = lipgloss.NewStyle().Foreground(c.warning)
 	statusSpin = lipgloss.NewStyle().Foreground(c.accent)
 
 	helpFooter = lipgloss.NewStyle().Foreground(c.dim)
 
-	userPromptNum = lipgloss.NewStyle().Foreground(c.accent).Bold(true)
+	userPromptNum   = lipgloss.NewStyle().Foreground(c.accent).Bold(true)
 	userPromptArrow = lipgloss.NewStyle().Foreground(c.accent)
-	userPromptText = lipgloss.NewStyle().Foreground(c.userText)
+	userPromptText  = lipgloss.NewStyle().Foreground(c.userText)
 
-	aiPrefix = lipgloss.NewStyle().Foreground(c.ai)
-	aiText = lipgloss.NewStyle().Foreground(c.aiText)
+	aiPrefix   = lipgloss.NewStyle().Foreground(c.ai)
+	aiText     = lipgloss.NewStyle().Foreground(c.aiText)
 	aiThinking = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
 
 	toolPrefix = lipgloss.NewStyle().Foreground(c.tool).Bold(true)
-	toolName = lipgloss.NewStyle().Foreground(c.accent)
+	toolName   = lipgloss.NewStyle().Foreground(c.accent)
 
 	observePrefix = lipgloss.NewStyle().Foreground(c.dim)
-	systemPrefix = lipgloss.NewStyle().Foreground(c.system)
-	errorPrefix = lipgloss.NewStyle().Foreground(c.error).Bold(true)
+	systemPrefix  = lipgloss.NewStyle().Foreground(c.system)
+	errorPrefix   = lipgloss.NewStyle().Foreground(c.error).Bold(true)
 
-	durationHint = lipgloss.NewStyle().Foreground(c.dim)
-	tokenHint = lipgloss.NewStyle().Foreground(c.dim)
+	durationHint  = lipgloss.NewStyle().Foreground(c.dim)
+	tokenHint     = lipgloss.NewStyle().Foreground(c.dim)
 	fileLinkStyle = lipgloss.NewStyle().Foreground(c.fileLink).Underline(true)
 
 	thinkingCollapsed = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
-	thinkingExpanded = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
-
-	autocompleteHeader = lipgloss.NewStyle().Foreground(c.dim)
-	autocompleteCursor = lipgloss.NewStyle().Foreground(c.accent)
-	autocompleteCategory = lipgloss.NewStyle().Foreground(c.system)
+	thinkingExpanded  = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
 )
