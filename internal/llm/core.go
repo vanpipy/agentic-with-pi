@@ -45,6 +45,13 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 	if err := c.validateRequest(req); err != nil {
 		return nil, err
 	}
+	ifaceLogger().Info("llm: request", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
+	for i, m := range req.Messages {
+		ifaceLogger().Info("llm: request msg", "i", i, "role", m.Role, "content", m.Content, "reasoning_len", len(m.Reasoning), "tool_calls", len(m.ToolCalls))
+	}
+	for i, t := range req.Tools {
+		ifaceLogger().Info("llm: request tool", "i", i, "name", t.Function.Name)
+	}
 	slog.Debug("llm: stream start", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
 
 	streamReq := *req
@@ -69,8 +76,18 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 
 	events := make(chan StreamEvent, 32)
 	go func() {
-		defer close(events)
 		accumulators := make(map[int]*toolCallAccum)
+		var totalContent, totalReasoning int
+		var lastUsage *Usage
+		var eventCount int
+		defer func() {
+			if lastUsage != nil {
+				ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens)
+			} else {
+				ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning)
+			}
+			close(events)
+		}()
 		for {
 			select {
 			case <-ctx.Done():
@@ -80,6 +97,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 					return
 				}
 				if item.Err != nil {
+					ifaceLogger().Info("llm: transport err", "err", item.Err)
 					select {
 					case events <- StreamEvent{Err: item.Err}:
 					case <-ctx.Done():
@@ -88,6 +106,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 				}
 				chunk, done, err := c.provider.ConvertResponse(item.Data)
 				if err != nil {
+					ifaceLogger().Info("llm: parse err", "err", err)
 					select {
 					case events <- StreamEvent{Err: err}:
 					case <-ctx.Done():
@@ -96,7 +115,10 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 				}
 
 				if chunk != nil {
+					eventCount++
 					for _, choice := range chunk.Choices {
+						totalContent += len(choice.Delta.Content)
+						totalReasoning += len(choice.Delta.Reasoning)
 						for _, tc := range choice.Delta.ToolCalls {
 							acc, exists := accumulators[choice.Index]
 							if !exists {
@@ -116,10 +138,11 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 						}
 					}
 					if chunk.Usage != nil {
+						lastUsage = chunk.Usage
 						select {
 						case events <- StreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
 						case <-ctx.Done():
-							return
+						return
 						}
 					}
 					for _, choice := range chunk.Choices {

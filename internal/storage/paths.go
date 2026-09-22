@@ -36,23 +36,12 @@ func SessionsDir() string {
 	return filepath.Join(LogsDir(), "sessions")
 }
 
-func ServerLogDir() string {
-	if dir := os.Getenv("AWP_SERVER_LOG_DIR"); dir != "" {
-		return dir
-	}
-	return filepath.Join(os.TempDir(), "awp-server-logs")
-}
-
 func ClientSocketPath(clientPID int) string {
 	return filepath.Join(RuntimeDir(), fmt.Sprintf("awp.sock.%d", clientPID))
 }
 
 func ServerPidPath(clientPID int) string {
 	return filepath.Join(RuntimeDir(), fmt.Sprintf("awp.tui.%d.pid", clientPID))
-}
-
-func ServerLogPath(clientPID int) string {
-	return filepath.Join(ServerLogDir(), fmt.Sprintf("awp.server.%d.log", clientPID))
 }
 
 func ConfigPath() string {

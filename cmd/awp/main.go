@@ -290,11 +290,7 @@ func spawnServer(socket string) (int, error) {
 	cmd := exec.Command(exe, "serve", "--socket", socket)
 	cmd.Stdin = nil
 	cmd.Stdout = nil
-	if stderrFile, ferr := os.OpenFile(storage.ServerLogPath(os.Getpid()), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); ferr == nil {
-		cmd.Stderr = stderrFile
-	} else {
-		cmd.Stderr = nil
-	}
+	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, err

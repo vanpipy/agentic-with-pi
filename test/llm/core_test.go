@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -381,5 +383,59 @@ func TestStreamChatPropagatesFinishReason(t *testing.T) {
 	}
 	if !sawFinish {
 		t.Error("expected stream event with FinishReasonToolUse")
+	}
+}
+
+func TestChatInterfaceLoggedToTmp(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "llm.log")
+	t.Setenv("AWP_LLM_LOG", logPath)
+	llm.ResetIfaceLoggerForTest()
+
+	core := llm.NewCore(&fakeProvider{
+		models: []llm.Model{{ID: "test-model", Vendor: "fake", SupportsTool: true}},
+		convertChunk: func(d []byte) (*llm.StreamChunk, bool, error) {
+			return &llm.StreamChunk{
+				Choices: []llm.StreamChoice{{
+					Index: 0,
+					Delta: llm.Message{Content: "pong"},
+				}},
+				Usage: &llm.Usage{PromptTokens: 42, CompletionTokens: 7, TotalTokens: 49},
+			}, true, nil
+		},
+	}, &fakeProtocol{streamItems: []protocol.StreamItem{
+		{Data: []byte(`{"type":"content_block_delta","delta":{"type":"text_delta","text":"pong"}}`)},
+	}})
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model: "test-model",
+		Messages: []llm.Message{
+			{Role: "system", Content: "you are a helper"},
+			{Role: "user", Content: "ping the system to see what you remember"},
+		},
+		Tools: []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "search"}}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log file: %v (path=%s)", err, logPath)
+	}
+	log := string(logBytes)
+	for _, want := range []string{
+		"llm: request",
+		"test-model",
+		"you are a helper",
+		"ping the system to see what you remember",
+		"search",
+		"prompt_tokens=42",
+		"completion_tokens=7",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("LLM log missing %q. log content:\n%s", want, log)
+		}
 	}
 }
