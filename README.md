@@ -39,16 +39,29 @@ make build
 When `aft` is on `PATH`, AWP uses it for file/bash/edit tools. Without it,
 AWP silently falls back to the built-in Go implementations.
 
+Pick one of:
+
 ```bash
-# Install from source (release build, ~30 MB binary)
-cargo install --git https://github.com/cortexkit/aft --locked aft-cli
+# Option A — official installer (downloads a release binary into PATH,
+# also configures any detected harnesses). Recommended for end users.
+npx @cortexkit/aft@latest setup
 
-# Or copy a pre-built binary
+# Option B — build from source (release build). Use this if you have the
+# aft repo checked out and want the latest source-tree changes.
+cargo install --path /path/to/aft/crates/aft --locked
+
+# Option C — copy a pre-built binary you downloaded elsewhere
 cp /path/to/aft ~/.cargo/bin/aft
+```
 
-# Verify
-which aft
-aft < /dev/null    # prints "[aft] started, pid N" then "[aft] stdin closed, shutting down"
+Verify it works:
+
+```bash
+which aft                          # should print a path
+echo '{"id":"1","command":"echo","message":"hi"}' | aft
+# expected: [aft] started, pid N
+#           {"id":"1","success":true,"message":"hi"}
+#           [aft] stdin closed, shutting down
 ```
 
 To **disable** AFT integration entirely (always use Go impls), set

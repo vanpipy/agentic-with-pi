@@ -28,8 +28,9 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 - `go build ./...` · `go vet ./...` · `go test -race ./test/...`
 - `gofmt -w` before commit. `make build / make test / make lint` (see Makefile).
 - **AFT integration tests** (`internal/agent/tools/aft_*_test.go`): skip
-  automatically when `aft` is not on `PATH`. Run `cargo install --path <aft>`
-  or set `AWP_TEST_AFT=/path/to/aft` to exercise them.
+  automatically when `aft` is not on `PATH`. Run `cargo install --path
+  <aft-repo>/crates/aft --locked` or set `AWP_TEST_AFT=/path/to/aft` to
+  exercise them.
 
 ## AFT integration
 
