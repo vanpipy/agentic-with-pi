@@ -29,6 +29,7 @@ const (
 	EventError
 	EventInvalid
 	EventUserMessage
+	EventCompaction
 )
 
 type Event struct {
@@ -42,6 +43,12 @@ type Event struct {
 	ToolIntent string
 	ToolCalls  []llm.ToolCall
 	Usage      *llm.Usage
+
+	Summary         string
+	TokensBefore    int
+	TokensAfter     int
+	FirstKeptSeq    int
+	CompactionModel string
 }
 
 type Tool interface {

@@ -342,5 +342,21 @@ func (a *Agent) compact(ctx context.Context, msgs []llm.Message, previousSummary
 	out := make([]llm.Message, 0, 2+len(recent))
 	out = append(out, systemMsg, summaryMsg)
 	out = append(out, recent...)
+
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	tokensBefore := estimateTotalTokens(msgs)
+	tokensAfter := estimateTotalTokens(out)
+	a.writeCompactionLocked(Event{
+		Category:        EventCompaction,
+		Summary:         summaryText.String(),
+		TokensBefore:    tokensBefore,
+		TokensAfter:     tokensAfter,
+		FirstKeptSeq:    a.logSeq,
+		CompactionModel: a.Model.ID,
+	})
+	if a.logBuf != nil {
+		_ = a.logBuf.Flush()
+	}
 	return out, nil
 }

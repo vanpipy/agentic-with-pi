@@ -23,6 +23,16 @@ type sessionHeader struct {
 	StartedAt string   `json:"started_at"`
 }
 
+type sessionCompaction struct {
+	Kind          string `json:"kind"`
+	At            string `json:"at"`
+	Summary       string `json:"summary"`
+	TokensBefore  int    `json:"tokens_before,omitempty"`
+	TokensAfter   int    `json:"tokens_after,omitempty"`
+	FirstKeptSeq  int    `json:"first_kept_seq,omitempty"`
+	Model         string `json:"model,omitempty"`
+}
+
 type sessionEvent struct {
 	Kind           string `json:"kind"`
 	Seq            int    `json:"seq"`
@@ -115,6 +125,27 @@ func (a *Agent) writeEvent(seq int, ev Event) {
 	}
 }
 
+func (a *Agent) writeCompactionLocked(ev Event) {
+	if a.LogWriter == nil {
+		return
+	}
+	if a.logBuf == nil {
+		return
+	}
+	entry := sessionCompaction{
+		Kind:         "compaction",
+		At:           time.Now().UTC().Format(time.RFC3339Nano),
+		Summary:      ev.Summary,
+		TokensBefore: ev.TokensBefore,
+		TokensAfter:  ev.TokensAfter,
+		FirstKeptSeq: ev.FirstKeptSeq,
+		Model:        ev.CompactionModel,
+	}
+	if err := writeJSONLine(a.logBuf, entry); err != nil {
+		slog.Debug("agent: compaction write failed", "err", err)
+	}
+}
+
 func writeJSONLine(w *bufio.Writer, v any) error {
 	line, err := json.Marshal(v)
 	if err != nil {
@@ -161,6 +192,8 @@ func categoryName(c EventCategory) string {
 		return "invalid"
 	case EventUserMessage:
 		return "user_message"
+	case EventCompaction:
+		return "compaction"
 	}
 	return "unknown"
 }

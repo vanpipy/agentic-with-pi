@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1166,3 +1168,93 @@ func TestToolFunc_Adapter(t *testing.T) {
 }
 
 var _ agent.Tool = agent.ToolFunc{N: "x", Fn: func(context.Context, string) (string, error) { return "", nil }}
+func TestAgentCompactionPersistsToSessionLog(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "session.jsonl")
+
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("the user's session log file was getting silently deleted by an os.Remove defer; fix: remove the defer; also stop server-side double writes that caused byte-level race"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "test-model").
+		WithModel(llm.Model{ID: "test-model", MaxContextTokens: 10}).
+		WithCompaction(agent.CompactionSettings{
+			Enabled:         true,
+			ReserveTokens:   1,
+			KeepRecentTurns: 0,
+		})
+	ag.LogWriter = mustOpenWriter(t, logPath)
+	defer ag.LogWriter.(*os.File).Close()
+
+	prompt := "this is a long-running session and the user has been complaining about os.Remove silently deleting their JSONL files. The fix is to remove the defer. Also remove server-side session writes to fix byte-level race"
+	if _, err := runAgent(t, ag, prompt); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := readJSONLFile(t, logPath)
+	var compaction map[string]any
+	for _, ln := range lines {
+		if ln["kind"] == "compaction" {
+			compaction = ln
+			break
+		}
+	}
+	if compaction == nil {
+		t.Fatalf("no compaction entry written to session log; lines:\n%s", mustDumpLines(lines))
+	}
+	if s, _ := compaction["summary"].(string); s == "" {
+		t.Errorf("compaction.summary is empty, got: %v", compaction)
+	}
+	tb, _ := compaction["tokens_before"].(float64)
+	ta, _ := compaction["tokens_after"].(float64)
+	if tb <= 0 {
+		t.Errorf("compaction.tokens_before = %v, want > 0", compaction["tokens_before"])
+	}
+	if ta <= 0 {
+		t.Errorf("compaction.tokens_after = %v, want > 0", compaction["tokens_after"])
+	}
+	if ta >= tb*2 {
+		t.Errorf("compaction.tokens_after (%v) much larger than tokens_before (%v); compact should not balloon", ta, tb)
+	}
+	if model, _ := compaction["model"].(string); model != "test-model" {
+		t.Errorf("compaction.model = %q, want test-model", model)
+	}
+}
+
+func mustOpenWriter(t *testing.T, path string) *os.File {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+func readJSONLFile(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("invalid JSON %q: %v", line, err)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+func mustDumpLines(lines []map[string]any) string {
+	var b strings.Builder
+	for i, l := range lines {
+		b.WriteString(fmt.Sprintf("L%d: kind=%v seq=%v\n", i, l["kind"], l["seq"]))
+	}
+	return b.String()
+}
