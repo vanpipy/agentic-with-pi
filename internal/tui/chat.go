@@ -139,17 +139,17 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		}
 		return []string{layout.body.Render(fmt.Sprintf("▸ thought for %s", dur))}
 	}
-	if g.role == roleTool && g.collapsed {
-		return wrapRender(layout.body.Width(width), "▸ "+toolCollapsedSummary(g.text))
+	if g.role == roleObserve && g.collapsed {
+		return wrapRender(layout.body.Width(width), "▸ result "+truncateMid(g.text, 60))
 	}
 	return wrapRender(layout.body.Width(width), g.text)
 }
 
-func toolCollapsedSummary(text string) string {
-	if i := strings.Index(text, "→"); i >= 0 {
-		return text[:i] + "…"
+func truncateMid(s string, max int) string {
+	if len(s) <= max {
+		return s
 	}
-	return text
+	return s[:max-1] + "…"
 }
 
 func wrapRender(style lipgloss.Style, text string) []string {
@@ -407,31 +407,11 @@ func (c *chatModel) appendReasoning(text string) {
 	c.refresh()
 }
 
-func (c *chatModel) appendTool(name, args, intent, result string) {
+func (c *chatModel) appendTool(name, args, intent string) {
 	prefix := intentPrefix(intent)
-	if result == "" {
-		c.messages = append(c.messages, chatMsg{
-			role: roleTool,
-			text: fmt.Sprintf("%s%s(%s)", prefix, name, args),
-		})
-		c.refresh()
-		return
-	}
-	if tools.ToolOutputLooksFailed(result) {
-		if summary, ok := tools.ConciseToolErrorSummary(result); ok {
-			c.messages = append(c.messages, chatMsg{
-				role: roleTool,
-				text: fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, summary),
-			})
-			c.refresh()
-			return
-		}
-	}
-	preview := tools.TruncateMiddle(result, 120)
 	c.messages = append(c.messages, chatMsg{
-		role:      roleTool,
-		text:      fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, preview),
-		collapsed: shouldCollapseResult(result),
+		role: roleTool,
+		text: fmt.Sprintf("%s%s(%s)", prefix, name, args),
 	})
 	c.refresh()
 }
@@ -454,7 +434,19 @@ func intentPrefix(intent string) string {
 }
 
 func (c *chatModel) appendObserve(text string) {
-	c.messages = append(c.messages, chatMsg{role: roleObserve, text: text})
+	preview := text
+	if tools.ToolOutputLooksFailed(text) {
+		if summary, ok := tools.ConciseToolErrorSummary(text); ok {
+			preview = summary
+		}
+	} else {
+		preview = tools.TruncateMiddle(text, 120)
+	}
+	c.messages = append(c.messages, chatMsg{
+		role:      roleObserve,
+		text:      preview,
+		collapsed: shouldCollapseResult(text),
+	})
 	c.refresh()
 }
 

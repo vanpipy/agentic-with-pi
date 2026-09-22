@@ -69,11 +69,10 @@ func handleServerEvent(c *chatModel, sessionID *string, ev client_sdk.Event) {
 		var d struct {
 			Name   string `json:"name"`
 			Args   string `json:"args"`
-			Result string `json:"result"`
 			Intent string `json:"intent"`
 		}
 		json.Unmarshal(ev.Data, &d)
-		c.appendTool(d.Name, d.Args, d.Intent, d.Result)
+		c.appendTool(d.Name, d.Args, d.Intent)
 	case "observe":
 		var d struct {
 			ToolName string `json:"tool_name"`
