@@ -6,12 +6,13 @@ import (
 )
 
 type keyBindings struct {
-	quit        key.Binding
-	quitEmpty   key.Binding
-	complete    key.Binding
-	scroll      key.Binding
-	showHelp    key.Binding
-	submit      key.Binding
+	quit         key.Binding
+	quitEmpty    key.Binding
+	complete     key.Binding
+	scroll       key.Binding
+	showHelp     key.Binding
+	submit       key.Binding
+	expandToggle key.Binding
 }
 
 func defaultKeys() keyBindings {
@@ -40,6 +41,10 @@ func defaultKeys() keyBindings {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "submit"),
 		),
+		expandToggle: key.NewBinding(
+			key.WithKeys("ctrl+e"),
+			key.WithHelp("ctrl+e", "expand/collapse"),
+		),
 	}
 }
 
@@ -49,7 +54,7 @@ func (k keyBindings) ShortHelp() []key.Binding {
 
 func (k keyBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.submit, k.complete},
+		{k.submit, k.complete, k.expandToggle},
 		{k.scroll, k.showHelp},
 		{k.quit, k.quitEmpty},
 	}

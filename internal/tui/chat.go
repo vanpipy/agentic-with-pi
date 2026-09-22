@@ -139,7 +139,17 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		}
 		return []string{layout.body.Render(fmt.Sprintf("▸ thought for %s", dur))}
 	}
+	if g.role == roleTool && g.collapsed {
+		return wrapRender(layout.body.Width(width), "▸ "+toolCollapsedSummary(g.text))
+	}
 	return wrapRender(layout.body.Width(width), g.text)
+}
+
+func toolCollapsedSummary(text string) string {
+	if i := strings.Index(text, "→"); i >= 0 {
+		return text[:i] + "…"
+	}
+	return text
 }
 
 func wrapRender(style lipgloss.Style, text string) []string {
@@ -200,6 +210,22 @@ func (c *chatModel) ScrollUp(n int) {
 	}
 	c.following = false
 	c.viewport.ScrollUp(n)
+}
+
+func (c *chatModel) ToggleCollapseAtViewportTop() {
+	top := c.viewport.YOffset()
+	walked := 0
+	for i, m := range c.messages {
+		h := c.lineCount(m)
+		if top >= walked && top < walked+h {
+			if m.role == roleTool || m.role == roleThinking {
+				c.messages[i].collapsed = !c.messages[i].collapsed
+				c.refresh()
+			}
+			return
+		}
+		walked += h
+	}
 }
 
 func (c *chatModel) ScrollDown(n int) {
@@ -403,10 +429,21 @@ func (c *chatModel) appendTool(name, args, intent, result string) {
 	}
 	preview := tools.TruncateMiddle(result, 120)
 	c.messages = append(c.messages, chatMsg{
-		role: roleTool,
-		text: fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, preview),
+		role:      roleTool,
+		text:      fmt.Sprintf("%s%s(%s) → %s", prefix, name, args, preview),
+		collapsed: shouldCollapseResult(result),
 	})
 	c.refresh()
+}
+
+func shouldCollapseResult(result string) bool {
+	if strings.Count(result, "\n") >= 5 {
+		return true
+	}
+	if len(result) > 500 {
+		return true
+	}
+	return false
 }
 
 func intentPrefix(intent string) string {

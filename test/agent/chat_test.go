@@ -69,6 +69,23 @@ func TestRenderMsgThinkingCollapsed(t *testing.T) {
 	}
 }
 
+func TestRenderMsgToolCollapsedShowsSummary(t *testing.T) {
+	lines := tui.RenderMsgForTest(tui.ChatMsg{
+		Role:      tui.RoleTool,
+		Text:      "read(/tmp/foo.rs) → first 5 lines of 200",
+		Collapsed: true,
+	}, 80)
+	if len(lines) == 0 {
+		t.Fatal("expected at least one line")
+	}
+	if !strings.Contains(lines[0], "▸") {
+		t.Errorf("collapsed tool line should contain ▸ glyph, got %q", lines[0])
+	}
+	if strings.Contains(lines[0], "→") {
+		t.Errorf("collapsed tool line should hide preview (no →), got %q", lines[0])
+	}
+}
+
 func TestGlyphPrefixWithPromptNumber(t *testing.T) {
 	layout := tui.RoleLayoutForTest(tui.RoleUser)
 	got := tui.GlyphPrefixForTest(layout, tui.RoleUser, 3)
