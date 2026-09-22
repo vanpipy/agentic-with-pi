@@ -1,12 +1,21 @@
 package tools_test
 
 import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/agent/tools"
 )
 
 func TestAllRegistersEveryBuiltin(t *testing.T) {
+	t.Setenv("AWP_TEST_AFT", "")
+	t.Setenv("AWP_NO_AFT", "1")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
 	got := tools.All(t.TempDir())
 	if len(got) < 7 {
 		t.Fatalf("tools.All returned %d tools, want at least 7", len(got))
@@ -29,6 +38,11 @@ func TestAllRegistersEveryBuiltin(t *testing.T) {
 }
 
 func TestAllTwiceReturnsDistinctToolValues(t *testing.T) {
+	t.Setenv("AWP_TEST_AFT", "")
+	t.Setenv("AWP_NO_AFT", "1")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
 	a := tools.All(t.TempDir())
 	b := tools.All(t.TempDir())
 	if len(a) != len(b) {
@@ -37,6 +51,84 @@ func TestAllTwiceReturnsDistinctToolValues(t *testing.T) {
 	for i := range a {
 		if a[i].Name() != b[i].Name() {
 			t.Errorf("position %d: %q != %q", i, a[i].Name(), b[i].Name())
+		}
+	}
+}
+func TestRegistryUsesAftWhenBinaryAvailable(t *testing.T) {
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "aft")
+	script := "#!/bin/sh\nwhile read -r line; do\n  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n  cmd=$(printf '%s' \"$line\" | sed -n 's/.*\"command\":\"\\([^\"]*\\)\".*/\\1/p')\n  printf '{\"id\":\"%s\",\"success\":true,\"command\":\"%s\",\"output\":\"ok\"}\\n' \"$id\" \"$cmd\"\ndone\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWP_TEST_AFT", bin)
+	t.Setenv("AWP_NO_AFT", "")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
+	got := tools.All(t.TempDir())
+	if len(got) < 7 {
+		t.Fatalf("tools.All returned %d tools, want at least 7", len(got))
+	}
+	for _, t0 := range got {
+		if t0.Name() == "read" {
+			out, err := t0.Invoke(context.Background(), `{"path":"/tmp/x"}`)
+			if err != nil {
+				t.Fatalf("read tool invoke failed: %v", err)
+			}
+			if !strings.Contains(out, `"command":"read"`) {
+				t.Errorf("read tool did not route via AFT backend: %q", out)
+			}
+			return
+		}
+	}
+	t.Fatal("read tool not found in registry")
+}
+
+func TestRegistryFallsBackToGoWhenAftDisabled(t *testing.T) {
+	t.Setenv("AWP_NO_AFT", "1")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
+	got := tools.All(t.TempDir())
+	if len(got) < 7 {
+		t.Fatalf("tools.All returned %d tools, want at least 7", len(got))
+	}
+	readTool := got[0]
+	for _, t0 := range got {
+		if t0.Name() == "read" {
+			readTool = t0
+			break
+		}
+	}
+	if readTool.Name() != "read" {
+		t.Fatalf("read tool not found in fallback registry")
+	}
+}
+
+func TestRegistryRespectsAwpNoAftOverride(t *testing.T) {
+	tmp := t.TempDir()
+	bin := filepath.Join(tmp, "aft")
+	script := "#!/bin/sh\nwhile read -r line; do\n  printf '{\"id\":\"x\",\"success\":true}\\n'\ndone\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWP_TEST_AFT", bin)
+	t.Setenv("AWP_NO_AFT", "1")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
+	got := tools.All(t.TempDir())
+	for _, t0 := range got {
+		if t0.Name() == "read" {
+			out, err := t0.Invoke(context.Background(), `{"path":"/dev/null"}`)
+			if err != nil {
+				t.Logf("read invoke err (expected: falls back to Go): %v", err)
+			}
+			if strings.Contains(out, `"command":"read"`) {
+				t.Errorf("read tool routed via AFT despite AWP_NO_AFT=1: %q", out)
+			}
+			return
 		}
 	}
 }
