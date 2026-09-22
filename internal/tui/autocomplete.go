@@ -1,8 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -15,44 +13,34 @@ type commandItem struct {
 	category    string
 }
 
-func (c commandItem) FilterValue() string { return c.title }
+const popupItemCount = 3
+
+func (c commandItem) FilterValue() string { return c.title + " " + c.description + " " + c.category }
 func (c commandItem) Title() string       { return "/" + c.title }
-func (c commandItem) Description() string { return c.description }
-func (c commandItem) Category() string    { return c.category }
-
-type commandDelegate struct{}
-
-func (d commandDelegate) Height() int                         { return 1 }
-func (d commandDelegate) Spacing() int                        { return 0 }
-func (d commandDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
-func (d commandDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	c, ok := item.(commandItem)
-	if !ok {
-		return
+func (c commandItem) Description() string {
+	if c.category == "" {
+		return c.description
 	}
-	marker := "  "
-	if index == m.Index() {
-		marker = autocompleteCursor.Render("▶ ")
-	}
-	name := autocompleteHeader.Render("/" + c.title)
-	desc := helpFooter.Render(c.description)
-	cat := autocompleteCategory.Render(c.category)
-	fmt.Fprintf(w, "%s%s  %-7s  %s", marker, name, cat, desc)
+	return c.category + " — " + c.description
 }
+func (c commandItem) Category() string { return c.category }
 
 type autocompleteModel struct {
-	visible       bool
-	query         string
-	list          list.Model
-	all           []commandItem
+	visible bool
+	query   string
+	list    list.Model
+	all     []commandItem
 }
 
 func newAutocompleteModel() *autocompleteModel {
 	all := commandsToItems()
 	const maxWidth = 80
-	const maxHeight = 5
-	delegate := commandDelegate{}
+	maxHeight := popupItemCount * 2
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = true
+	delegate.Styles = list.NewDefaultItemStyles(true)
 	l := list.New(toCommandItems(all), delegate, maxWidth, maxHeight)
+	l.Styles = list.DefaultStyles(true)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(false)
@@ -133,8 +121,7 @@ func (a *autocompleteModel) View() string {
 	if !a.visible {
 		return ""
 	}
-	header := autocompleteHeader.Render(" commands:") + "\n"
-	return header + a.list.View()
+	return a.list.View()
 }
 
 func allCommands() []string {
@@ -167,5 +154,3 @@ func (m *Model) acceptAutocomplete() {
 	m.input.SetValue("/" + cmd + " ")
 	m.autocomplete.visible = false
 }
-
-var _ tea.Cmd

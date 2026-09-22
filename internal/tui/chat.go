@@ -1,19 +1,19 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"fmt"
 	"strings"
 	"time"
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
-	tea "charm.land/bubbletea/v2"
 
 	"github.com/vanpiyp/awp/internal/agent/tools"
 )
 
 type chatModel struct {
-	viewport viewport.Model
+	viewport  viewport.Model
 	messages  []chatMsg
 	streaming strings.Builder
 	reasoning strings.Builder
@@ -265,7 +265,8 @@ func (c *chatModel) GotoTop() {
 
 func (c *chatModel) GotoBottom() {
 	c.viewport.GotoBottom()
-	c.following = true}
+	c.following = true
+}
 
 func (c *chatModel) JumpToPrompt(direction int) {
 	if direction == 0 || len(c.messages) == 0 {

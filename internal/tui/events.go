@@ -14,12 +14,12 @@ type serverEventMsg struct {
 
 func parseUsage(data []byte) *msgUsage {
 	var d struct {
-		PromptTokens     int    `json:"prompt_tokens"`
-		CompletionTokens int    `json:"completion_tokens"`
-		TotalTokens      int    `json:"total_tokens"`
-		PromptTokensStr   string `json:"-"`
+		PromptTokens        int    `json:"prompt_tokens"`
+		CompletionTokens    int    `json:"completion_tokens"`
+		TotalTokens         int    `json:"total_tokens"`
+		PromptTokensStr     string `json:"-"`
 		CompletionTokensStr string `json:"-"`
-		TotalTokensStr    string `json:"-"`
+		TotalTokensStr      string `json:"-"`
 	}
 	_ = json.Unmarshal(data, &d)
 	if d.TotalTokens == 0 {

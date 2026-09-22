@@ -139,7 +139,7 @@ func (m *Model) executeCommand(text string) (quit bool, cmd tea.Cmd) {
 
 	spec, found := findCommand(parsed.name)
 	if !found {
-		m.chat.appendSystem(errorPrefix.Render(" unknown command: /" + parsed.name) +
+		m.chat.appendSystem(errorPrefix.Render(" unknown command: /"+parsed.name) +
 			helpFooter.Render("\n  type /help for available commands"))
 		return false, nil
 	}

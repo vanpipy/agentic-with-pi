@@ -2,11 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"io"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
-	tea "charm.land/bubbletea/v2"
 )
 
 type sessionItem struct {
@@ -26,25 +24,6 @@ func (s sessionItem) Description() string {
 }
 func (s sessionItem) Category() string { return "" }
 
-type sessionDelegate struct{}
-
-func (d sessionDelegate) Height() int                         { return 1 }
-func (d sessionDelegate) Spacing() int                        { return 0 }
-func (d sessionDelegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
-func (d sessionDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	s, ok := item.(sessionItem)
-	if !ok {
-		return
-	}
-	marker := "  "
-	if index == m.Index() {
-		marker = autocompleteCursor.Render("\u25b6 ")
-	}
-	id := autocompleteHeader.Render(s.id)
-	desc := helpFooter.Render(s.Description())
-	fmt.Fprintf(w, "%s%s  %s", marker, id, desc)
-}
-
 type sessionPickerModel struct {
 	visible  bool
 	query    string
@@ -54,10 +33,13 @@ type sessionPickerModel struct {
 }
 
 func newSessionPickerModel() *sessionPickerModel {
-	delegate := sessionDelegate{}
+	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = true
+	delegate.Styles = list.NewDefaultItemStyles(true)
 	const maxWidth = 80
-	const maxHeight = 6
+	maxHeight := popupItemCount * 2
 	l := list.New([]list.Item{}, delegate, maxWidth, maxHeight)
+	l.Styles = list.DefaultStyles(true)
 	l.SetShowTitle(false)
 	l.SetShowStatusBar(false)
 	l.SetShowPagination(false)
@@ -124,8 +106,5 @@ func (p *sessionPickerModel) View() string {
 	if !p.visible {
 		return ""
 	}
-	header := autocompleteHeader.Render(" sessions (esc to cancel):") + "\n"
-	return header + p.list.View()
+	return p.list.View()
 }
-
-var _ tea.Cmd
