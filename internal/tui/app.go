@@ -355,7 +355,7 @@ func (m *Model) View() tea.View {
 		return tea.NewView("initializing...")
 	}
 
-	header := renderHeader(m.width, m.statusRender(), sessionLabel(m.session))
+	header := renderHeader(m.width, m.statusRender(), m.session)
 
 	inputBox := m.input.View()
 
@@ -540,14 +540,25 @@ func shortHelpBindings() []key.Binding {
 	return defaultKeys().ShortHelp()
 }
 
-func sessionLabel(id string) string {
+func sessionLabel(id string, maxWidth int) string {
 	if id == "" {
 		return "(none)"
 	}
-	if len(id) > 12 {
-		return id[:8] + "..."
+	if maxWidth <= 0 || len(id) <= maxWidth {
+		return id
 	}
-	return id
+	if maxWidth <= 1 {
+		return id[:maxWidth]
+	}
+	return id[:maxWidth-1] + "…"
+}
+
+func SessionLabelForTest(id string, maxWidth int) string {
+	return sessionLabel(id, maxWidth)
+}
+
+func RenderHeaderForTest(width int, status, sessionID string) string {
+	return renderHeader(width, status, sessionID)
 }
 
 func (m *Model) statusRender() string {
@@ -559,15 +570,22 @@ func (m *Model) statusRender() string {
 	}
 }
 
-func renderHeader(width int, status, session string) string {
+func renderHeader(width int, status, sessionID string) string {
 	if width <= 0 {
 		return ""
 	}
 	left := headerBrand.Render("awp") +
 		headerSeparator.Render(" │ ") +
 		status
-	right := headerSession.Render(session)
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	leftWidth := lipgloss.Width(left)
+	available := width - leftWidth - 1
+	if available < 1 {
+		available = 0
+	}
+	rightText := sessionLabel(sessionID, available)
+	right := headerSession.Render(rightText)
+	rightWidth := lipgloss.Width(right)
+	gap := width - leftWidth - rightWidth
 	if gap < 1 {
 		gap = 1
 	}
