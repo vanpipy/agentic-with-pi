@@ -24,6 +24,23 @@ func aftCallTool(backend *AftBackend, name, description string, schema map[strin
 	}
 }
 
+func aftCallToolNested(backend *AftBackend, name, description string, schema map[string]any) agent.Tool {
+	return agent.ToolFunc{
+		N: name,
+		D: description,
+		P: requireIntentSchema(name, schema),
+		Fn: func(_ context.Context, argsJSON string) (string, error) {
+			params := map[string]any{}
+			if argsJSON != "" {
+				if err := json.Unmarshal([]byte(argsJSON), &params); err != nil {
+					return "", err
+				}
+			}
+			return backend.CallNested(name, params)
+		},
+	}
+}
+
 func ReadAftForTest(backend *AftBackend) agent.Tool {
 	return aftCallTool(backend, "read",
 		"Read a file. Backed by AFT (Rust). Supports text, images, PDFs, line ranges.",
@@ -71,10 +88,10 @@ func EditAftForTest(backend *AftBackend) agent.Tool {
 }
 
 func BashAftForTest(backend *AftBackend) agent.Tool {
-	return aftCallTool(backend, "bash",
+	return aftCallToolNested(backend, "bash",
 		"Execute a shell command. Backed by AFT (Rust) with sandbox + permissions + 30-min background task support.",
 		map[string]any{
-			"type":     "object",
+			"type": "object",
 			"properties": map[string]any{
 				"command":     map[string]any{"type": "string", "description": "REQUIRED. Shell command to execute."},
 				"timeout":     map[string]any{"type": "integer", "description": "Timeout in milliseconds (default 120000 = 2 min)."},

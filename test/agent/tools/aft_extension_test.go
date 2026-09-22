@@ -13,7 +13,7 @@ import (
 func writeFakeAftEchoing(t *testing.T, dir string) string {
 	t.Helper()
 	bin := filepath.Join(dir, "aft")
-	script := "#!/bin/sh\nwhile read -r line; do\n  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n  cmd=$(printf '%s' \"$line\" | sed -n 's/.*\"command\":\"\\([^\"]*\\)\".*/\\1/p')\n  printf '{\"id\":\"%s\",\"success\":true,\"command\":\"%s\",\"output\":\"ok\"}\\n' \"$id\" \"$cmd\"\ndone\n"
+	script := "#!/bin/sh\nwhile read -r line; do\n  id=$(printf '%s' \"$line\" | sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n  cmd=$(printf '%s' \"$line\" | sed 's/,\"params\".*//' | sed -n 's/.*\"command\":\"\\([^\"]*\\)\".*/\\1/p')\n  printf '{\"id\":\"%s\",\"success\":true,\"command\":\"%s\",\"output\":\"ok\"}\\n' \"$id\" \"$cmd\"\ndone\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +43,40 @@ func TestAftExtensionRoutesThroughBackend(t *testing.T) {
 	}
 	if !strings.Contains(got, `"path":"/tmp/x"`) {
 		t.Errorf("read wrapper dropped params: %q", got)
+	}
+}
+
+func TestBashWireFormatIsNested(t *testing.T) {
+	tmp := t.TempDir()
+	capturedReq := filepath.Join(tmp, "request.json")
+	bin := filepath.Join(tmp, "aft")
+	script := "#!/bin/sh\nwhile read -r line; do\n  echo \"$line\" > " + capturedReq + "\n  printf '{\"id\":\"awp-1\",\"success\":true,\"output\":\"ok\"}\\n'\n  break\ndone\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	backend, err := tools.NewAftBackend(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = backend.Close() })
+
+	bash := tools.BashAftForTest(backend)
+	if _, err := bash.Invoke(context.Background(), `{"command":"date"}`); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(capturedReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire := string(data)
+	if !strings.Contains(wire, `"command":"bash"`) {
+		t.Errorf("bash wire format should put tool name 'bash' at top level: %q", wire)
+	}
+	if !strings.Contains(wire, `"params":`) {
+		t.Errorf("bash wire format must use nested 'params' to avoid collision with the bash 'command' field; got: %q", wire)
+	}
+	if strings.Count(wire, `"command":`) != 2 {
+		t.Errorf("bash wire should have exactly 2 'command' keys (top-level tool + nested params.command), got: %q", wire)
 	}
 }
 

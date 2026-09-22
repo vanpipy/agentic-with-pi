@@ -79,17 +79,29 @@ func NewAftBackend(binPath string) (*AftBackend, error) {
 }
 
 func (a *AftBackend) Call(name string, params map[string]any) (string, error) {
+	return a.call(name, params, false)
+}
+
+func (a *AftBackend) CallNested(name string, params map[string]any) (string, error) {
+	return a.call(name, params, true)
+}
+
+func (a *AftBackend) call(name string, params map[string]any, nested bool) (string, error) {
 	id := a.nextID.Add(1)
 	reqID := fmt.Sprintf("awp-%d", id)
 
-	req := make(map[string]any, len(params)+2)
+	req := make(map[string]any, len(params)+3)
 	req["id"] = reqID
 	req["command"] = name
-	for k, v := range params {
-		if k == "id" || k == "command" {
-			continue
+	if nested {
+		req["params"] = params
+	} else {
+		for k, v := range params {
+			if k == "id" || k == "command" {
+				continue
+			}
+			req[k] = v
 		}
-		req[k] = v
 	}
 	b, err := json.Marshal(req)
 	if err != nil {
