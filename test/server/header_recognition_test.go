@@ -76,7 +76,7 @@ func TestAgentHeaderRecognizableByServerLoad(t *testing.T) {
 		t.Fatalf("server.Load: %v", err)
 	}
 	if loaded.Meta.SessionID != sessionID {
-		t.Errorf("server.Load Meta.SessionID = %q, want %q (sessionsHasHeader would delete the file)", loaded.Meta.SessionID, sessionID)
+		t.Errorf("server.Load Meta.SessionID = %q, want %q (must match file stem so the session is locatable)", loaded.Meta.SessionID, sessionID)
 	}
 	if loaded.Meta.Model != "test-model" {
 		t.Errorf("server.Load Meta.Model = %q, want test-model", loaded.Meta.Model)

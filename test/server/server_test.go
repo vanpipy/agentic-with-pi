@@ -50,6 +50,12 @@ func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan
 	return ch, nil
 }
 
+type failingCore struct{}
+
+func (failingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	return nil, errors.New("llm provider is down")
+}
+
 func setupTest(t *testing.T) (*server.Server, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -676,4 +682,75 @@ func (f *fakeCoreAccum) StreamChat(ctx context.Context, req *llm.ChatRequest) (<
 	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{}}
 	close(ch)
 	return ch, nil
+}
+
+func TestServerKeepsSessionFileWhenLLMFails(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "test.sock")
+	t.Setenv("AWP_HOME", dir)
+
+	ag := agent.NewAgent(&failingCore{}).
+		WithModel(llm.Model{ID: "test", SupportsTool: false})
+
+	s, err := server.New(ag, socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	defer s.Shutdown(context.Background())
+
+	for i := 0; i < 50; i++ {
+		conn, err := net.Dial("unix", socketPath)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
+		Prompt: "hello",
+	})
+	if err := json_rpc.MarshalRequest(conn, req); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := bufio.NewReader(conn)
+	deadline := time.Now().Add(2 * time.Second)
+	var sessionID string
+	for time.Now().Before(deadline) && sessionID == "" {
+		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		resp, err := json_rpc.ReadEvent(reader)
+		if err != nil {
+			break
+		}
+		if resp.Event == "session_started" {
+			var d struct {
+				SessionID string `json:"session_id"`
+			}
+			json.Unmarshal(resp.Data, &d)
+			sessionID = d.SessionID
+		}
+	}
+	if sessionID == "" {
+		t.Fatal("did not receive session_started event before timeout")
+	}
+
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		if _, err := json_rpc.ReadEvent(reader); err != nil {
+			break
+		}
+	}
+
+	path := filepath.Join(dir, "logs", "sessions", sessionID+".jsonl")
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("session file %s should exist after prompt (even when LLM failed), got: %v", path, err)
+	}
 }

@@ -154,11 +154,6 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 	} else {
 		events = s.agent.RunStream(runCtx, params.Prompt)
 	}
-	defer func() {
-		if !s.sessionsHasHeader(store, sessionID) {
-			_ = os.Remove(store.Path())
-		}
-	}()
 
 	headerWritten := false
 	cancelled := false
@@ -280,14 +275,6 @@ func (s *Server) handleCancel(conn io.Writer, req *json_rpc.Request) {
 	if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCancelAck, nil); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack", "err", err)
 	}
-}
-
-func (s *Server) sessionsHasHeader(store *Store, sessionID string) bool {
-	loaded, err := Load(store.Path())
-	if err != nil {
-		return false
-	}
-	return loaded.Meta.SessionID == sessionID
 }
 
 func mapAgentEvent(ev agent.Event) (string, any) {
