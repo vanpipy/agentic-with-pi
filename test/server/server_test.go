@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -829,5 +830,102 @@ func TestServerNeverWritesToHomeLogSessions(t *testing.T) {
 	}
 	if len(serverWritten) > 0 {
 		t.Errorf("server should not write session events to ~/.awp/logs/sessions/; found: %v", serverWritten)
+	}
+}
+type accumulatingCore struct {
+	mu       sync.Mutex
+	calls    int
+	lastMsgs []llm.Message
+}
+
+func (a *accumulatingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	a.mu.Lock()
+	a.calls++
+	a.lastMsgs = append([]llm.Message{}, req.Messages...)
+	a.mu.Unlock()
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "pong"}}}}}
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
+	close(ch)
+	return ch, nil
+}
+
+func (a *accumulatingCore) requestCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
+
+func (a *accumulatingCore) lastRequestMessages() []llm.Message {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastMsgs
+}
+
+func TestSessionStateAccumulatesAcrossPrompts(t *testing.T) {
+	dir := t.TempDir()
+	socketPath := filepath.Join(dir, "test.sock")
+	t.Setenv("AWP_HOME", dir)
+
+	core := &accumulatingCore{}
+	ag := agent.NewAgent(core).
+		WithModel(llm.Model{ID: "test", SupportsTool: false})
+	llm.ResetIfaceLoggerForTest()
+	defer llm.ResetIfaceLoggerForTest()
+
+	s, err := server.New(ag, socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	defer s.Shutdown(context.Background())
+
+	for i := 0; i < 50; i++ {
+		c, err := net.Dial("unix", socketPath)
+		if err == nil {
+			c.Close()
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	sessionID := fmt.Sprintf("state-test-%d", time.Now().UnixNano())
+	sendPrompt := func(reqID, promptText string) {
+		c, err := net.Dial("unix", socketPath)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer c.Close()
+		req, _ := json_rpc.NewRequest(reqID, json_rpc.MethodPrompt, json_rpc.PromptParams{
+			SessionID: sessionID,
+			Prompt:    promptText,
+		})
+		if err := json_rpc.MarshalRequest(c, req); err != nil {
+			t.Fatal(err)
+		}
+		reader := bufio.NewReader(c)
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			c.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+			resp, err := json_rpc.ReadEvent(reader)
+			if err != nil {
+				return
+			}
+			if resp.Event == "final_answer" {
+				return
+			}
+		}
+	}
+
+	sendPrompt("1", "first-prompt")
+	firstMsgs := core.lastRequestMessages()
+	if len(firstMsgs) != 2 {
+		t.Fatalf("first prompt: LLM should see [system, user] (2 messages), got %d", len(firstMsgs))
+	}
+
+	sendPrompt("2", "second-prompt")
+	secondMsgs := core.lastRequestMessages()
+	if len(secondMsgs) <= len(firstMsgs) {
+		t.Errorf("second prompt: LLM should see history carried (messages=%d > first %d); sessionStates snapshot select has a default: that drops the snapshot, so msgs array is dropped every prompt", len(secondMsgs), len(firstMsgs))
 	}
 }

@@ -930,8 +930,8 @@ func TestAgentRunStreamResumedStartsWithHistory(t *testing.T) {
 	}
 
 	req := core.requests[0]
-	if len(req.Messages) != len(history)+1 {
-		t.Errorf("messages = %d, want %d (history + new prompt)", len(req.Messages), len(history)+1)
+	if len(req.Messages) != len(history)+2 {
+		t.Errorf("messages = %d, want %d (system + history + new prompt)", len(req.Messages), len(history)+2)
 	}
 	lastMsg := req.Messages[len(req.Messages)-1]
 	if lastMsg.Role != "user" || lastMsg.Content != "next task" {

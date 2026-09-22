@@ -386,10 +386,10 @@ func (a *Agent) CompactionSettingsForTest() CompactionSettings {
 
 func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 	ch := make(chan Event, 32)
-	a.openLogLocked()
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
+		a.openLogLocked()
 		if a.Model.ID == "" {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
 			return
@@ -411,6 +411,7 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
+		a.openLogLocked()
 		if sink != nil {
 			defer close(sink)
 		}
@@ -418,7 +419,11 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
 			return
 		}
-		msgs := append([]llm.Message{}, history...)
+		msgs := make([]llm.Message, 0, len(history)+2)
+		if len(history) == 0 || history[0].Role != "system" {
+			msgs = append(msgs, llm.Message{Role: "system", Content: a.SystemPrompts})
+		}
+		msgs = append(msgs, history...)
 		msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
 		a.loopWithMsgs(ctx, msgs, ch)
 		if sink != nil {

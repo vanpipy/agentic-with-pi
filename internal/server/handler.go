@@ -149,11 +149,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 		seed = append(seed, msgs...)
 	}
 	s.agent.LogEventForTest(agent.Event{Category: agent.EventUserMessage, Content: params.Prompt})
-	if len(seed) > 0 {
-		events, snapshotCh = s.agent.RunStreamResumedWithSnapshot(runCtx, params.Prompt, seed)
-	} else {
-		events = s.agent.RunStream(runCtx, params.Prompt)
-	}
+	events, snapshotCh = s.agent.RunStreamResumedWithSnapshot(runCtx, params.Prompt, seed)
 
 	cancelled := false
 	for ev := range events {
@@ -184,7 +180,6 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 			if ok && len(msgs) > 0 {
 				s.sessionStates.update(sessionID, msgs)
 			}
-		default:
 		}
 	}
 }
