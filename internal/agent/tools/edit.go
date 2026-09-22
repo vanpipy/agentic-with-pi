@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,11 +16,16 @@ type EditOp struct {
 	ReplaceAll bool   `json:"replace_all,omitempty"`
 }
 
+type editArgs struct {
+	Path  string   `json:"path"`
+	Edits []EditOp `json:"edits"`
+}
+
 func EditFile(cwd string) agent.Tool {
-	return agent.Tool{
-		Name:        "edit",
-		Description: "Apply one or more edits to a file. Each edit replaces old_text with new_text in order. By default old_text must match exactly once. REQUIRED: 'path' must be a file path; 'edits' must be a non-empty array.",
-		Parameters: requireIntentSchema("edit", map[string]any{
+	return agent.ToolFunc{
+		N: "edit",
+		D: "Apply one or more edits to a file. Each edit replaces old_text with new_text in order. By default old_text must match exactly once. REQUIRED: 'path' must be a file path; 'edits' must be a non-empty array.",
+		P: requireIntentSchema("edit", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"path": map[string]any{"type": "string", "description": "REQUIRED. Path to file to edit."},
@@ -41,41 +45,32 @@ func EditFile(cwd string) agent.Tool {
 			},
 			"required": []string{"path", "edits"},
 		}),
-		Execute: func(_ context.Context, argsJSON string) (string, error) {
-			if err := requireIntentOrError(argsJSON); err != nil {
-				return "", err
-			}
-			var args struct {
-				Path   string   `json:"path"`
-				Edits  []EditOp `json:"edits"`
-				Intent string   `json:"intent"`
-			}
-			if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-				return "", fmt.Errorf("invalid args: %w", err)
-			}
-			if len(args.Edits) == 0 {
-				return "", errors.New("edits array must not be empty")
-			}
-			fullPath := absPath(cwd, args.Path)
-			data, err := os.ReadFile(fullPath)
-			if err != nil {
-				return "", err
-			}
-			content := string(data)
-			for i, op := range args.Edits {
-				if !op.ReplaceAll && strings.Count(content, op.OldText) != 1 {
-					return "", fmt.Errorf("edit %d: old_text must match exactly once (or set replace_all=true)", i)
+		Fn: func(_ context.Context, argsJSON string) (string, error) {
+			return agent.RunTool(context.TODO(), argsJSON, func(_ context.Context, args editArgs) (string, error) {
+				if len(args.Edits) == 0 {
+					return "", errors.New("edits array must not be empty")
 				}
-				if op.ReplaceAll {
-					content = strings.ReplaceAll(content, op.OldText, op.NewText)
-				} else {
-					content = strings.Replace(content, op.OldText, op.NewText, 1)
+				fullPath := absPath(cwd, args.Path)
+				data, err := os.ReadFile(fullPath)
+				if err != nil {
+					return "", err
 				}
-			}
-			if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("applied %d edits to %s", len(args.Edits), fullPath), nil
+				content := string(data)
+				for i, op := range args.Edits {
+					if !op.ReplaceAll && strings.Count(content, op.OldText) != 1 {
+						return "", fmt.Errorf("edit %d: old_text must match exactly once (or set replace_all=true)", i)
+					}
+					if op.ReplaceAll {
+						content = strings.ReplaceAll(content, op.OldText, op.NewText)
+					} else {
+						content = strings.Replace(content, op.OldText, op.NewText, 1)
+					}
+				}
+				if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("applied %d edits to %s", len(args.Edits), fullPath), nil
+			})
 		},
 	}
 }

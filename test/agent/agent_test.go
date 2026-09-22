@@ -176,7 +176,8 @@ func TestNewAgentSafetyNetMatchesPiDefault(t *testing.T) {
 	}
 }
 
-func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {	callIDs := make([]string, 7)
+func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {
+	callIDs := make([]string, 7)
 	for i := range callIDs {
 		callIDs[i] = fmt.Sprintf("call_%d", i)
 	}
@@ -187,7 +188,7 @@ func TestAgentToolCallTruncationKeepsAssistantAndResultsAligned(t *testing.T) {	
 	chunks = append(chunks, messageDeltaStopChunk("tool_use"), messageStopChunk())
 	core := &fakeCore{streamChunks: chunks}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{Name: "ls", Execute: func(_ context.Context, _ string) (string, error) {
+	ag.WithTool(agent.ToolFunc{N: "ls", Fn: func(_ context.Context, _ string) (string, error) {
 		return "ok", nil
 	}})
 
@@ -248,9 +249,9 @@ func TestAgentExecutesToolAndContinues(t *testing.T) {
 		},
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{
-		Name: "get_time",
-		Execute: func(ctx context.Context, argsJSON string) (string, error) {
+	ag.WithTool(agent.ToolFunc{
+		N: "get_time",
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
 			return "2026-09-13T15:00:00+08:00", nil
 		},
 	})
@@ -290,9 +291,9 @@ func TestAgentToolExecutionError(t *testing.T) {
 		messageStopChunk(),
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{
-		Name:    "boom",
-		Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", errors.New("kaboom") },
+	ag.WithTool(agent.ToolFunc{
+		N:  "boom",
+		Fn: func(ctx context.Context, argsJSON string) (string, error) { return "", errors.New("kaboom") },
 	})
 	_, err := runAgent(t, ag, "boom")
 	if err == nil {
@@ -306,8 +307,8 @@ func TestAgentToolExecutionError(t *testing.T) {
 func TestAgentMidBatchToolFailureKeepsAssistantAndResultsAligned(t *testing.T) {
 	core := &fakeCore{}
 	ag := agent.NewAgent(core).WithModel(llm.Model{ID: "m", SupportsTool: true})
-	ag.WithTool(agent.Tool{Name: "ok", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "ok", nil }})
-	ag.WithTool(agent.Tool{Name: "boom", Execute: func(ctx context.Context, argsJSON string) (string, error) {
+	ag.WithTool(agent.ToolFunc{N: "ok", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "ok", nil }})
+	ag.WithTool(agent.ToolFunc{N: "boom", Fn: func(ctx context.Context, argsJSON string) (string, error) {
 		return "", errors.New("mid-batch kaboom")
 	}})
 
@@ -346,11 +347,11 @@ func TestAgentSafetyNetReached(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	_ = core  // legacy streamChunks (unused)
+	_ = core // legacy streamChunks (unused)
 	ag := newTestAgent(core, "test-model").WithSafetyNet(2)
-	ag.WithTool(agent.Tool{
-		Name:    "loop",
-		Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil },
+	ag.WithTool(agent.ToolFunc{
+		N:  "loop",
+		Fn: func(ctx context.Context, argsJSON string) (string, error) { return "", nil },
 	})
 	_, err := runAgent(t, ag, "loop forever")
 	if err == nil {
@@ -377,7 +378,7 @@ func TestAgentRefusesLengthWithToolCalls(t *testing.T) {
 		messageStopChunk(),
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{Name: "f", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
+	ag.WithTool(agent.ToolFunc{N: "f", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
 
 	_, err := runAgent(t, ag, "truncated")
 	if err == nil {
@@ -490,7 +491,7 @@ func TestAgentCarriesReasoningSigForward(t *testing.T) {
 		},
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
+	ag.WithTool(agent.ToolFunc{N: "noop", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
 	if _, err := runAgent(t, ag, "multi turn"); err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +670,7 @@ func TestAgentEmitsThoughtBracketEvents(t *testing.T) {
 		{textDeltaChunk("b"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
+	ag.WithTool(agent.ToolFunc{N: "noop", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
 	var starts, ends int
 	for ev := range ag.RunStream(context.Background(), "x") {
 		switch ev.Category {
@@ -693,7 +694,7 @@ func TestAgentMessageHistoryGrowsAcrossTurns(t *testing.T) {
 		{textDeltaChunk("done"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
 	}}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
+	ag.WithTool(agent.ToolFunc{N: "noop", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "r", nil }})
 	if _, err := runAgent(t, ag, "x"); err != nil {
 		t.Fatal(err)
 	}
@@ -723,14 +724,14 @@ func TestAgentDefensiveMaxTurnsClamp(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}
-	_ = repeat  // keep tests clean
+	_ = repeat // keep tests clean
 	chunksList := make([][]llm.StreamEvent, 10)
 	for i := range chunksList {
 		chunksList[i] = repeat
 	}
 	core := &fakeCore{streamChunksList: chunksList}
 	ag := newTestAgent(core, "test-model").WithSafetyNet(0)
-	ag.WithTool(agent.Tool{Name: "loop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
+	ag.WithTool(agent.ToolFunc{N: "loop", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
 	_, err := runAgentLastError(t, ag, "x")
 	if err == nil {
 		t.Fatal("expected error from clamped 0 max turns, got nil")
@@ -752,7 +753,7 @@ func TestAgentSafetyNetStopsLongLoop(t *testing.T) {
 	}
 	core := &fakeCore{streamChunksList: chunksList}
 	ag := newTestAgent(core, "test-model").WithSafetyNet(250)
-	ag.WithTool(agent.Tool{Name: "noop", Execute: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
+	ag.WithTool(agent.ToolFunc{N: "noop", Fn: func(ctx context.Context, argsJSON string) (string, error) { return "", nil }})
 
 	_, err := runAgentLastError(t, ag, "x")
 	if err == nil {
@@ -776,7 +777,7 @@ func TestAgentDoesNotAbortOnSingleTransientToolError(t *testing.T) {
 	}
 	core := &fakeCore{streamChunksList: chunks}
 	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
-	ag.WithTool(agent.Tool{Name: "read", Execute: func(ctx context.Context, argsJSON string) (string, error) {
+	ag.WithTool(agent.ToolFunc{N: "read", Fn: func(ctx context.Context, argsJSON string) (string, error) {
 		if argsJSON == "{}" {
 			return "", errors.New("path is required")
 		}
@@ -802,7 +803,7 @@ func TestAgentWithholdsOversizedToolResult(t *testing.T) {
 	}
 	core := &fakeCore{streamChunksList: chunks}
 	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
-	ag.WithTool(agent.Tool{Name: "dump", Execute: func(_ context.Context, _ string) (string, error) {
+	ag.WithTool(agent.ToolFunc{N: "dump", Fn: func(_ context.Context, _ string) (string, error) {
 		return huge, nil
 	}})
 
@@ -839,7 +840,7 @@ func TestAgentAcceptLargeOutputOverridesWithhold(t *testing.T) {
 	}
 	core := &fakeCore{streamChunksList: chunks}
 	ag := newTestAgent(core, "test-model").WithSafetyNet(50)
-	ag.WithTool(agent.Tool{Name: "dump", Execute: func(_ context.Context, _ string) (string, error) {
+	ag.WithTool(agent.ToolFunc{N: "dump", Fn: func(_ context.Context, _ string) (string, error) {
 		return huge, nil
 	}})
 
@@ -875,9 +876,9 @@ func TestAgentAbortsOnRepeatedToolError(t *testing.T) {
 	}
 	core := &fakeCore{streamChunksList: chunksList}
 	ag := newTestAgent(core, "test-model")
-	ag.WithTool(agent.Tool{
-		Name: "read",
-		Execute: func(ctx context.Context, argsJSON string) (string, error) {
+	ag.WithTool(agent.ToolFunc{
+		N: "read",
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
 			return "", errors.New("path is required")
 		},
 	})
@@ -968,3 +969,200 @@ func TestAgentFinalAnswerDoesNotDuplicateReasoning(t *testing.T) {
 	}
 }
 
+func TestAgentFindToolByName(t *testing.T) {
+	ag := agent.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m", SupportsTool: true})
+	ag.WithTool(agent.ToolFunc{N: "alpha", Fn: func(context.Context, string) (string, error) { return "a", nil }})
+	ag.WithTool(agent.ToolFunc{N: "beta", Fn: func(context.Context, string) (string, error) { return "b", nil }})
+
+	got, ok := agent.AgentFindToolForTest(ag, "beta")
+	if !ok {
+		t.Fatal("findTool(beta) = !ok, want true")
+	}
+	if got.Name() != "beta" {
+		t.Errorf("got Name = %q, want beta", got.Name())
+	}
+
+	if _, ok := agent.AgentFindToolForTest(ag, "missing"); ok {
+		t.Error("findTool(missing) = ok, want false")
+	}
+}
+
+func TestAgentFindTool_DoubleRegisterOverwrites(t *testing.T) {
+	ag := agent.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m", SupportsTool: true})
+	ag.WithTool(agent.ToolFunc{N: "alpha", Fn: func(context.Context, string) (string, error) { return "first", nil }})
+	ag.WithTool(agent.ToolFunc{N: "alpha", Fn: func(context.Context, string) (string, error) { return "second", nil }})
+
+	got, ok := agent.AgentFindToolForTest(ag, "alpha")
+	if !ok {
+		t.Fatal("findTool(alpha) = !ok, want true")
+	}
+	out, err := got.Invoke(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if out != "second" {
+		t.Errorf("Execute output = %q, want second (overwrite)", out)
+	}
+}
+
+func TestReActStrategyStep_ContinuesOnToolCalls(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		toolUseStartChunk("c1", "ls"),
+		textDeltaChunk("thinking..."),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}}
+	strat := agent.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	noop := func(context.Context, agent.Event) bool { return true }
+
+	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "explore"}}, noop)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if step.Kind != agent.StepContinue {
+		t.Errorf("Kind = %v, want StepContinue", step.Kind)
+	}
+	if len(step.ToolCalls) != 1 {
+		t.Errorf("len(ToolCalls) = %d, want 1", len(step.ToolCalls))
+	}
+	if step.ToolCalls[0].Function.Name != "ls" {
+		t.Errorf("ToolCalls[0].Name = %q, want ls", step.ToolCalls[0].Function.Name)
+	}
+	if step.Content != "thinking..." {
+		t.Errorf("Content = %q, want %q", step.Content, "thinking...")
+	}
+}
+
+func TestReActStrategyStep_FinalAnswer(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("the answer"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	strat := agent.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	noop := func(context.Context, agent.Event) bool { return true }
+
+	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "?"}}, noop)
+	if err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+	if step.Kind != agent.StepFinal {
+		t.Errorf("Kind = %v, want StepFinal", step.Kind)
+	}
+	if step.Content != "the answer" {
+		t.Errorf("Content = %q, want %q", step.Content, "the answer")
+	}
+	if len(step.ToolCalls) != 0 {
+		t.Errorf("len(ToolCalls) = %d, want 0", len(step.ToolCalls))
+	}
+}
+
+func TestReActStrategyShouldAbort_RepeatedCalls(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
+	msgs := []llm.Message{
+		{Role: "user", Content: "explore"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+	if err := strat.ShouldAbort(msgs, ""); err == nil {
+		t.Error("ShouldAbort returned nil, want non-nil for repeated identical tool calls")
+	}
+}
+
+func TestReActStrategyShouldAbort_RepeatedErrors(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	errMsg := "Tool ls failed: kaboom"
+	msgs := []llm.Message{
+		{Role: "user", Content: "ls"},
+		{Role: "tool", Content: errMsg},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}}},
+		{Role: "tool", Content: errMsg},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}}},
+		{Role: "tool", Content: errMsg},
+	}
+	if err := strat.ShouldAbort(msgs, errMsg); err == nil {
+		t.Error("ShouldAbort returned nil, want non-nil for repeated identical errors")
+	}
+}
+
+func TestReActStrategyShouldAbort_NormalHistory(t *testing.T) {
+	strat := agent.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	msgs := []llm.Message{
+		{Role: "user", Content: "explore"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "a.txt\nb.txt"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c2", Function: llm.FunctionCall{Name: "grep", Arguments: `{"pattern":"x"}`}}}},
+		{Role: "tool", ToolCallID: "c2", Content: "match"},
+	}
+	if err := strat.ShouldAbort(msgs, ""); err != nil {
+		t.Errorf("ShouldAbort returned %v, want nil for varied history", err)
+	}
+}
+
+type runToolArgs struct {
+	Name string `json:"name"`
+}
+
+func TestRunTool_Success(t *testing.T) {
+	handler := func(_ context.Context, a runToolArgs) (string, error) {
+		return "hi " + a.Name, nil
+	}
+	out, err := agent.RunTool(context.Background(), `{"name":"alice","intent":"x"}`, handler)
+	if err != nil {
+		t.Fatalf("RunTool: %v", err)
+	}
+	if out != "hi alice" {
+		t.Errorf("out = %q, want %q", out, "hi alice")
+	}
+}
+
+func TestRunTool_MissingIntent(t *testing.T) {
+	handler := func(_ context.Context, a runToolArgs) (string, error) { return "", nil }
+	_, err := agent.RunTool(context.Background(), `{"name":"alice"}`, handler)
+	if err == nil {
+		t.Fatal("expected error for missing intent")
+	}
+	if !strings.Contains(err.Error(), "intent") {
+		t.Errorf("err = %q, want mentions intent", err.Error())
+	}
+}
+
+func TestRunTool_BadJSON(t *testing.T) {
+	handler := func(_ context.Context, a runToolArgs) (string, error) { return "", nil }
+	_, err := agent.RunTool(context.Background(), `not json`, handler)
+	if err == nil {
+		t.Fatal("expected error for bad JSON")
+	}
+}
+
+func TestToolFunc_Adapter(t *testing.T) {
+	tf := agent.ToolFunc{
+		N:  "test",
+		D:  "test tool",
+		P:  map[string]any{"type": "object"},
+		Fn: func(_ context.Context, _ string) (string, error) { return "result", nil },
+	}
+	if tf.Name() != "test" {
+		t.Errorf("Name() = %q, want test", tf.Name())
+	}
+	if tf.Description() != "test tool" {
+		t.Errorf("Description() = %q, want test tool", tf.Description())
+	}
+	if tf.Parameters()["type"] != "object" {
+		t.Errorf("Parameters() type = %v, want object", tf.Parameters()["type"])
+	}
+	out, err := tf.Invoke(context.Background(), `{}`)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if out != "result" {
+		t.Errorf("out = %q, want result", out)
+	}
+}
+
+var _ agent.Tool = agent.ToolFunc{N: "x", Fn: func(context.Context, string) (string, error) { return "", nil }}

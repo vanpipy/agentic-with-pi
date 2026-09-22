@@ -17,8 +17,8 @@ func TestAllRegistersEveryBuiltin(t *testing.T) {
 		"invalid": false,
 	}
 	for _, t0 := range got {
-		if _, ok := want[t0.Name]; ok {
-			want[t0.Name] = true
+		if _, ok := want[t0.Name()]; ok {
+			want[t0.Name()] = true
 		}
 	}
 	for name, seen := range want {
@@ -35,8 +35,8 @@ func TestAllTwiceReturnsDistinctToolValues(t *testing.T) {
 		t.Fatalf("lengths differ: %d vs %d", len(a), len(b))
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name {
-			t.Errorf("position %d: %q != %q", i, a[i].Name, b[i].Name)
+		if a[i].Name() != b[i].Name() {
+			t.Errorf("position %d: %q != %q", i, a[i].Name(), b[i].Name())
 		}
 	}
 }

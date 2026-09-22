@@ -1,21 +1,11 @@
 package tools
 
-import (
-	"encoding/json"
-	"fmt"
-	"strings"
-)
-
-const IntentField = "intent"
-const IntentDescription = "Required short label shown in the UI: why this call is being made."
 const AcceptLargeOutputField = "accept_large_output"
 const AcceptLargeOutputDescription = "Default false; set true only when accepting the token cost of a withheld result."
 
-type intentArgs struct {
-	Intent string `json:"intent"`
-}
-
 func requireIntentSchema(name string, schema map[string]any) map[string]any {
+	const intentField = "intent"
+	const intentDescription = "Required short label shown in the UI: why this call is being made."
 	if schema == nil {
 		schema = map[string]any{}
 	}
@@ -24,10 +14,10 @@ func requireIntentSchema(name string, schema map[string]any) map[string]any {
 		props = map[string]any{}
 		schema["properties"] = props
 	}
-	if _, ok := props[IntentField]; !ok {
-		props[IntentField] = map[string]any{
+	if _, ok := props[intentField]; !ok {
+		props[intentField] = map[string]any{
 			"type":        "string",
-			"description": IntentDescription,
+			"description": intentDescription,
 		}
 	}
 	if _, ok := props[AcceptLargeOutputField]; !ok {
@@ -45,25 +35,14 @@ func requireIntentSchema(name string, schema map[string]any) map[string]any {
 	required = append(required, requiredRaw...)
 	hasIntent := false
 	for _, r := range required {
-		if r == IntentField {
+		if r == intentField {
 			hasIntent = true
 			break
 		}
 	}
 	if !hasIntent {
-		required = append(required, IntentField)
+		required = append(required, intentField)
 	}
 	schema["required"] = required
 	return schema
-}
-
-func requireIntentOrError(argsJSON string) error {
-	var args intentArgs
-	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
-		return fmt.Errorf("invalid args: %w", err)
-	}
-	if strings.TrimSpace(args.Intent) == "" {
-		return fmt.Errorf("%s is required (%s)", IntentField, IntentDescription)
-	}
-	return nil
 }
