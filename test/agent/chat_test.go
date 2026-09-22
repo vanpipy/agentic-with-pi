@@ -86,6 +86,32 @@ func TestRenderMsgObserveCollapsedShowsGlyph(t *testing.T) {
 	}
 }
 
+func TestRenderMsgObserveCollapsedShowsIntent(t *testing.T) {
+	lines := tui.RenderMsgForTest(tui.ChatMsg{
+		Role:      tui.RoleObserve,
+		Text:      strings.Repeat("a", 600),
+		Intent:    "list current working directory",
+		Collapsed: true,
+	}, 80)
+	if !strings.Contains(lines[0], "list current working directory") {
+		t.Errorf("collapsed observe with intent should show intent, got %q", lines[0])
+	}
+	if strings.Count(lines[0], "a") > 5 {
+		t.Errorf("collapsed observe with intent should hide result, got %d a's", strings.Count(lines[0], "a"))
+	}
+}
+
+func TestRenderMsgObserveCollapsedWithoutIntentFallsBack(t *testing.T) {
+	lines := tui.RenderMsgForTest(tui.ChatMsg{
+		Role:      tui.RoleObserve,
+		Text:      strings.Repeat("a", 600),
+		Collapsed: true,
+	}, 80)
+	if !strings.Contains(lines[0], "result") {
+		t.Errorf("collapsed observe without intent should fall back to 'result', got %q", lines[0])
+	}
+}
+
 func TestGlyphPrefixWithPromptNumber(t *testing.T) {
 	layout := tui.RoleLayoutForTest(tui.RoleUser)
 	got := tui.GlyphPrefixForTest(layout, tui.RoleUser, 3)

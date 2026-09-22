@@ -78,12 +78,13 @@ func handleServerEvent(c *chatModel, sessionID *string, ev client_sdk.Event) {
 			ToolName string `json:"tool_name"`
 			Result   string `json:"result"`
 			Error    string `json:"error"`
+			Intent   string `json:"intent"`
 		}
 		json.Unmarshal(ev.Data, &d)
 		if d.Error != "" {
 			c.appendError(d.Error)
 		} else {
-			c.appendObserve(d.Result)
+			c.appendObserve(d.Result, d.Intent)
 		}
 	case "final_answer":
 		c.commitStream()

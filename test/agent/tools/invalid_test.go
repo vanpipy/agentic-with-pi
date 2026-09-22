@@ -24,12 +24,12 @@ func TestInvalidTool(t *testing.T) {
 
 func TestInvalidToolMissingIntent(t *testing.T) {
 	tool := tools.InvalidTool()
-	_, err := tool.Invoke(context.Background(), `{"tool":"read","reason":"oops"}`)
-	if err == nil {
-		t.Fatal("expected error for missing intent")
+	out, err := tool.Invoke(context.Background(), `{"tool":"read","reason":"oops"}`)
+	if err != nil {
+		t.Fatalf("missing intent should NOT block, got err: %v", err)
 	}
-	if !strings.Contains(err.Error(), "intent") {
-		t.Errorf("err = %q, want mentions 'intent'", err.Error())
+	if !strings.Contains(out, "oops") {
+		t.Errorf("out = %q, want contains 'oops' (the reason)", out)
 	}
 }
 

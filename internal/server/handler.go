@@ -318,11 +318,15 @@ func mapAgentEvent(ev agent.Event) (string, any) {
 		}
 		return json_rpc.EventTool, payload
 	case agent.EventObserve:
-		return json_rpc.EventObserve, map[string]string{
+		observe := map[string]string{
 			"tool_name": ev.ToolName,
 			"result":    ev.ToolResult,
 			"error":     ev.ToolError,
 		}
+		if ev.ToolIntent != "" {
+			observe["intent"] = ev.ToolIntent
+		}
+		return json_rpc.EventObserve, observe
 	case agent.EventFinalAnswer:
 		data := map[string]string{"content": ev.Content}
 		if u := usageToMap(ev.Usage); u != nil {

@@ -140,7 +140,11 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		return []string{layout.body.Render(fmt.Sprintf("▸ thought for %s", dur))}
 	}
 	if g.role == roleObserve && g.collapsed {
-		return wrapRender(layout.body.Width(width), "▸ result "+truncateMid(g.text, 60))
+		summary := g.intent
+		if summary == "" {
+			summary = "result"
+		}
+		return wrapRender(layout.body.Width(width), "▸ "+truncateMid(summary, 60))
 	}
 	return wrapRender(layout.body.Width(width), g.text)
 }
@@ -433,7 +437,7 @@ func intentPrefix(intent string) string {
 	return intent + " · "
 }
 
-func (c *chatModel) appendObserve(text string) {
+func (c *chatModel) appendObserve(text, intent string) {
 	preview := text
 	if tools.ToolOutputLooksFailed(text) {
 		if summary, ok := tools.ConciseToolErrorSummary(text); ok {
@@ -445,6 +449,7 @@ func (c *chatModel) appendObserve(text string) {
 	c.messages = append(c.messages, chatMsg{
 		role:      roleObserve,
 		text:      preview,
+		intent:    intent,
 		collapsed: shouldCollapseResult(text),
 	})
 	c.refresh()
@@ -498,6 +503,7 @@ type Role = role
 type ChatMsg struct {
 	Role      Role
 	Text      string
+	Intent    string
 	Duration  time.Duration
 	Usage     *msgUsage
 	PromptNum int
@@ -508,6 +514,7 @@ func toChatMsg(c ChatMsg) chatMsg {
 	return chatMsg{
 		role:      c.Role,
 		text:      c.Text,
+		intent:    c.Intent,
 		duration:  c.Duration,
 		usage:     c.Usage,
 		promptNum: c.PromptNum,

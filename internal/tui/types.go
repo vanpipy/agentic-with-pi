@@ -35,6 +35,7 @@ func StateStreamingForTestValue() State { return StateStreaming }
 type chatMsg struct {
 	role      role
 	text      string
+	intent    string
 	duration  time.Duration
 	usage     *msgUsage
 	promptNum int

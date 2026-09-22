@@ -1122,13 +1122,13 @@ func TestRunTool_Success(t *testing.T) {
 }
 
 func TestRunTool_MissingIntent(t *testing.T) {
-	handler := func(_ context.Context, a runToolArgs) (string, error) { return "", nil }
-	_, err := agent.RunTool(context.Background(), `{"name":"alice"}`, handler)
-	if err == nil {
-		t.Fatal("expected error for missing intent")
+	handler := func(_ context.Context, a runToolArgs) (string, error) { return "ok", nil }
+	out, err := agent.RunTool(context.Background(), `{"name":"alice"}`, handler)
+	if err != nil {
+		t.Fatalf("missing intent should NOT block the call, got err: %v", err)
 	}
-	if !strings.Contains(err.Error(), "intent") {
-		t.Errorf("err = %q, want mentions intent", err.Error())
+	if out != "ok" {
+		t.Errorf("out = %q, want ok", out)
 	}
 }
 

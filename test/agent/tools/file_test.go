@@ -14,13 +14,16 @@ import (
 
 func TestReadFileMissingIntent(t *testing.T) {
 	dir := t.TempDir()
-	tool := tools.ReadFile(dir, tools.FileOptions{})
-	_, err := tool.Invoke(context.Background(), `{"path":"hello.txt"}`)
-	if err == nil {
-		t.Fatal("expected error for missing intent")
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "intent") {
-		t.Errorf("err = %q, want mentions 'intent'", err.Error())
+	tool := tools.ReadFile(dir, tools.FileOptions{})
+	out, err := tool.Invoke(context.Background(), `{"path":"hello.txt"}`)
+	if err != nil {
+		t.Fatalf("missing intent should NOT block, got err: %v", err)
+	}
+	if !strings.Contains(out, "hi") {
+		t.Errorf("out = %q, want contains 'hi'", out)
 	}
 }
 
@@ -67,24 +70,14 @@ func TestAllToolsRequireIntentInSchema(t *testing.T) {
 		if _, ok := props["accept_large_output"]; !ok {
 			t.Errorf("tool %q: schema missing accept_large_output property", tool.Name())
 		}
-		required, ok := schema["required"].([]string)
-		if !ok {
-			t.Errorf("tool %q: schema required not []string", tool.Name())
-			continue
-		}
-		hasIntent := false
-		for _, r := range required {
-			if r == "intent" {
-				hasIntent = true
-				break
-			}
-		}
-		if !hasIntent {
-			t.Errorf("tool %q: required does not contain 'intent'", tool.Name())
-		}
-		for _, r := range required {
-			if r == "accept_large_output" {
-				t.Errorf("tool %q: accept_large_output must NOT be required", tool.Name())
+		if requiredRaw, ok := schema["required"].([]string); ok {
+			for _, r := range requiredRaw {
+				if r == "intent" {
+					t.Errorf("tool %q: intent must NOT be required (it's optional)", tool.Name())
+				}
+				if r == "accept_large_output" {
+					t.Errorf("tool %q: accept_large_output must NOT be required", tool.Name())
+				}
 			}
 		}
 	}

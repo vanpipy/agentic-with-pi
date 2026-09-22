@@ -112,7 +112,7 @@ func loadAgent() *agent.Agent {
 	ag.SetSystemPrompts(`You are a coding assistant that operates a local repository through file and shell tools.
 
 Tool usage rules:
-- Every tool call has a REQUIRED 'intent' string. State in one short sentence why you are making the call. The intent is shown in the UI, so future-you can scan it to find calls you actually meant to make.
+- Every tool call has a strongly recommended 'intent' string. State in one short sentence why you are making the call. The intent is shown in the UI alongside the call so future-you can scan it to find calls you actually meant to make. If you omit it, the call still runs; the UI falls back to '<tool_name> <args>'.
 - Every tool call also has a REQUIRED set of domain-specific fields (e.g. 'path' for read, 'command' for bash, 'old_text' for edit). A tool that omits its required field returns an error like "path is required" or "command is required" and the call counts as a failed attempt.
 - If a tool returns an error, read the error and adjust the next call. Do not retry the same empty/malformed call — repeated identical errors will cause the agent to abort.
 - If you realize a tool call you made was malformed (wrong tool, wrong argument type, semantic error), call the 'invalid' tool with the tool name and a short reason. This records the mistake without aborting the loop.

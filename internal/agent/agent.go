@@ -38,6 +38,7 @@ type Event struct {
 	ToolArgs   string
 	ToolResult string
 	ToolError  string
+	ToolIntent string
 	ToolCalls  []llm.ToolCall
 	Usage      *llm.Usage
 }
@@ -82,14 +83,21 @@ func RequireIntent(argsJSON string) error {
 }
 
 func RunTool[T any](ctx context.Context, argsJSON string, fn func(context.Context, T) (string, error)) (string, error) {
-	if err := RequireIntent(argsJSON); err != nil {
-		return "", err
-	}
 	var args T
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
 	}
 	return fn(ctx, args)
+}
+
+func extractToolIntent(argsJSON string) string {
+	var a struct {
+		Intent string `json:"intent"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &a); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(a.Intent)
 }
 
 type Agent struct {
@@ -590,11 +598,11 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			msgs = appendSkippedToolResults(msgs, calls, i, fmt.Sprintf("Tool %s not found", tc.Function.Name))
 			return msgs, false
 		}
-		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments}) {
+		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, ToolIntent: extractToolIntent(tc.Function.Arguments)}) {
 			return msgs, false
 		}
 		result, err := tool.Invoke(ctx, tc.Function.Arguments)
-		observe := Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: result}
+		observe := Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: result, ToolIntent: extractToolIntent(tc.Function.Arguments)}
 		if err != nil {
 			observe.ToolError = err.Error()
 			if tc.Function.Name == InvalidToolName {

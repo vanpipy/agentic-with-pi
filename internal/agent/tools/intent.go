@@ -5,7 +5,7 @@ const AcceptLargeOutputDescription = "Default false; set true only when acceptin
 
 func requireIntentSchema(name string, schema map[string]any) map[string]any {
 	const intentField = "intent"
-	const intentDescription = "Required short label shown in the UI: why this call is being made."
+	const intentDescription = "Short label shown in the UI alongside the call. Strongly recommended: explains why this call is being made. If omitted, the UI falls back to '<tool_name> <args>'."
 	if schema == nil {
 		schema = map[string]any{}
 	}
@@ -30,19 +30,5 @@ func requireIntentSchema(name string, schema map[string]any) map[string]any {
 	if _, ok := schema["type"]; !ok {
 		schema["type"] = "object"
 	}
-	requiredRaw, _ := schema["required"].([]string)
-	required := make([]string, 0, len(requiredRaw)+1)
-	required = append(required, requiredRaw...)
-	hasIntent := false
-	for _, r := range required {
-		if r == intentField {
-			hasIntent = true
-			break
-		}
-	}
-	if !hasIntent {
-		required = append(required, intentField)
-	}
-	schema["required"] = required
 	return schema
 }
