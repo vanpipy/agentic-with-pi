@@ -8,7 +8,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/transport"
 )
 
@@ -75,14 +75,14 @@ func (c *Client) Prompt(ctx context.Context, prompt string) (<-chan Event, error
 }
 
 func (c *Client) PromptWithSessionID(ctx context.Context, prompt, sessionID string) (<-chan Event, error) {
-	req, err := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+	req, err := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
 		SessionID: sessionID,
 		Prompt:    prompt,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
@@ -93,12 +93,12 @@ func (c *Client) PromptWithSessionID(ctx context.Context, prompt, sessionID stri
 			if ctx.Err() != nil {
 				return
 			}
-			resp, err := protocol.ReadEvent(c.reader)
+			resp, err := json_rpc.ReadEvent(c.reader)
 			if err != nil {
 				return
 			}
 			events <- Event{Kind: resp.Event, Data: resp.Data}
-			if resp.Event == protocol.EventFinalAnswer {
+			if resp.Event == json_rpc.EventFinalAnswer {
 				return
 			}
 		}
@@ -107,11 +107,11 @@ func (c *Client) PromptWithSessionID(ctx context.Context, prompt, sessionID stri
 }
 
 func (c *Client) Ping() error {
-	req, _ := protocol.NewRequest("1", protocol.MethodPing, nil)
-	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPing, nil)
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
 		return err
 	}
-	resp, err := protocol.ReadEvent(c.reader)
+	resp, err := json_rpc.ReadEvent(c.reader)
 	if err != nil {
 		return err
 	}
@@ -126,29 +126,29 @@ func ParseEventData(data []byte, dst any) error {
 }
 
 func (c *Client) Cancel(ctx context.Context) error {
-	req, _ := protocol.NewRequest("1", protocol.MethodCancel, nil)
-	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodCancel, nil)
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
 		return fmt.Errorf("send cancel: %w", err)
 	}
 	return nil
 }
 
-func (c *Client) ListSessions(ctx context.Context) ([]protocol.SessionSummary, error) {
-	req, _ := protocol.NewRequest("1", protocol.MethodListSessions, protocol.ListSessionsParams{})
-	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+func (c *Client) ListSessions(ctx context.Context) ([]json_rpc.SessionSummary, error) {
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodListSessions, json_rpc.ListSessionsParams{})
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
 		return nil, fmt.Errorf("send list_sessions: %w", err)
 	}
-	resp, err := protocol.ReadEvent(c.reader)
+	resp, err := json_rpc.ReadEvent(c.reader)
 	if err != nil {
 		return nil, fmt.Errorf("read list_sessions: %w", err)
 	}
-	if resp.Event == protocol.EventError {
+	if resp.Event == json_rpc.EventError {
 		return nil, fmt.Errorf("server error: %s", string(resp.Data))
 	}
 	if resp.Event != "sessions_list" {
 		return nil, fmt.Errorf("unexpected event: %s", resp.Event)
 	}
-	var out protocol.ListSessionsResult
+	var out json_rpc.ListSessionsResult
 	if err := json.Unmarshal(resp.Data, &out); err != nil {
 		return nil, fmt.Errorf("decode list_sessions: %w", err)
 	}
@@ -156,13 +156,13 @@ func (c *Client) ListSessions(ctx context.Context) ([]protocol.SessionSummary, e
 }
 
 func (c *Client) Resume(ctx context.Context, sessionID string) (<-chan Event, error) {
-	req, err := protocol.NewRequest("1", protocol.MethodResume, protocol.ResumeParams{
+	req, err := json_rpc.NewRequest("1", json_rpc.MethodResume, json_rpc.ResumeParams{
 		SessionID: sessionID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	if err := protocol.MarshalRequest(c.conn, req); err != nil {
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 
@@ -173,7 +173,7 @@ func (c *Client) Resume(ctx context.Context, sessionID string) (<-chan Event, er
 			if ctx.Err() != nil {
 				return
 			}
-			resp, err := protocol.ReadEvent(c.reader)
+			resp, err := json_rpc.ReadEvent(c.reader)
 			if err != nil {
 				return
 			}

@@ -1,4 +1,4 @@
-package protocol
+package json_rpc
 
 import (
 	"bufio"

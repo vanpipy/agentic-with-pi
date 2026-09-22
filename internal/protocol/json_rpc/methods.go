@@ -1,26 +1,10 @@
-package protocol
-
-import "encoding/json"
-
-type Request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      string          `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type Response struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      string          `json:"id"`
-	Event   string          `json:"event"`
-	Data    json.RawMessage `json:"data,omitempty"`
-}
+package json_rpc
 
 const (
-	MethodPrompt      = "prompt"
-	MethodResume      = "resume"
-	MethodCancel      = "cancel"
-	MethodPing        = "ping"
+	MethodPrompt       = "prompt"
+	MethodResume       = "resume"
+	MethodCancel       = "cancel"
+	MethodPing         = "ping"
 	MethodListSessions = "list_sessions"
 )
 

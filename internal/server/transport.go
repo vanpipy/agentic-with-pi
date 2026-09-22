@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 )
 
 func (s *Server) SocketPath() string {
@@ -62,7 +62,7 @@ func (s *Server) handleConn(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 
 	for {
-		req, err := protocol.ReadRequest(reader)
+		req, err := json_rpc.ReadRequest(reader)
 		if err != nil {
 			return
 		}
@@ -75,18 +75,18 @@ func (s *Server) handleConn(conn net.Conn) {
 	}
 }
 
-func (s *Server) dispatchRun(conn io.Writer, connCtx context.Context, req *protocol.Request) {
+func (s *Server) dispatchRun(conn io.Writer, connCtx context.Context, req *json_rpc.Request) {
 	switch req.Method {
-	case protocol.MethodPing:
+	case json_rpc.MethodPing:
 		s.handlePing(conn, req)
-	case protocol.MethodPrompt:
+	case json_rpc.MethodPrompt:
 		s.handlePrompt(conn, connCtx, req)
-	case protocol.MethodResume:
+	case json_rpc.MethodResume:
 		s.handleResume(conn, req)
-	case protocol.MethodCancel:
+	case json_rpc.MethodCancel:
 		s.handleCancel(conn, req)
 	default:
-		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "unknown method: " + req.Method,
 		}); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "default_error", "err", err)

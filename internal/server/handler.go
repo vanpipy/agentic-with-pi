@@ -14,23 +14,23 @@ import (
 
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/llm"
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 )
 
-func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol.Request) {
+func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *json_rpc.Request) {
 	switch req.Method {
-	case protocol.MethodPing:
+	case json_rpc.MethodPing:
 		s.handlePing(conn, req)
-	case protocol.MethodPrompt:
+	case json_rpc.MethodPrompt:
 		s.handlePrompt(conn, connCtx, req)
-	case protocol.MethodResume:
+	case json_rpc.MethodResume:
 		s.handleResume(conn, req)
-	case protocol.MethodCancel:
+	case json_rpc.MethodCancel:
 		s.handleCancel(conn, req)
-	case protocol.MethodListSessions:
+	case json_rpc.MethodListSessions:
 		s.handleListSessions(conn, req)
 	default:
-		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "unknown method: " + req.Method,
 		}); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "default_error", "err", err)
@@ -38,35 +38,35 @@ func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *protocol
 	}
 }
 
-func (s *Server) handlePing(conn io.Writer, req *protocol.Request) {
-	if err := protocol.MarshalEvent(conn, req.ID, "pong", nil); err != nil {
+func (s *Server) handlePing(conn io.Writer, req *json_rpc.Request) {
+	if err := json_rpc.MarshalEvent(conn, req.ID, "pong", nil); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "ping_pong", "err", err)
 	}
 }
 
-func (s *Server) handleListSessions(conn io.Writer, req *protocol.Request) {
+func (s *Server) handleListSessions(conn io.Writer, req *json_rpc.Request) {
 	summaries, err := s.collectSessionSummaries()
 	if err != nil {
-		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "list sessions: " + err.Error(),
 		}); mErr != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "list_sessions_err", "err", mErr)
 		}
 		return
 	}
-	if err := protocol.MarshalEvent(conn, req.ID, "sessions_list", protocol.ListSessionsResult{
+	if err := json_rpc.MarshalEvent(conn, req.ID, "sessions_list", json_rpc.ListSessionsResult{
 		Sessions: summaries,
 	}); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "list_sessions", "err", err)
 	}
 }
 
-func (s *Server) collectSessionSummaries() ([]protocol.SessionSummary, error) {
+func (s *Server) collectSessionSummaries() ([]json_rpc.SessionSummary, error) {
 	entries, err := os.ReadDir(s.sessionsDir)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]protocol.SessionSummary, 0, len(entries))
+	out := make([]json_rpc.SessionSummary, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -81,7 +81,7 @@ func (s *Server) collectSessionSummaries() ([]protocol.SessionSummary, error) {
 		if err != nil || loaded == nil {
 			continue
 		}
-		out = append(out, protocol.SessionSummary{
+		out = append(out, json_rpc.SessionSummary{
 			SessionID: sessionID,
 			Model:     loaded.Meta.Model,
 			StartedAt: loaded.Meta.StartedAt,
@@ -92,7 +92,7 @@ func (s *Server) collectSessionSummaries() ([]protocol.SessionSummary, error) {
 	return out, nil
 }
 
-func sortSummaries(s []protocol.SessionSummary) {
+func sortSummaries(s []json_rpc.SessionSummary) {
 	for i := 1; i < len(s); i++ {
 		for j := i; j > 0 && s[j].StartedAt > s[j-1].StartedAt; j-- {
 			s[j], s[j-1] = s[j-1], s[j]
@@ -100,10 +100,10 @@ func sortSummaries(s []protocol.SessionSummary) {
 	}
 }
 
-func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *protocol.Request) {
-	var params protocol.PromptParams
+func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json_rpc.Request) {
+	var params json_rpc.PromptParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "invalid params",
 		}); mErr != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "invalid_params", "err", mErr)
@@ -117,7 +117,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	}
 
 	store := s.getOrCreateStore(sessionID)
-	if err := protocol.MarshalEvent(conn, req.ID, "session_started", map[string]string{
+	if err := json_rpc.MarshalEvent(conn, req.ID, "session_started", map[string]string{
 		"session_id": sessionID,
 	}); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "session_started", "session_id", sessionID, "err", err)
@@ -168,7 +168,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 
 		eventName, data := mapAgentEvent(ev)
 
-		if err := protocol.MarshalEvent(conn, req.ID, eventName, data); err != nil {
+		if err := json_rpc.MarshalEvent(conn, req.ID, eventName, data); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "prompt_stream", "session_id", sessionID, "event", eventName, "err", err)
 			return
 		}
@@ -184,12 +184,12 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *prot
 	}
 
 	if cancelled {
-		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, map[string]string{
+		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCancelAck, map[string]string{
 			"reason": "user_cancelled",
 		}); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack_stream", "err", err)
 		}
-		if writeErr := store.WriteEvent(protocol.EventCancelAck, map[string]string{"reason": "user_cancelled"}); writeErr != nil {
+		if writeErr := store.WriteEvent(json_rpc.EventCancelAck, map[string]string{"reason": "user_cancelled"}); writeErr != nil {
 			slog.Debug("server: cancel session write failed", "err", writeErr)
 		}
 	}
@@ -222,10 +222,10 @@ func (s *Server) loadResumeHistory(sessionID string) ([]llm.Message, bool) {
 	}, true
 }
 
-func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
-	var params protocol.ResumeParams
+func (s *Server) handleResume(conn io.Writer, req *json_rpc.Request) {
+	var params json_rpc.ResumeParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
-		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "invalid params",
 		}); mErr != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_invalid_params", "err", mErr)
@@ -235,7 +235,7 @@ func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
 
 	loaded, err := Load(DefaultPath(s.sessionsDir, params.SessionID))
 	if err != nil {
-		if mErr := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "session not found: " + params.SessionID,
 		}); mErr != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_not_found", "err", mErr)
@@ -244,23 +244,23 @@ func (s *Server) handleResume(conn io.Writer, req *protocol.Request) {
 	}
 
 	for _, ev := range loaded.Events {
-		if err := protocol.MarshalEvent(conn, req.ID, ev.Kind, json.RawMessage(ev.Data)); err != nil {
+		if err := json_rpc.MarshalEvent(conn, req.ID, ev.Kind, json.RawMessage(ev.Data)); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
 			return
 		}
 	}
 
-	if err := protocol.MarshalEvent(conn, req.ID, "session_resumed", map[string]int{
+	if err := json_rpc.MarshalEvent(conn, req.ID, "session_resumed", map[string]int{
 		"event_count": len(loaded.Events),
 	}); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_done", "session_id", params.SessionID, "err", err)
 	}
 }
 
-func (s *Server) handleCancel(conn io.Writer, req *protocol.Request) {
+func (s *Server) handleCancel(conn io.Writer, req *json_rpc.Request) {
 	cancel := s.popConnCancel(req.ID)
 	if cancel == nil {
-		if err := protocol.MarshalEvent(conn, req.ID, protocol.EventError, map[string]string{
+		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "no active prompt to cancel for id " + req.ID,
 		}); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_no_active", "err", err)
@@ -268,7 +268,7 @@ func (s *Server) handleCancel(conn io.Writer, req *protocol.Request) {
 		return
 	}
 	cancel()
-	if err := protocol.MarshalEvent(conn, req.ID, protocol.EventCancelAck, nil); err != nil {
+	if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCancelAck, nil); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack", "err", err)
 	}
 }
@@ -284,9 +284,9 @@ func (s *Server) sessionsHasHeader(store *Store, sessionID string) bool {
 func mapAgentEvent(ev agent.Event) (string, any) {
 	switch ev.Category {
 	case agent.EventThoughtStart:
-		return protocol.EventThoughtStart, nil
+		return json_rpc.EventThoughtStart, nil
 	case agent.EventThoughtChunk:
-		return protocol.EventThoughtChunk, map[string]string{
+		return json_rpc.EventThoughtChunk, map[string]string{
 			"reasoning": ev.Reasoning,
 			"content":   ev.Content,
 		}
@@ -300,14 +300,14 @@ func mapAgentEvent(ev agent.Event) (string, any) {
 				data[k] = v
 			}
 		}
-		return protocol.EventThoughtEnd, data
+		return json_rpc.EventThoughtEnd, data
 	case agent.EventTool:
-		return protocol.EventTool, map[string]string{
+		return json_rpc.EventTool, map[string]string{
 			"name": ev.ToolName,
 			"args": ev.ToolArgs,
 		}
 	case agent.EventObserve:
-		return protocol.EventObserve, map[string]string{
+		return json_rpc.EventObserve, map[string]string{
 			"tool_name": ev.ToolName,
 			"result":    ev.ToolResult,
 			"error":     ev.ToolError,
@@ -319,9 +319,9 @@ func mapAgentEvent(ev agent.Event) (string, any) {
 				data[k] = v
 			}
 		}
-		return protocol.EventFinalAnswer, data
+		return json_rpc.EventFinalAnswer, data
 	case agent.EventError:
-		return protocol.EventError, map[string]string{
+		return json_rpc.EventError, map[string]string{
 			"error": ev.ToolError,
 		}
 	default:

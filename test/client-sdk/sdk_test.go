@@ -11,7 +11,7 @@ import (
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/client-sdk"
 	"github.com/vanpiyp/awp/internal/llm"
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/server"
 )
 
@@ -124,7 +124,7 @@ func TestPromptStreamEvents(t *testing.T) {
 	var finalContent string
 	for ev := range events {
 		kinds = append(kinds, ev.Kind)
-		if ev.Kind == protocol.EventFinalAnswer {
+		if ev.Kind == json_rpc.EventFinalAnswer {
 			var data struct {
 				Content string `json:"content"`
 			}
@@ -141,13 +141,13 @@ func TestPromptStreamEvents(t *testing.T) {
 	hasChunk := false
 	hasFinal := false
 	for _, k := range kinds {
-		if k == protocol.EventThoughtStart {
+		if k == json_rpc.EventThoughtStart {
 			hasThought = true
 		}
-		if k == protocol.EventThoughtChunk {
+		if k == json_rpc.EventThoughtChunk {
 			hasChunk = true
 		}
-		if k == protocol.EventFinalAnswer {
+		if k == json_rpc.EventFinalAnswer {
 			hasFinal = true
 		}
 	}
@@ -180,7 +180,7 @@ func TestSendPromptOneShot(t *testing.T) {
 
 	var finalContent string
 	for ev := range events {
-		if ev.Kind == protocol.EventFinalAnswer {
+		if ev.Kind == json_rpc.EventFinalAnswer {
 			var data struct {
 				Content string `json:"content"`
 			}

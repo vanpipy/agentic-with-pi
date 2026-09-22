@@ -10,7 +10,7 @@ import (
 
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/llm"
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/server"
 	"github.com/vanpiyp/awp/internal/storage"
 )
@@ -65,19 +65,19 @@ func TestServerListSessions(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("L", protocol.MethodListSessions, protocol.ListSessionsParams{})
-	if err := protocol.MarshalRequest(conn, req); err != nil {
+	req, _ := json_rpc.NewRequest("L", json_rpc.MethodListSessions, json_rpc.ListSessionsParams{})
+	if err := json_rpc.MarshalRequest(conn, req); err != nil {
 		t.Fatal(err)
 	}
 
-	resp, err := protocol.ReadEvent(bufio.NewReader(conn))
+	resp, err := json_rpc.ReadEvent(bufio.NewReader(conn))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resp.Event != "sessions_list" {
 		t.Fatalf("event = %q, want sessions_list", resp.Event)
 	}
-	var result protocol.ListSessionsResult
+	var result json_rpc.ListSessionsResult
 	if err := json.Unmarshal(resp.Data, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -115,13 +115,13 @@ func TestServerListSessionsEmpty(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("L", protocol.MethodListSessions, protocol.ListSessionsParams{})
-	protocol.MarshalRequest(conn, req)
-	resp, err := protocol.ReadEvent(bufio.NewReader(conn))
+	req, _ := json_rpc.NewRequest("L", json_rpc.MethodListSessions, json_rpc.ListSessionsParams{})
+	json_rpc.MarshalRequest(conn, req)
+	resp, err := json_rpc.ReadEvent(bufio.NewReader(conn))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result protocol.ListSessionsResult
+	var result json_rpc.ListSessionsResult
 	if err := json.Unmarshal(resp.Data, &result); err != nil {
 		t.Fatal(err)
 	}

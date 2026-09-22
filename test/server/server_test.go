@@ -18,7 +18,7 @@ import (
 
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/llm"
-	"github.com/vanpiyp/awp/internal/protocol"
+	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/server"
 )
 
@@ -116,8 +116,8 @@ func TestServerLogsBrokenPipeOnDispatch(t *testing.T) {
 	bw := &brokenPipeWriter{failAt: 0, failWith: errors.New("write @->test.sock: write: broken pipe")}
 	logBuf := captureSlog(t)
 
-	req, _ := protocol.NewRequest("1", "ping", nil)
-	if err := protocol.MarshalEvent(bw, req.ID, "pong", nil); err == nil {
+	req, _ := json_rpc.NewRequest("1", "ping", nil)
+	if err := json_rpc.MarshalEvent(bw, req.ID, "pong", nil); err == nil {
 		t.Fatal("expected write to fail immediately")
 	}
 
@@ -168,13 +168,13 @@ func TestServerPing(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("1", protocol.MethodPing, nil)
-	if err := protocol.MarshalRequest(conn, req); err != nil {
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPing, nil)
+	if err := json_rpc.MarshalRequest(conn, req); err != nil {
 		t.Fatal(err)
 	}
 
 	reader := bufio.NewReader(conn)
-	resp, err := protocol.ReadEvent(reader)
+	resp, err := json_rpc.ReadEvent(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +193,10 @@ func TestServerPrompt(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
 		Prompt: "test",
 	})
-	if err := protocol.MarshalRequest(conn, req); err != nil {
+	if err := json_rpc.MarshalRequest(conn, req); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,12 +205,12 @@ func TestServerPrompt(t *testing.T) {
 	var events []string
 	var finalContent string
 	for {
-		resp, err := protocol.ReadEvent(reader)
+		resp, err := json_rpc.ReadEvent(reader)
 		if err != nil {
 			break
 		}
 		events = append(events, resp.Event)
-		if resp.Event == protocol.EventFinalAnswer {
+		if resp.Event == json_rpc.EventFinalAnswer {
 			var data struct {
 				Content string `json:"content"`
 			}
@@ -235,15 +235,15 @@ func TestServerUnknownMethod(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("1", "unknown_method", nil)
-	protocol.MarshalRequest(conn, req)
+	req, _ := json_rpc.NewRequest("1", "unknown_method", nil)
+	json_rpc.MarshalRequest(conn, req)
 
 	reader := bufio.NewReader(conn)
-	resp, err := protocol.ReadEvent(reader)
+	resp, err := json_rpc.ReadEvent(reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Event != protocol.EventError {
+	if resp.Event != json_rpc.EventError {
 		t.Errorf("event = %q, want error", resp.Event)
 	}
 }
@@ -258,11 +258,11 @@ func TestServerMultipleClients(t *testing.T) {
 			t.Fatalf("dial %d: %v", i, err)
 		}
 
-		req, _ := protocol.NewRequest("1", protocol.MethodPing, nil)
-		protocol.MarshalRequest(conn, req)
+		req, _ := json_rpc.NewRequest("1", json_rpc.MethodPing, nil)
+		json_rpc.MarshalRequest(conn, req)
 
 		reader := bufio.NewReader(conn)
-		resp, err := protocol.ReadEvent(reader)
+		resp, err := json_rpc.ReadEvent(reader)
 		if err != nil {
 			conn.Close()
 			t.Fatalf("read %d: %v", i, err)
@@ -302,16 +302,16 @@ func TestServerCancelDoesNotTearDownServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reqC, _ := protocol.NewRequest("C", protocol.MethodCancel, nil)
-	if err := protocol.MarshalRequest(connA, reqC); err != nil {
+	reqC, _ := json_rpc.NewRequest("C", json_rpc.MethodCancel, nil)
+	if err := json_rpc.MarshalRequest(connA, reqC); err != nil {
 		t.Fatal(err)
 	}
-	respA, err := protocol.ReadEvent(bufio.NewReader(connA))
+	respA, err := json_rpc.ReadEvent(bufio.NewReader(connA))
 	if err != nil {
 		t.Fatalf("connA read after cancel without active prompt: %v", err)
 	}
-	if respA.Event != protocol.EventError {
-		t.Fatalf("connA event = %q, want %q", respA.Event, protocol.EventError)
+	if respA.Event != json_rpc.EventError {
+		t.Fatalf("connA event = %q, want %q", respA.Event, json_rpc.EventError)
 	}
 	connA.Close()
 
@@ -320,19 +320,19 @@ func TestServerCancelDoesNotTearDownServer(t *testing.T) {
 		t.Fatalf("connB dial after cancel: server appears down (%v)", err)
 	}
 	defer connB.Close()
-	reqPrompt, _ := protocol.NewRequest("P", protocol.MethodPrompt, protocol.PromptParams{Prompt: "hi"})
-	if err := protocol.MarshalRequest(connB, reqPrompt); err != nil {
+	reqPrompt, _ := json_rpc.NewRequest("P", json_rpc.MethodPrompt, json_rpc.PromptParams{Prompt: "hi"})
+	if err := json_rpc.MarshalRequest(connB, reqPrompt); err != nil {
 		t.Fatal(err)
 	}
 
 	readerB := bufio.NewReader(connB)
 	var finalContent string
 	for {
-		resp, err := protocol.ReadEvent(readerB)
+		resp, err := json_rpc.ReadEvent(readerB)
 		if err != nil {
 			break
 		}
-		if resp.Event == protocol.EventFinalAnswer {
+		if resp.Event == json_rpc.EventFinalAnswer {
 			var data struct {
 				Content string `json:"content"`
 			}
@@ -395,10 +395,10 @@ func TestServerPromptWritesSession(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req, _ := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
 		Prompt: "test",
 	})
-	protocol.MarshalRequest(conn, req)
+	json_rpc.MarshalRequest(conn, req)
 
 	reader := bufio.NewReader(conn)
 
@@ -407,7 +407,7 @@ func TestServerPromptWritesSession(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) && !sawFinal {
 		conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-		resp, err := protocol.ReadEvent(reader)
+		resp, err := json_rpc.ReadEvent(reader)
 		if err != nil {
 			break
 		}
@@ -436,17 +436,17 @@ func TestServerPromptWritesSession(t *testing.T) {
 	}
 	defer conn2.Close()
 
-	req2, _ := protocol.NewRequest("2", protocol.MethodResume, protocol.ResumeParams{
+	req2, _ := json_rpc.NewRequest("2", json_rpc.MethodResume, json_rpc.ResumeParams{
 		SessionID: sessionID,
 	})
-	protocol.MarshalRequest(conn2, req2)
+	json_rpc.MarshalRequest(conn2, req2)
 
 	reader2 := bufio.NewReader(conn2)
 	conn2.SetReadDeadline(time.Now().Add(3 * time.Second))
 
 	var events []string
 	for {
-		resp, err := protocol.ReadEvent(reader2)
+		resp, err := json_rpc.ReadEvent(reader2)
 		if err != nil {
 			break
 		}
@@ -504,11 +504,11 @@ func TestRunResumeUsesCompactionHistory(t *testing.T) {
 	}
 	defer c.Close()
 
-	req, _ := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+	req, _ := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
 		SessionID: "sess-x",
 		Prompt:    "continue",
 	})
-	if err := protocol.MarshalRequest(c, req); err != nil {
+	if err := json_rpc.MarshalRequest(c, req); err != nil {
 		t.Fatal(err)
 	}
 
@@ -517,7 +517,7 @@ func TestRunResumeUsesCompactionHistory(t *testing.T) {
 
 	gotSummary := false
 	for {
-		resp, err := protocol.ReadEvent(reader)
+		resp, err := json_rpc.ReadEvent(reader)
 		if err != nil {
 			break
 		}
@@ -601,15 +601,15 @@ func TestServerAccumulatesMessagesAcrossPromptsInSameSession(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer c.Close()
-		req, _ := protocol.NewRequest("1", protocol.MethodPrompt, protocol.PromptParams{
+		req, _ := json_rpc.NewRequest("1", json_rpc.MethodPrompt, json_rpc.PromptParams{
 			SessionID: "shared",
 			Prompt:    prompt,
 		})
-		protocol.MarshalRequest(c, req)
+		json_rpc.MarshalRequest(c, req)
 		reader := bufio.NewReader(c)
 		c.SetReadDeadline(time.Now().Add(3 * time.Second))
 		for {
-			resp, err := protocol.ReadEvent(reader)
+			resp, err := json_rpc.ReadEvent(reader)
 			if err != nil {
 				return ""
 			}
