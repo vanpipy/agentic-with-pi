@@ -101,13 +101,19 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 
 ## TUI constraints
 
-- **Prefer `charm.land/bubbles/v2` components** over self-rolled implementations: `viewport` (chat scroll, `SoftWrap = true` for auto-wrap), `textarea` (multi-line input), `textinput` only when single-line is fixed, `spinner` (`spinner.MiniDot`), `help` + `key.Binding` (`ShortHelpView` / `FullHelpView`), `progress` (token progress), `filepicker` (file pickers), `list` (autocomplete), `table` / `tree` / `timer` / `paginator` as needed. If bubbles ships a component, use it.
+- **Use `charm.land/bubbles/v2` components exclusively** — never self-roll what bubbles ships. The full surface we rely on: `viewport` (chat scroll, `SoftWrap = true` for auto-wrap), `textarea` (multi-line input), `textinput` only when single-line is fixed, `spinner` (`spinner.MiniDot`, single `spinner.Model` per TUI, tick via `m.spinner.Tick()` / `m.spinner.Update(spinner.TickMsg)`), `help` + `key.Binding` (`ShortHelpView` / `FullHelpView`), `progress` (token progress), `filepicker` (file pickers), `list` (autocomplete), `table` / `tree` / `timer` / `paginator` as needed. If bubbles ships a component, use it.
+- **Use each component's official default styles** — unless the user explicitly asks for a custom look, wire components up by calling their `DefaultStyles(isDark bool)` constructor (or `DefaultStyles()` where the component doesn't take a dark flag) and then drop your own stylesheet. Reference upstreams:
+  - `list.DefaultStyles(isDark)` → `Styles{ TitleBar, Title, Spinner, Filter, StatusBar, StatusEmpty, StatusBarActiveFilter, StatusBarFilterCount, NoItems, PaginationStyle, HelpStyle, ActivePaginationDot, InactivePaginationDot, ArabicPagination, DividerDot, DefaultFilterCharacterMatch }` — assign to `list.Model.Styles`.
+  - `textarea.DefaultStyles(isDark)` / `textinput.DefaultStyles(isDark)` → focused + blurred + cursor state, assign via `SetStyles(...)`.
+  - `help.DefaultStyles(isDark)` → `help.New()` already wires `DefaultDarkStyles()`; call `m.help.Styles = help.DefaultStyles(true)` only when overriding.
+  - `filepicker.DefaultStyles()`, `tree.DefaultStyles(isDark)`.
+  - `spinner` / `viewport` / `progress` ship no Style struct — leave them at zero value.
+- **Detect dark mode once at startup** via `lipgloss.HasDarkBackground(os.Stdin, os.Stdout)` and thread the resulting `lightDark := lipgloss.LightDark(hasDark)` into every `DefaultStyles(isDark)` call. Bubble Tea v2 handles terminal color downsampling automatically; do not reach for `compat.AdaptiveColor`.
+- **Custom styling is allowed only where bubbles ships no component** — currently: the chat-pane role palette (user / assistant / tool / observe / error / system / thinking glyphs and body text) and the header strip (brand + separator + status + track + session). In `internal/tui/styles.go` express these via `lightDark(lipgloss.Color("#dark"), lipgloss.Color("#light"))` so they adapt to the detected background. Never invent package-level styles for things `list.DefaultStyles` / `textarea.DefaultStyles` / `help.DefaultStyles` already cover.
 - **Prefer `charm.land/lipgloss/v2` layout**: `Style.Width(n).Render(text)` for chat-pane line wrap, `Style.Height(n)`, `Style.Border(b)`, `Style.Align(...)`, `Style.Padding(...)`, `Style.Margin(...)`, `lipgloss.JoinHorizontal` / `lipgloss.JoinVertical` for composite layouts. `lipgloss.Width(s)` for ANSI-aware width measurement.
 - **No self-rolled layout primitives**: do not reimplement line wrapping, alignment indent, or width counters by hand — lipgloss v2 is ANSI-aware and word-aware; hand-rolled byte/rune counters risk subtle ANSI/Unicode bugs.
-- **No self-rolled ANSI spinner frames**: `bubbles/spinner` is the only spinner. The TUI Model owns one `spinner.Model`; tick via `m.spinner.Tick()` and `m.spinner.Update(spinner.TickMsg)`.
 - **Header status composition**: split the header into brand + separator + status + track + session so status colors are not overwritten by an outer `Style.Width(n).Render(...)` wrapper. The wrapper collapses any inner ANSI escapes.
 - **No inline ANSI escapes in render**: do not write `\x1b[...]` strings by hand; render through lipgloss styles only.
-- **TUI palette** lives in `internal/tui/styles.go` and is the only place colors are defined; other TUI files reference styles, never raw hex.
 - **No comments in TUI code**; behavioural explanation lives in test names and commit messages (project rule).
 
 ## Code style
