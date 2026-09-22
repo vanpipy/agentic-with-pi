@@ -13,121 +13,17 @@ This project covers four layers of an AI coding system:
 
 ## Features
 
-- **Single Go binary** (`awp`) — agent + server + TUI + JSON-RPC dispatch, all in one.
-- **Session JSONL** — every LLM turn, tool call, observation, and compaction is
-  persisted to `~/.awp/logs/sessions/<session_id>.jsonl` for replay/resume.
-- **AFT-backed tools** — file/bash/edit tools can be offloaded to
-  [`aft`](https://github.com/cortexkit/aft) (a separate Rust worker process)
-  for image/PDF inline, hashline-verified edits, AST-aware operations, and
-  callgraph/semantic search. **Optional** — falls back to built-in Go
-  implementations when `aft` is not on `PATH`.
-- **LLM interface log** — every request/response is logged to
-  `$TMP/awp-llm.log` for debugging. Override with `AWP_LLM_LOG`.
+- **Single Go binary** (`awp`) — agent + server + TUI + JSON-RPC dispatch.
+- **Session JSONL** — every LLM turn, tool call, observation, and compaction persisted to `~/.awp/logs/sessions/<session_id>.jsonl`.
+- **AFT-backed tools** (optional) — file/bash/edit can be offloaded to the [aft](https://github.com/cortexkit/aft) Rust worker for image/PDF inline, hashline-verified edits, AST-aware operations, callgraph and semantic search. Falls back to built-in Go implementations when `aft` is not on `PATH`.
+- **LLM interface log** — every request/response logged to `$TMP/awp-llm.log` for debugging.
 
 ## Install
 
-### AWP binary
-
 ```bash
-go build -o awp ./cmd/awp
-# or
-make build
+go build -o awp ./cmd/awp        # AWP
+npx @cortexkit/aft@latest setup  # AFT (optional, enables the AFT-backed tools)
 ```
 
-### AFT backend (optional)
-
-When `aft` is on `PATH`, AWP uses it for file/bash/edit tools. Without it,
-AWP silently falls back to the built-in Go implementations.
-
-Pick one of:
-
-```bash
-# Option A — official installer. Downloads a release binary into PATH,
-# registers with any detected harnesses, and initialises cortexkit storage
-# under ~/.local/share/cortexkit/aft/. Recommended for end users.
-npx @cortexkit/aft@latest setup
-
-# Option B — build from source (release). Use this if you have the
-# aft repo checked out and want the latest source-tree changes.
-cargo install --path /path/to/aft/crates/aft --locked
-
-# Option C — copy a pre-built binary you downloaded elsewhere
-cp /path/to/aft ~/.cargo/bin/aft
-```
-
-Verify it works:
-
-```bash
-which aft                          # should print a path
-echo '{"id":"1","command":"echo","message":"hi"}' | aft
-# expected:
-#   [aft] started, pid N
-#   {"id":"1","success":true,"message":"hi"}
-#   [aft] stdin closed, shutting down
-```
-
-**Note**: `aft` keeps persistent state under `~/.local/share/cortexkit/aft/`
-(SQLite, callgraph, checkpoints, cache). The directory is created on first
-run, even for `aft --help`. Wipe it with `npx @cortexkit/aft@latest doctor
---clear` or `rm -rf ~/.local/share/cortexkit`.
-
-To **disable** AFT integration entirely (always use Go impls), set
-`AWP_NO_AFT=1` in the environment.
-
-## Usage
-
-```bash
-# Interactive TUI (default mode)
-./awp
-
-# Headless: send one prompt to a running TUI/serve
-./awp connect --connect-pid <pid> "<prompt>"
-
-# Headless: serve on a per-instance socket
-./awp serve --socket /tmp/awp.sock
-
-# Resume / extend a session
-./awp resume --connect-pid <pid> <session_id> "<optional new prompt>"
-```
-
-## Architecture
-
-```
-                 TUI (bubbletea v2)
-                      │  client-sdk
-                      ▼
-   ┌─────────────────────────────────────┐
-   │  awp (Go)                           │
-   │  ├─ server (JSON-RPC dispatch)      │
-   │  ├─ agent (ReAct loop)              │
-   │  │   └─ tools (registry)            │
-   │  │       ├─ built-in Go impls       │
-   │  │       └─ AFT wrappers ──┐        │
-   │  ├─ llm (provider/stream)   │        │
-   │  └─ storage/log/transport   │        │
-   └─────────────────────────────│────────┘
-                                 │ NDJSON over stdin/stdout
-                                 ▼
-                          aft (Rust, optional)
-                          └─ ~/.local/share/cortexkit/aft/
-                             (SQLite, callgraph, checkpoints)
-```
-
-- `cmd/awp` — entrypoint.
-- `internal/agent` + `internal/agent/tools/` — ReAct loop, tool registry.
-- `internal/llm` + `internal/llm/protocol` + `internal/llm/providers/` —
-  provider abstraction (`Provider` / `Protocol` / `Core` / `RetryCore` /
-  `Registry`). Default vendor is `minimax` (Anthropic-compatible).
-- `internal/server` — accept loop, JSON-RPC 2.0 dispatch, JSONL session
-  store.
-- `internal/protocol` — JSON-RPC 2.0 message types, shared by server and
-  client SDK.
-- `internal/client-sdk` — Go client SDK.
-- `internal/storage` — XDG paths. `internal/log` — slog rotation.
-  `internal/transport` — Unix domain socket.
-- `internal/tui` — bubbletea frontend.
-
-## See also
-
-- [`AGENTS.md`](./AGENTS.md) — architectural rules, layout, code style, TUI
-  constraints, tool-extension conventions.
+See [`AGENTS.md`](./AGENTS.md) for the full install matrix, AFT integration
+details, architectural rules, and tool-extension conventions.
