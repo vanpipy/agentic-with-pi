@@ -159,3 +159,45 @@ func TestSocketPermIsNotWorldAccessible(t *testing.T) {
 		t.Errorf("socket should not be world accessible, got %v", perm)
 	}
 }
+
+func TestWriteServerPIDCreatesParentDir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "awp.tui.pid")
+
+	if err := transport.WriteServerPID(path, 1234); err != nil {
+		t.Fatalf("WriteServerPID: %v", err)
+	}
+
+	got, err := transport.ReadServerPID(path)
+	if err != nil {
+		t.Fatalf("ReadServerPID: %v", err)
+	}
+	if got != 1234 {
+		t.Errorf("ReadServerPID = %d, want 1234", got)
+	}
+}
+
+func TestWriteServerPIDOverwrites(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "awp.tui.pid")
+
+	if err := transport.WriteServerPID(path, 111); err != nil {
+		t.Fatal(err)
+	}
+	if err := transport.WriteServerPID(path, 222); err != nil {
+		t.Fatal(err)
+	}
+	got, err := transport.ReadServerPID(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 222 {
+		t.Errorf("ReadServerPID = %d, want 222 (overwrite)", got)
+	}
+}
+
+func TestRemoveServerPIDMissingIsNoop(t *testing.T) {
+	if err := transport.RemoveServerPID("/nonexistent/awp.tui.pid"); err != nil {
+		t.Errorf("RemoveServerPID on missing path should be noop, got %v", err)
+	}
+}

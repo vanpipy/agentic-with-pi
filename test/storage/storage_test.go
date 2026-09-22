@@ -23,26 +23,38 @@ func TestHomeDefault(t *testing.T) {
 	}
 }
 
-func TestRuntimeDirPrefersXDG(t *testing.T) {
+func TestRuntimeDirDefaultUnderHome(t *testing.T) {
 	t.Setenv("AWP_RUNTIME_DIR", "")
+	t.Setenv("AWP_HOME", "/custom/home")
+	want := filepath.Join("/custom/home", "runtime")
+	if got := storage.RuntimeDir(); got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRuntimeDirIgnoresXDG(t *testing.T) {
+	t.Setenv("AWP_RUNTIME_DIR", "")
+	t.Setenv("AWP_HOME", "/custom/home")
 	t.Setenv("XDG_RUNTIME_DIR", "/run/user/1000")
-	if got := storage.RuntimeDir(); got != "/run/user/1000/awp" {
-		t.Errorf("got %q, want /run/user/1000/awp", got)
+	want := filepath.Join("/custom/home", "runtime")
+	if got := storage.RuntimeDir(); got != want {
+		t.Errorf("got %q, want %q (XDG must not leak into RuntimeDir)", got, want)
 	}
 }
 
 func TestRuntimeDirRespectsEnv(t *testing.T) {
 	t.Setenv("AWP_RUNTIME_DIR", "/custom/runtime")
+	t.Setenv("AWP_HOME", "/should/be/ignored")
 	if got := storage.RuntimeDir(); got != "/custom/runtime" {
 		t.Errorf("got %q, want /custom/runtime", got)
 	}
 }
 
-func TestRuntimeDirHasFallback(t *testing.T) {
-	t.Setenv("AWP_RUNTIME_DIR", "")
-	t.Setenv("XDG_RUNTIME_DIR", "")
-	if got := storage.RuntimeDir(); got == "" {
-		t.Errorf("RuntimeDir returned empty in fallback path")
+func TestRuntimeDirEnvOverridesHome(t *testing.T) {
+	t.Setenv("AWP_RUNTIME_DIR", "/explicit/runtime")
+	t.Setenv("AWP_HOME", "/custom/home")
+	if got := storage.RuntimeDir(); got != "/explicit/runtime" {
+		t.Errorf("got %q, want /explicit/runtime (AWP_RUNTIME_DIR must beat AWP_HOME)", got)
 	}
 }
 

@@ -3,12 +3,18 @@ package transport
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 )
 
 func WriteServerPID(path string, pid int) error {
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir parent: %w", err)
+		}
+	}
 	return os.WriteFile(path, []byte(strconv.Itoa(pid)), 0o644)
 }
 

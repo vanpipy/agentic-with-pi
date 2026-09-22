@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 func Home() string {
@@ -19,13 +18,7 @@ func RuntimeDir() string {
 	if env := os.Getenv("AWP_RUNTIME_DIR"); env != "" {
 		return env
 	}
-	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
-		return filepath.Join(xdg, "awp")
-	}
-	if tmpdir := os.Getenv("TMPDIR"); tmpdir != "" {
-		return filepath.Join(tmpdir, "awp-"+userDiscriminator())
-	}
-	return filepath.Join("/tmp", "awp-"+userDiscriminator())
+	return filepath.Join(Home(), "runtime")
 }
 
 func ConfigDir() string {
@@ -61,11 +54,4 @@ func ServerLogPath(clientPID int) string {
 
 func ConfigPath() string {
 	return filepath.Join(Home(), "config.yaml")
-}
-
-func userDiscriminator() string {
-	if uid := os.Getuid(); uid >= 0 {
-		return strconv.Itoa(uid)
-	}
-	return "default"
 }
