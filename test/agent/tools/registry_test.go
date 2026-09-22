@@ -106,6 +106,42 @@ func TestRegistryFallsBackToGoWhenAftDisabled(t *testing.T) {
 	}
 }
 
+func TestRegistryBashUsesNestedWireFormat(t *testing.T) {
+	tmp := t.TempDir()
+	capturedReq := filepath.Join(tmp, "request.json")
+	bin := filepath.Join(tmp, "aft")
+	script := "#!/bin/sh\nwhile read -r line; do\n  echo \"$line\" > " + capturedReq + "\n  printf '{\"id\":\"awp-1\",\"success\":true,\"output\":\"ok\"}\\n'\n  break\ndone\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AWP_TEST_AFT", bin)
+	t.Setenv("AWP_NO_AFT", "")
+	tools.ResetAftBackendForTest()
+	t.Cleanup(tools.ResetAftBackendForTest)
+
+	got := tools.All(t.TempDir())
+	for _, t0 := range got {
+		if t0.Name() == "bash" {
+			if _, err := t0.Invoke(context.Background(), `{"command":"date"}`); err != nil {
+				t.Fatalf("bash invoke: %v", err)
+			}
+			data, _ := os.ReadFile(capturedReq)
+			wire := string(data)
+			if !strings.Contains(wire, `"params":`) {
+				t.Errorf("registry bash must use nested wire format; got: %q", wire)
+			}
+			if !strings.Contains(wire, `"command":"bash"`) {
+				t.Errorf("registry bash must route to bash tool; got: %q", wire)
+			}
+			if !strings.Contains(wire, `"command":"date"`) {
+				t.Errorf("registry bash must include the LLM's command; got: %q", wire)
+			}
+			return
+		}
+	}
+	t.Fatal("bash tool not found")
+}
+
 func TestRegistryRespectsAwpNoAftOverride(t *testing.T) {
 	tmp := t.TempDir()
 	bin := filepath.Join(tmp, "aft")

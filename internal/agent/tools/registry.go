@@ -46,7 +46,7 @@ func All(cwd string) []agent.Tool {
 					},
 					"required": []string{"file", "old_string", "new_string"},
 				}),
-			aftCallTool(backend, "bash",
+			aftCallToolNested(backend, "bash",
 				"Execute a shell command. Backed by AFT (Rust) with sandbox + permissions + 30-min background task support.",
 				map[string]any{
 					"type": "object",
