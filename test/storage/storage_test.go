@@ -114,13 +114,14 @@ func TestServerPidPathIncludesPID(t *testing.T) {
 }
 
 func TestServerLogPathIncludesPID(t *testing.T) {
+	t.Setenv("AWP_SERVER_LOG_DIR", "")
 	got := storage.ServerLogPath(1234)
 	wantSuffix := "/awp.server.1234.log"
 	if !strings.HasSuffix(got, wantSuffix) {
 		t.Errorf("got %q, want suffix %q", got, wantSuffix)
 	}
-	if !strings.Contains(got, "/server/") {
-		t.Errorf("got %q, want path under server/ subdir", got)
+	if !strings.HasPrefix(got, filepath.Join(os.TempDir(), "awp-server-logs")) {
+		t.Errorf("got %q, want path under $TMP/awp-server-logs", got)
 	}
 }
 
@@ -153,3 +154,33 @@ func TestEnsureDir(t *testing.T) {
 	}
 }
 
+
+func TestServerLogDirUsesTemp(t *testing.T) {
+	t.Setenv("AWP_SERVER_LOG_DIR", "")
+	got := storage.ServerLogDir()
+	wantPrefix := filepath.Join(os.TempDir(), "awp-server-logs")
+	if got != wantPrefix {
+		t.Errorf("ServerLogDir() = %q, want %q (must live in $TMP, not ~/.awp/logs/)", got, wantPrefix)
+	}
+	if strings.Contains(got, ".awp") {
+		t.Errorf("ServerLogDir() must not be under ~/.awp; got %q", got)
+	}
+}
+
+func TestServerLogDirRespectsEnv(t *testing.T) {
+	t.Setenv("AWP_SERVER_LOG_DIR", "/custom/awp-server-logs")
+	if got := storage.ServerLogDir(); got != "/custom/awp-server-logs" {
+		t.Errorf("got %q, want /custom/awp-server-logs", got)
+	}
+}
+
+func TestServerLogPathUnderTemp(t *testing.T) {
+	t.Setenv("AWP_SERVER_LOG_DIR", "")
+	got := storage.ServerLogPath(12345)
+	if strings.Contains(got, ".awp/logs/server") {
+		t.Errorf("ServerLogPath must not be under ~/.awp/logs/server; got %q", got)
+	}
+	if !strings.HasPrefix(got, os.TempDir()) {
+		t.Errorf("ServerLogPath = %q, want prefix %q", got, os.TempDir())
+	}
+}

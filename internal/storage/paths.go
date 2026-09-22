@@ -37,7 +37,10 @@ func SessionsDir() string {
 }
 
 func ServerLogDir() string {
-	return filepath.Join(LogsDir(), "server")
+	if dir := os.Getenv("AWP_SERVER_LOG_DIR"); dir != "" {
+		return dir
+	}
+	return filepath.Join(os.TempDir(), "awp-server-logs")
 }
 
 func ClientSocketPath(clientPID int) string {

@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/vanpiyp/awp/internal/agent"
 	"github.com/vanpiyp/awp/internal/llm"
 	"github.com/vanpiyp/awp/internal/protocol/json_rpc"
+	"github.com/vanpiyp/awp/internal/storage"
 )
 
 func extractIntent(argsJSON string) string {
@@ -71,7 +71,8 @@ func (s *Server) handleListSessions(conn io.Writer, req *json_rpc.Request) {
 }
 
 func (s *Server) collectSessionSummaries() ([]json_rpc.SessionSummary, error) {
-	entries, err := os.ReadDir(s.sessionsDir)
+	sessionsDir := storage.SessionsDir()
+	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +86,7 @@ func (s *Server) collectSessionSummaries() ([]json_rpc.SessionSummary, error) {
 			continue
 		}
 		sessionID := strings.TrimSuffix(name, ".jsonl")
-		path := filepath.Join(s.sessionsDir, name)
+		path := filepath.Join(sessionsDir, name)
 		loaded, err := Load(path)
 		if err != nil || loaded == nil {
 			continue
@@ -126,7 +127,6 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 	}
 
 	s.agent.WithSessionID(sessionID)
-	store := s.getOrCreateStore(sessionID)
 	if err := json_rpc.MarshalEvent(conn, req.ID, "session_started", map[string]string{
 		"session_id": sessionID,
 	}); err != nil {
@@ -155,32 +155,13 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 		events = s.agent.RunStream(runCtx, params.Prompt)
 	}
 
-	headerWritten := false
 	cancelled := false
 	for ev := range events {
-		if !headerWritten {
-			meta := SessionMeta{
-				SessionID: sessionID,
-				Model:     s.agent.Model.ID,
-				MaxTurns:  s.agent.SafetyNet,
-				System:    s.agent.SystemPrompts,
-				StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
-			}
-			if err := store.WriteHeader(meta); err != nil {
-				slog.Debug("server: header write failed", "err", err)
-			}
-			headerWritten = true
-		}
-
 		eventName, data := mapAgentEvent(ev)
 
 		if err := json_rpc.MarshalEvent(conn, req.ID, eventName, data); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "prompt_stream", "session_id", sessionID, "event", eventName, "err", err)
 			return
-		}
-
-		if writeErr := store.WriteEvent(eventName, data); writeErr != nil {
-			slog.Debug("server: session write failed", "err", writeErr)
 		}
 
 		if runCtx.Err() != nil {
@@ -194,9 +175,6 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 			"reason": "user_cancelled",
 		}); err != nil {
 			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack_stream", "err", err)
-		}
-		if writeErr := store.WriteEvent(json_rpc.EventCancelAck, map[string]string{"reason": "user_cancelled"}); writeErr != nil {
-			slog.Debug("server: cancel session write failed", "err", writeErr)
 		}
 	}
 
@@ -212,7 +190,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 }
 
 func (s *Server) loadResumeHistory(sessionID string) ([]llm.Message, bool) {
-	path := DefaultPath(s.sessionsDir, sessionID)
+	path := DefaultPath(storage.SessionsDir(), sessionID)
 	loaded, err := Load(path)
 	if err != nil {
 		return nil, false
@@ -237,7 +215,7 @@ func (s *Server) handleResume(conn io.Writer, req *json_rpc.Request) {
 		return
 	}
 
-	loaded, err := Load(DefaultPath(s.sessionsDir, params.SessionID))
+	loaded, err := Load(DefaultPath(storage.SessionsDir(), params.SessionID))
 	if err != nil {
 		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "session not found: " + params.SessionID,
