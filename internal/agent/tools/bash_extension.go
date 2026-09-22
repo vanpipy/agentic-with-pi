@@ -26,12 +26,13 @@ func Bash(cwd string, opts BashOptions) agent.Tool {
 	}
 	return agent.ToolFunc{
 		N: "bash",
-		D: "Execute a shell command and return stdout+stderr. Working directory is cwd. REQUIRED: the 'command' argument must always be a non-empty string.",
+		D: "Execute a shell command and return stdout+stderr combined. Working directory is the project root by default; pass 'workdir' to change. Do not put large temp files under /tmp — prefer a project-local scratch directory. Use the 'read' tool to look at file contents instead of `cat` when you only need a portion. Use 'edit' for changes, not `sed -i`. Avoid commands that block indefinitely (e.g. `tail -f`, `watch`) — give them a timeout.",
 		P: requireIntentSchema("bash", map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "REQUIRED. The shell command to run. Must be non-empty."},
-				"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 60)"},
+				"command": map[string]any{"type": "string", "description": "REQUIRED. The shell command to run. Must be non-empty. Avoid commands that block indefinitely (use timeout instead)."},
+				"timeout": map[string]any{"type": "integer", "description": "Timeout in SECONDS (default 60). Use 5–10 for quick probes; 120+ for builds/tests. If the command runs longer it is killed."},
+				"workdir": map[string]any{"type": "string", "description": "Working directory for the command. Defaults to the project root. Pass an absolute path if you need to escape."},
 			},
 			"required": []string{"command"},
 		}),

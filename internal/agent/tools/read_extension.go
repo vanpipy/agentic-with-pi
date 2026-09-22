@@ -26,7 +26,7 @@ func ReadFile(cwd string, opts FileOptions) agent.Tool {
 	}
 	return agent.ToolFunc{
 		N: "read",
-		D: fmt.Sprintf("Read file contents. Output is truncated to %d lines or %dKB (whichever hits first). Use offset/limit for large files. REQUIRED: the 'path' argument must always be provided.", maxLines, maxBytes/1024),
+		D: fmt.Sprintf("Read a file's contents. Output is truncated to %d lines or %dKB (whichever hits first); for larger files use offset+limit to read a specific range. Prefer this over `cat`/`head`/`sed` so you don't blow the context window. The 'path' is required and must be an absolute path or relative to the project root. Do not re-read files you already have in context — the second read returns the same bytes.", maxLines, maxBytes/1024),
 		P: requireIntentSchema("read", map[string]any{
 			"type": "object",
 			"properties": map[string]any{

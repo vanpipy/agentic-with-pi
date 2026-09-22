@@ -24,7 +24,7 @@ type editArgs struct {
 func EditFile(cwd string) agent.Tool {
 	return agent.ToolFunc{
 		N: "edit",
-		D: "Apply one or more edits to a file. Each edit replaces old_text with new_text in order. By default old_text must match exactly once. REQUIRED: 'path' must be a file path; 'edits' must be a non-empty array.",
+		D: "Apply edits to a file. Each edit replaces 'old_text' with 'new_text' in order. By default 'old_text' must match exactly once in the file; pass 'replace_all=true' to replace every occurrence. Read the file first and copy the 'old_text' exactly (including whitespace) — whitespace mismatch is the #1 cause of edit failures. If 'old_text' does not match, re-read the file before retrying; the file may have changed since your last read.",
 		P: requireIntentSchema("edit", map[string]any{
 			"type": "object",
 			"properties": map[string]any{

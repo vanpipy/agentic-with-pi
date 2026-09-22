@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -616,13 +617,79 @@ func (a *Agent) toolDefsForStrategy() []llm.ToolDef {
 	return defs
 }
 
+func (a *Agent) toolNamesForError() []string {
+	names := make([]string, 0, len(a.toolList))
+	for _, t := range a.toolList {
+		names = append(names, t.Name())
+	}
+	return names
+}
+
+func (a *Agent) preflightValidate(tc llm.ToolCall) string {
+	tool, ok := a.findTool(tc.Function.Name)
+	if !ok {
+		return ""
+	}
+	schema := tool.Parameters()
+	if schema == nil {
+		return ""
+	}
+	required, _ := schema["required"].([]string)
+	if len(required) == 0 {
+		return ""
+	}
+	var got map[string]any
+	if tc.Function.Arguments != "" {
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &got); err != nil {
+			return ""
+		}
+	}
+	missing := []string{}
+	for _, name := range required {
+		v, present := got[name]
+		if !present {
+			missing = append(missing, name)
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	parts := []string{}
+	for _, name := range missing {
+		props, _ := schema["properties"].(map[string]any)
+		if prop, ok := props[name].(map[string]any); ok {
+			if desc, ok := prop["description"].(string); ok {
+				parts = append(parts, fmt.Sprintf("%s: %s", name, desc))
+				continue
+			}
+		}
+		parts = append(parts, name)
+	}
+	return fmt.Sprintf("Tool %s: missing required field(s) [%s]. Pass them as a JSON object argument. Example: {\"%s\": \"<value>\"}. Field descriptions: %s",
+		tc.Function.Name, strings.Join(missing, ", "), missing[0], strings.Join(parts, "; "))
+}
+
 func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
 	for i, tc := range calls {
 		tool, ok := a.findTool(tc.Function.Name)
 		if !ok {
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("unknown tool: %s", tc.Function.Name)})
-			msgs = appendSkippedToolResults(msgs, calls, i, fmt.Sprintf("Tool %s not found", tc.Function.Name))
+			available := a.toolNamesForError()
+			sort.Strings(available)
+			errMsg := fmt.Sprintf("Tool %q is not registered. Available tools: [%s]. Pick one of those and call it again.",
+				tc.Function.Name, strings.Join(available, ", "))
+			a.emit(ctx, ch, Event{Category: EventError, ToolError: errMsg})
+			msgs = appendSkippedToolResults(msgs, calls, i, errMsg)
 			return msgs, false
+		}
+		if preflight := a.preflightValidate(tc); preflight != "" {
+			a.emit(ctx, ch, Event{Category: EventError, ToolName: tc.Function.Name, ToolError: preflight})
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: preflight})
+			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed preflight validation", tc.Function.Name, tc.Function.Name))
+			return msgs, true
 		}
 		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, ToolIntent: extractToolIntent(tc.Function.Arguments)}) {
 			return msgs, false
@@ -646,8 +713,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			} else {
 				a.emit(ctx, ch, Event{Category: EventError, ToolError: err.Error()})
 			}
-			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed", tc.Function.Name, tc.Function.Name))
-			return msgs, true
+			continue
 		}
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(result, tc.Function.Arguments, tc.Function.Name)})
 	}
