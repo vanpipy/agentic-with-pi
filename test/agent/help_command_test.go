@@ -66,26 +66,6 @@ func TestSlashHelpDoubleRenderFix(t *testing.T) {
 	}
 }
 
-func TestQuestionMarkTogglesHelp(t *testing.T) {
-	m := tui.NewModelForTest()
-	out, _ := m.Update(tea.KeyPressMsg{Text: "?"})
-	m = out.(*tui.Model)
-	if !m.ShowHelpForTest() {
-		t.Fatal("? did not set showHelp")
-	}
-}
-
-func TestQuestionMarkTwiceClosesHelp(t *testing.T) {
-	m := tui.NewModelForTest()
-	out, _ := m.Update(tea.KeyPressMsg{Text: "?"})
-	m = out.(*tui.Model)
-	out, _ = m.Update(tea.KeyPressMsg{Text: "?"})
-	m = out.(*tui.Model)
-	if m.ShowHelpForTest() {
-		t.Fatal("double ? should close help")
-	}
-}
-
 func TestEscClosesHelp(t *testing.T) {
 	m := tui.NewModelForTest()
 	m = typeChars(m, "/help")

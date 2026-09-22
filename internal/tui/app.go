@@ -167,8 +167,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.input.Update(msg))
 		case "ctrl+e":
 			m.chat.ToggleCollapseAtViewportTop()
-		case "?":
-			m.showHelp = !m.showHelp
 		case "esc":
 			if m.showHelp {
 				m.showHelp = false

@@ -10,7 +10,6 @@ type keyBindings struct {
 	quitEmpty    key.Binding
 	complete     key.Binding
 	scroll       key.Binding
-	showHelp     key.Binding
 	submit       key.Binding
 	expandToggle key.Binding
 }
@@ -33,10 +32,6 @@ func defaultKeys() keyBindings {
 			key.WithKeys("up", "down"),
 			key.WithHelp("↑↓", "scroll chat"),
 		),
-		showHelp: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "toggle full help"),
-		),
 		submit: key.NewBinding(
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "submit"),
@@ -49,13 +44,13 @@ func defaultKeys() keyBindings {
 }
 
 func (k keyBindings) ShortHelp() []key.Binding {
-	return []key.Binding{k.submit, k.complete, k.scroll, k.showHelp, k.quit}
+	return []key.Binding{k.submit, k.complete, k.scroll, k.quit}
 }
 
 func (k keyBindings) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.submit, k.complete, k.expandToggle},
-		{k.scroll, k.showHelp},
+		{k.scroll},
 		{k.quit, k.quitEmpty},
 	}
 }
