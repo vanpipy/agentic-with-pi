@@ -60,8 +60,6 @@ var (
 	statusWarn = lipgloss.NewStyle().Foreground(c.warning)
 	statusSpin = lipgloss.NewStyle().Foreground(c.accent)
 
-	helpFooter = lipgloss.NewStyle().Foreground(c.dim)
-
 	userPromptNum   = lipgloss.NewStyle().Foreground(c.accent).Bold(true)
 	userPromptArrow = lipgloss.NewStyle().Foreground(c.accent)
 	userPromptText  = lipgloss.NewStyle().Foreground(c.userText)

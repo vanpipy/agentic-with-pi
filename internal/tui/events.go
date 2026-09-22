@@ -106,6 +106,6 @@ func handleServerEvent(c *chatModel, sessionID *string, ev client_sdk.Event) {
 			Reason string `json:"reason"`
 		}
 		json.Unmarshal(ev.Data, &d)
-		c.appendSystem(systemPrefix.Render(" cancelled") + helpFooter.Render(" ("+d.Reason+")"))
+		c.appendSystem(systemPrefix.Render(" cancelled") + durationHint.Render(" ("+d.Reason+")"))
 	}
 }

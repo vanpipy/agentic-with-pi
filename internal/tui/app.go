@@ -64,7 +64,6 @@ type Model struct {
 	spinner       spinner.Model
 	help          help.Model
 	keys          keyBindings
-	showHelp      bool
 }
 
 type errMsg struct{ err error }
@@ -146,9 +145,7 @@ func Run() error {
 		autocomplete: newAutocompleteModel(),
 		picker:       newSessionPickerModel(),
 		spinner:      newSpinner(),
-		help:         help.New(),
 		keys:         defaultKeys(),
-		showHelp:     false,
 	}
 
 	p := tea.NewProgram(m)
@@ -209,10 +206,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+e":
 			m.chat.ToggleCollapseAtViewportTop()
 		case "esc":
-			if m.showHelp {
-				m.showHelp = false
-				break
-			}
 			if m.autocomplete.visible {
 				m.autocomplete.hide()
 				m.input.Reset()
@@ -365,26 +358,8 @@ func (m *Model) View() tea.View {
 
 	inputBox := m.input.View()
 
-	m.help.ShowAll = m.showHelp
-	var footer string
-	if m.showHelp {
-		footer = ""
-	} else {
-		footer = m.help.ShortHelpView(m.keys.ShortHelp())
-	}
+	footer := m.help.ShortHelpView(m.keys.ShortHelp())
 	footerLines := 1
-	if footer == "" {
-		footerLines = 0
-	}
-
-	if m.showHelp {
-		helpText := systemPrefix.Render(" help") + "\n" +
-			m.help.FullHelpView(m.keys.FullHelp())
-		lines := []string{header, "", helpText, "", inputBox}
-		v := tea.NewView(strings.Join(lines, "\n"))
-		v.AltScreen = true
-		return v
-	}
 
 	popup := ""
 	if m.picker.visible {
@@ -429,17 +404,12 @@ func (m *Model) layout() {
 		return
 	}
 	footerLines := 1
-	if m.showHelp {
-		footerLines = len(strings.Split(m.help.FullHelpView(m.keys.FullHelp()), "\n"))
-	}
 	staticLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
 	bodyHeight := m.height - staticLines
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
-	if !m.showHelp {
-		m.chat.SetSize(m.width-4, bodyHeight)
-	}
+	m.chat.SetSize(m.width-4, bodyHeight)
 	m.help.SetWidth(m.width)
 	m.input.SetWidth(m.width - 2)
 }
@@ -484,8 +454,6 @@ func NewModelForTest() *Model {
 	}
 	return m
 }
-
-func (m *Model) ShowHelpForTest() bool { return m.showHelp }
 
 func (m *Model) AutocompleteVisibleForTest() bool { return m.autocomplete.visible }
 

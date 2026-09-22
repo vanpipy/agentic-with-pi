@@ -28,15 +28,6 @@ var registry = []commandSpec{
 		},
 	},
 	{
-		Name:        "help",
-		Description: "show available slash commands",
-		Category:    "help",
-		Run: func(m *Model, _ string) (bool, tea.Cmd) {
-			m.showHelp = true
-			return false, nil
-		},
-	},
-	{
 		Name:        "new",
 		Description: "clear chat history, start fresh turn",
 		Category:    "session",
@@ -140,14 +131,10 @@ func (m *Model) executeCommand(text string) (quit bool, cmd tea.Cmd) {
 	spec, found := findCommand(parsed.name)
 	if !found {
 		m.chat.appendSystem(errorPrefix.Render(" unknown command: /"+parsed.name) +
-			helpFooter.Render("\n  type /help for available commands"))
+			"\n  available: /quit /new /resume")
 		return false, nil
 	}
 	return spec.Run(m, parsed.arg)
-}
-
-func (m *Model) cmdHelp() {
-	m.showHelp = true
 }
 
 type ParsedCommand struct {
