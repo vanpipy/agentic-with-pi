@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/vanpiyp/awp/internal/storage"
 )
 
 type sessionHeader struct {
@@ -162,14 +164,7 @@ func defaultSessionLogPath() (string, error) {
 	if path != "" {
 		return path, nil
 	}
-	home := os.Getenv("AWP_HOME")
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("resolve home: %w", err)
-		}
-		home = filepath.Join(userHome, ".awp")
-	}
+	home := storage.Home()
 	dir := filepath.Join(home, "logs", "sessions")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir sessions dir: %w", err)
