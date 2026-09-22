@@ -5,7 +5,7 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 ## Layout
 
 - `cmd/awp` — entrypoint, subcommands (`serve` / `connect` / `resume` / `demo`).
-- `internal/agent` + `internal/agent/tools` — ReAct loop, built-in tools (file / shell / search).
+- `internal/agent` + `internal/agent/tools` — ReAct loop, built-in tools (file / shell / search). Each tool implementation lives in `{name}_extension.go`; helpers (`errors.go`, `intent.go`, `registry.go`, `shared.go`, `truncate.go`) keep effect-based names.
 - `internal/llm` + `internal/llm/protocol` + `internal/llm/providers` — `Provider` / `Protocol` / `Core` / `RetryCore` / `Registry`. `minimax` is the default vendor (Anthropic-compat).
 - `internal/server` — accept loop, JSON-RPC 2.0 dispatch, JSONL session store.
 - `internal/protocol` — JSON-RPC 2.0 message types, shared by `server` and `client-sdk`.
@@ -27,6 +27,49 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 
 - `go build ./...` · `go vet ./...` · `go test -race ./test/...`
 - `gofmt -w` before commit. `make build / make test / make lint` (see Makefile).
+- **AFT integration tests** (`internal/agent/tools/aft_*_test.go`): skip
+  automatically when `aft` is not on `PATH`. Run `cargo install --path <aft>`
+  or set `AWP_TEST_AFT=/path/to/aft` to exercise them.
+
+## AFT integration
+
+- AFT ([github.com/cortexkit/aft](https://github.com/cortexkit/aft)) is an
+  optional Rust worker that AWP spawns as a long-lived subprocess. It
+  implements file/bash/edit/symbol/grep tools in Rust with image/PDF inline,
+  hashline byte verification, AST awareness via `oxc_engine`, callgraph,
+  semantic search via ONNX embeddings, and a unified `tool_call` NDJSON
+  protocol.
+- **Detection**: `exec.LookPath("aft")` at first tool registration. If
+  `AWP_NO_AFT=1`, force the Go path.
+- **Lifecycle**: one `aft` worker per AWP session. Worker is started when
+  the registry is built (first tool call) and stopped by closing its stdin,
+  which triggers `[aft] stdin closed, shutting down`. If the worker exits
+  unexpectedly mid-session, the wrapper falls back to Go for that call only
+  and re-attempts the worker on the next call.
+- **Protocol**: NDJSON over stdin/stdout. Request: `{"id":"awp-N","command":"<name>","<param>":...}`.
+  Response: `{"id":"awp-N","success":bool,"<data>":...}`. Lock-step per
+  worker (no concurrent in-flight calls in Phase 1; mutating calls
+  serialize on a per-worker mutex).
+- **Subprocess args**: `aft` is invoked with no CLI args (NDJSON standalone
+  mode). Stderr is captured to `$TMP/aft-<pid>.log` for crash triage.
+- **Failure modes**:
+  - `aft` not on `PATH` → silent fallback to Go.
+  - `aft` crashes mid-session → the next tool call returns
+    `ErrAftUnavailable`, the wrapper tries once to restart the worker,
+    then falls back to Go for that call.
+  - `aft` returns `success: false` with `code` + `message` → wrapper
+    surfaces as Go error (so the LLM sees the same `Tool X failed: ...`
+    shape it already handles).
+- **Adding a new AFT-backed tool**: write `ReadXxxAft(cwd)` /
+  `EditXxxAft(cwd)` etc. in `internal/agent/tools/aft_extension.go`,
+  mirror the Go impl's `agent.Tool` interface exactly (same `Name`,
+  `Description`, `Parameters`, `Invoke` signature). Add to
+  `tools.All(cwd)` registry branch when `useAft`. Keep the Go impl as the
+  fallback for users without `aft` installed.
+- **Why not cgo / FFI**: AFT is published as a Rust crate but has no
+  C-ABI binding. A cgo bridge would require upstream changes to AFT and
+  per-platform build complexity; subprocess + NDJSON is the documented
+  transport and gives us the same capability with ~225 lines of Go.
 
 ## Architectural rules
 
@@ -39,6 +82,7 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 7. **TUI**: depends on `internal/client-sdk` + `internal/storage`. Never `internal/server` or `internal/agent` directly.
 8. **Adding a vendor**: implement `Provider` in `internal/llm/providers/<name>.go`, register in `cmd/awp/main.go loadAgent()`. Field-name quirks stay inside the provider.
 9. **Adding a tool**: build `llm.ToolDef` with JSON Schema, register via `ag.WithTool(agent.Tool{...})`, parse `argsJSON` locally with `json.Unmarshal`. Wire up in `cmd/awp/main.go loadAgent()`.
+10. **AFT backend (optional)**: when `aft` is on `PATH`, AWP spawns a long-lived `aft` subprocess at agent start and routes file/bash/edit tools through it via NDJSON over stdin/stdout. The `aft` worker lives for the duration of the TUI/serve session; closing stdin triggers `[aft] stdin closed, shutting down`. When `aft` is missing, AWP silently falls back to the Go implementations in `internal/agent/tools/`. Set `AWP_NO_AFT=1` to disable AFT entirely. Implementation: `internal/agent/tools/aft_backend.go` (subprocess + NDJSON), `internal/agent/tools/aft_extension.go` (per-tool wrappers). Both Go and AFT implementations share the same `agent.Tool` interface, so the registry swap is transparent.
 
 ## TUI constraints
 
