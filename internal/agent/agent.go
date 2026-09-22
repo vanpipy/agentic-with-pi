@@ -28,6 +28,7 @@ const (
 	EventFinalAnswer
 	EventError
 	EventInvalid
+	EventUserMessage
 )
 
 type Event struct {
@@ -107,6 +108,7 @@ type Agent struct {
 	SystemPrompts          string
 	toolList               []Tool
 	toolsByID              map[string]int
+	sessionID              string
 	LogWriter              io.Writer
 	logMu                  sync.Mutex
 	logBuf                 *bufio.Writer
@@ -369,6 +371,8 @@ func (a *Agent) WithTool(t Tool) *Agent {
 	return a
 }
 func (a *Agent) WithLogWriter(w io.Writer) *Agent { a.LogWriter = w; return a }
+func (a *Agent) WithSessionID(id string) *Agent  { a.sessionID = id; return a }
+func (a *Agent) SessionIDForTest() string         { return a.sessionID }
 func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }
 
 func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
@@ -470,6 +474,16 @@ func (a *Agent) bindEmit(ch chan<- Event) func(context.Context, Event) bool {
 	}
 }
 
+func (a *Agent) LogEventForTest(ev Event) {
+	if a.LogWriter == nil {
+		return
+	}
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.logSeq++
+	a.writeEvent(a.logSeq, ev)
+}
+
 func lastFailedToolError(msgs []llm.Message) string {
 	for _, m := range msgs {
 		if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
@@ -490,7 +504,7 @@ func (a *Agent) openLogLocked() {
 		}
 		return
 	}
-	path, err := defaultSessionLogPath()
+	path, err := defaultSessionLogPath(a.sessionID)
 	if err != nil {
 		slog.Warn("agent: default session log path failed", "err", err)
 		return

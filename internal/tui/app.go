@@ -442,7 +442,7 @@ func (m *Model) startStream(text string) tea.Cmd {
 	ctx := context.Background()
 	conn := m.conn
 
-	events, err := conn.Prompt(ctx, text)
+	events, err := conn.PromptWithSessionID(ctx, text, m.session)
 	if err != nil {
 		return func() tea.Msg { return errMsg{err} }
 	}

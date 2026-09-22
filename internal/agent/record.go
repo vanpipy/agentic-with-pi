@@ -34,6 +34,7 @@ type sessionEvent struct {
 	Reasoning      string `json:"reasoning,omitempty"`
 	ToolName       string `json:"tool_name,omitempty"`
 	ToolArgs       string `json:"tool_args,omitempty"`
+	UserMessage    string `json:"user_message,omitempty"`
 	ToolCallsCount int    `json:"tool_calls_count,omitempty"`
 	ToolError      string `json:"tool_error,omitempty"`
 }
@@ -104,6 +105,8 @@ func (a *Agent) writeEvent(seq int, ev Event) {
 		entry.ToolName = ev.ToolName
 		entry.ToolArgs = ev.ToolArgs
 		entry.ToolCallsCount = len(ev.ToolCalls)
+	case EventUserMessage:
+		entry.UserMessage = ev.Content
 	}
 	if err := writeJSONLine(a.logBuf, entry); err != nil {
 		slog.Debug("agent: event write failed", "err", err)
@@ -152,11 +155,15 @@ func categoryName(c EventCategory) string {
 		return "final_answer"
 	case EventError:
 		return "error"
+	case EventInvalid:
+		return "invalid"
+	case EventUserMessage:
+		return "user_message"
 	}
 	return "unknown"
 }
 
-func defaultSessionLogPath() (string, error) {
+func defaultSessionLogPath(sessionID string) (string, error) {
 	if env := os.Getenv("AWP_NO_SESSION_LOG"); env != "" {
 		return "", nil
 	}
@@ -169,12 +176,10 @@ func defaultSessionLogPath() (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir sessions dir: %w", err)
 	}
-	id, err := randomID()
-	if err != nil {
-		return "", err
+	if sessionID == "" {
+		sessionID = "orphan-" + time.Now().UTC().Format("20060102T150405")
 	}
-	name := fmt.Sprintf("%s-%s.jsonl", time.Now().UTC().Format("20060102T150405"), id)
-	return filepath.Join(dir, name), nil
+	return filepath.Join(dir, sessionID+".jsonl"), nil
 }
 
 func randomID() (string, error) {

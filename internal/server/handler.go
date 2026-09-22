@@ -125,6 +125,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 		sessionID = NewID()
 	}
 
+	s.agent.WithSessionID(sessionID)
 	store := s.getOrCreateStore(sessionID)
 	if err := json_rpc.MarshalEvent(conn, req.ID, "session_started", map[string]string{
 		"session_id": sessionID,
@@ -147,6 +148,7 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 	if msgs, ok := s.sessionStates.snapshot(sessionID); ok {
 		seed = append(seed, msgs...)
 	}
+	s.agent.LogEventForTest(agent.Event{Category: agent.EventUserMessage, Content: params.Prompt})
 	if len(seed) > 0 {
 		events, snapshotCh = s.agent.RunStreamResumedWithSnapshot(runCtx, params.Prompt, seed)
 	} else {
