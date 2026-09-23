@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strings"
 
 	"charm.land/bubbles/v2/list"
 )
@@ -26,7 +25,6 @@ func (s sessionItem) Category() string { return "" }
 
 type sessionPickerModel struct {
 	visible  bool
-	query    string
 	list     list.Model
 	all      []sessionItem
 	fetching bool
@@ -63,21 +61,6 @@ func (p *sessionPickerModel) Show(sessions []sessionItem) {
 
 func (p *sessionPickerModel) hide() {
 	p.visible = false
-}
-
-func (p *sessionPickerModel) setQuery(text string) {
-	if !p.visible {
-		return
-	}
-	newQuery := strings.TrimSpace(text)
-	if newQuery == p.query {
-		return
-	}
-	p.query = newQuery
-	p.list.SetFilterText(newQuery)
-	if p.list.Index() >= len(p.list.VisibleItems()) {
-		p.list.Select(0)
-	}
 }
 
 func (p *sessionPickerModel) next() {
