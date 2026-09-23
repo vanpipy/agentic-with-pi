@@ -28,9 +28,9 @@ func TestSendSuccess(t *testing.T) {
 
 	p := protocol.NewHTTPRest()
 	resp, err := p.Send(context.Background(), &protocol.Request{
-		URL:    srv.URL,
-		Method: "POST",
-		Body:   []byte("hello"),
+		URL:     srv.URL,
+		Method:  "POST",
+		Body:    []byte("hello"),
 		Headers: map[string]string{"X-Test": "1"},
 	})
 	if err != nil {

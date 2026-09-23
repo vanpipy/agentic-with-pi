@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vanpiyp/awp/internal/storage"
+	"github.com/vanpiyp/awp/internal/paths"
 )
 
 type Config struct {
@@ -59,7 +59,7 @@ func Setup(cfg Config) error {
 }
 
 func prepareFile(path string, maxSize, maxAge int) error {
-	if err := storage.EnsureDir(filepath.Dir(path)); err != nil {
+	if err := paths.EnsureDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("mkdir logs dir: %w", err)
 	}
 	if maxAge > 0 {
@@ -81,7 +81,7 @@ func DefaultLogFile() string {
 	if env := os.Getenv("AWP_LOG_FILE"); env != "" {
 		return env
 	}
-	return filepath.Join(storage.Home(), "logs", "awp.log")
+	return filepath.Join(paths.Home(), "logs", "awp.log")
 }
 
 func LLMLogPath() string {

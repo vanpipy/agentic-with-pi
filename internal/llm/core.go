@@ -142,7 +142,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 						select {
 						case events <- StreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
 						case <-ctx.Done():
-						return
+							return
 						}
 					}
 					for _, choice := range chunk.Choices {

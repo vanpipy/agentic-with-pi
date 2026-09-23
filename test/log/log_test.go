@@ -1,7 +1,6 @@
 package log_test
 
 import (
-	"github.com/vanpiyp/awp/internal/log"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -9,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/vanpiyp/awp/internal/log"
 )
 
 func resetGlobalLogger(t *testing.T) {

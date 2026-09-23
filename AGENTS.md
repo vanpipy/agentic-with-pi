@@ -5,12 +5,12 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 ## Layout
 
 - `cmd/awp` — entrypoint, subcommands (`serve` / `connect` / `resume` / `demo`).
-- `internal/agent` + `internal/agent/tools` — ReAct loop, built-in tools (file / shell / search). Each tool implementation lives in `{name}_extension.go`; helpers (`errors.go`, `intent.go`, `registry.go`, `shared.go`, `truncate.go`) keep effect-based names.
+- `internal/agent-core` + `internal/agent-core/tools` — ReAct loop, built-in tools (file / shell / search). Each tool implementation lives in `{name}_extension.go`; helpers (`errors.go`, `intent.go`, `registry.go`, `shared.go`, `truncate.go`) keep effect-based names.
 - `internal/llm` + `internal/llm/protocol` + `internal/llm/providers` — `Provider` / `Protocol` / `Core` / `RetryCore` / `Registry`. `minimax` is the default vendor (Anthropic-compat).
-- `internal/server` — accept loop, JSON-RPC 2.0 dispatch, JSONL session store.
-- `internal/protocol` — JSON-RPC 2.0 message types, shared by `server` and `client-sdk`.
-- `internal/client-sdk` — Go client SDK (`Dial` / `Prompt` / `Resume` / `Ping`).
-- `internal/storage` — XDG paths. `internal/log` — slog rotation. `internal/transport` — Unix domain socket.
+- `internal/agent-server` — accept loop, JSON-RPC 2.0 dispatch, JSONL session store.
+- `internal/agent-protocol` — JSON-RPC 2.0 message types, shared by `agent-server` and `agent-client`.
+- `internal/agent-client` — Go client SDK (`Dial` / `Prompt` / `Resume` / `Ping`).
+- `internal/paths` — XDG paths, env-var resolution, PID file IO. `internal/log` — slog rotation. `internal/ipc` — process-boundary IPC (Unix Domain Socket + daemon PID lifecycle).
 - `internal/tui` — bubbletea frontend (default `awp` mode).
 - `test/` — external tests, mirror `internal/` (`package <pkg>_test`).
 
@@ -27,7 +27,7 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 
 - `go build ./...` · `go vet ./...` · `go test -race ./test/...`
 - `gofmt -w` before commit. `make build / make test / make lint` (see Makefile).
-- **AFT integration tests** (`internal/agent/tools/aft_*_test.go`): skip
+- **AFT integration tests** (`internal/agent-core/tools/aft_*_test.go`): skip
   automatically when `aft` is not on `PATH`. Run `cargo install --path
   <aft-repo>/crates/aft --locked` or set `AWP_TEST_AFT=/path/to/aft` to
   exercise them.
@@ -76,8 +76,8 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
     surfaces as Go error (so the LLM sees the same `Tool X failed: ...`
     shape it already handles).
 - **Adding a new AFT-backed tool**: write `ReadXxxAft(cwd)` /
-  `EditXxxAft(cwd)` etc. in `internal/agent/tools/aft_extension.go`,
-  mirror the Go impl's `agent.Tool` interface exactly (same `Name`,
+  `EditXxxAft(cwd)` etc. in `internal/agent-core/tools/aft_extension.go`,
+  mirror the Go impl's `agentcore.Tool` interface exactly (same `Name`,
   `Description`, `Parameters`, `Invoke` signature). Add to
   `tools.All(cwd)` registry branch when `useAft`. Keep the Go impl as the
   fallback for users without `aft` installed.
@@ -91,13 +91,13 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 1. **No cycles.** `llm` is the leaf for vendors and the agent; `internal/llm/protocol` depends on nothing internal.
 2. **Interfaces live with their consumer** — small surfaces, strong abstractions.
 3. **Transport boundary**: `protocol` returns `*protocol.HTTPError`; `llm.Classify` upgrades to `*llm.Error` with a `Kind`.
-4. **LLM layer is single-call.** `Core.StreamChat` is the only method; multi-turn, tools, history live in `internal/agent`.
+4. **LLM layer is single-call.** `Core.StreamChat` is the only method; multi-turn, tools, history live in `internal/agent-core`.
 5. **Streaming**: one channel of `StreamEvent{Chunk, Err}`. Tool calls ride the last chunk on `message_stop`. `RetryCore` retries only `StreamChat` on transient kinds (`RateLimit` / `Server` / `Network`).
-6. **Server ↔ client-sdk**: share `internal/protocol/` only. Never duplicate. Server also owns the JSONL session store (`Store` / `Load` / `SessionMeta` / `NewID`).
-7. **TUI**: depends on `internal/client-sdk` + `internal/storage`. Never `internal/server` or `internal/agent` directly.
+6. **agent-server ↔ agent-client**: share `internal/agent-protocol/` only. Never duplicate. agent-server also owns the JSONL session store (`Store` / `Load` / `SessionMeta` / `NewID`).
+7. **TUI**: depends on `internal/agent-client` + `internal/paths`. Never `internal/agent-server` or `internal/agent-core` directly.
 8. **Adding a vendor**: implement `Provider` in `internal/llm/providers/<name>.go`, register in `cmd/awp/main.go loadAgent()`. Field-name quirks stay inside the provider.
-9. **Adding a tool**: build `llm.ToolDef` with JSON Schema, register via `ag.WithTool(agent.Tool{...})`, parse `argsJSON` locally with `json.Unmarshal`. Wire up in `cmd/awp/main.go loadAgent()`.
-10. **AFT backend (optional)**: when `aft` is on `PATH`, AWP spawns a long-lived `aft` subprocess at agent start and routes file/bash/edit tools through it via NDJSON over stdin/stdout. The `aft` worker lives for the duration of the TUI/serve session; closing stdin triggers `[aft] stdin closed, shutting down`. When `aft` is missing, AWP silently falls back to the Go implementations in `internal/agent/tools/`. Set `AWP_NO_AFT=1` to disable AFT entirely. Implementation: `internal/agent/tools/aft_backend.go` (subprocess + NDJSON), `internal/agent/tools/aft_extension.go` (per-tool wrappers). Both Go and AFT implementations share the same `agent.Tool` interface, so the registry swap is transparent.
+9. **Adding a tool**: build `llm.ToolDef` with JSON Schema, register via `ag.WithTool(agentcore.Tool{...})`, parse `argsJSON` locally with `json.Unmarshal`. Wire up in `cmd/awp/main.go loadAgent()`.
+10. **AFT backend (optional)**: when `aft` is on `PATH`, AWP spawns a long-lived `aft` subprocess at agent start and routes file/bash/edit tools through it via NDJSON over stdin/stdout. The `aft` worker lives for the duration of the TUI/serve session; closing stdin triggers `[aft] stdin closed, shutting down`. When `aft` is missing, AWP silently falls back to the Go implementations in `internal/agent-core/tools/`. Set `AWP_NO_AFT=1` to disable AFT entirely. Implementation: `internal/agent-core/tools/aft_backend.go` (subprocess + NDJSON), `internal/agent-core/tools/aft_extension.go` (per-tool wrappers). Both Go and AFT implementations share the same `agentcore.Tool` interface, so the registry swap is transparent.
 
 ## TUI constraints
 
@@ -120,6 +120,6 @@ Go binary (`awp`) — LLM agent over JSON-RPC 2.0 (Unix socket) with a bubbletea
 
 - **No comments in code.** `//` and `/* */` are stripped on sight. Behavioural explanation lives in test names and commit messages.
 - **One package per directory.** Never split across siblings.
-- **Errors**: `fmt.Errorf("...: %w", err)` + `errors.Is` / `errors.As`. Wrap vendor / transport / network failures in `*llm.Error` with a `Kind` (`Auth / RateLimit / Client / Server / Network / Vendor`).
+- **Errors**: `fmt.Errorf("...: %w", err)` + `errors.Is` / `errors.As`. Wrap vendor / ipc / network failures in `*llm.Error` with a `Kind` (`Auth / RateLimit / Client / Server / Network / Vendor`).
 - **Context first**: `func(ctx context.Context, ...)`. Propagate to `http.NewRequestWithContext`.
 - **Tests** are external (`package <pkg>_test`); mirror `internal/`. White-box unexported access is not used — export helpers instead.

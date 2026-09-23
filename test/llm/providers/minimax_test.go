@@ -153,13 +153,12 @@ func TestConvertRequestToolResultAsUserMessage(t *testing.T) {
 	}
 }
 
-
 func TestConvertRequestToolChoice(t *testing.T) {
 	p := newProvider()
 	body, _ := p.ConvertRequest(&llm.ChatRequest{
-		Model:    "MiniMax-M3",
-		Messages: []llm.Message{{Role: "user", Content: "hi"}},
-		Tools:    []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "f"}}},
+		Model:      "MiniMax-M3",
+		Messages:   []llm.Message{{Role: "user", Content: "hi"}},
+		Tools:      []llm.ToolDef{{Type: "function", Function: llm.FunctionDef{Name: "f"}}},
 		ToolChoice: &llm.ToolChoice{Mode: "tool", Name: "f"},
 	})
 	var got map[string]any
@@ -259,8 +258,8 @@ func TestConvertResponseMessageDeltaOnlyUsage(t *testing.T) {
 func TestConvertRequestEnablesThinkingForReasoningModel(t *testing.T) {
 	p := newProvider()
 	body, err := p.ConvertRequest(&llm.ChatRequest{
-		Model:    "MiniMax-M3",
-		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+		Model:     "MiniMax-M3",
+		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
 		MaxTokens: 4096,
 	})
 	if err != nil {
@@ -285,8 +284,8 @@ func TestConvertRequestEnablesThinkingForReasoningModel(t *testing.T) {
 func TestConvertRequestCappedThinkingBudget(t *testing.T) {
 	p := newProvider()
 	body, err := p.ConvertRequest(&llm.ChatRequest{
-		Model:    "MiniMax-M3",
-		Messages: []llm.Message{{Role: "user", Content: "hello"}},
+		Model:     "MiniMax-M3",
+		Messages:  []llm.Message{{Role: "user", Content: "hello"}},
 		MaxTokens: 32000,
 	})
 	if err != nil {
@@ -319,4 +318,3 @@ func TestConvertRequestEnablesThinkingWithDefaultMaxTokens(t *testing.T) {
 		t.Errorf("thinking.budget_tokens = %v, want 2048 (half of default 4096)", budget)
 	}
 }
-

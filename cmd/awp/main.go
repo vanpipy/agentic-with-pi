@@ -13,16 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vanpiyp/awp/internal/agent"
-	"github.com/vanpiyp/awp/internal/agent/tools"
-	"github.com/vanpiyp/awp/internal/client-sdk"
+	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/tools"
+	agentserver "github.com/vanpiyp/awp/internal/agent-server"
+	"github.com/vanpiyp/awp/internal/ipc"
 	"github.com/vanpiyp/awp/internal/llm"
 	"github.com/vanpiyp/awp/internal/llm/protocol"
 	"github.com/vanpiyp/awp/internal/llm/providers"
 	"github.com/vanpiyp/awp/internal/log"
-	"github.com/vanpiyp/awp/internal/server"
-	"github.com/vanpiyp/awp/internal/storage"
-	"github.com/vanpiyp/awp/internal/transport"
+	"github.com/vanpiyp/awp/internal/paths"
 	"github.com/vanpiyp/awp/internal/tui"
 )
 
@@ -75,8 +75,8 @@ func setupLog() {
 	}
 }
 
-func loadAgent() *agent.Agent {
-	cfg, err := agent.LoadConfig()
+func loadAgent() *agentcore.Agent {
+	cfg, err := agentcore.LoadConfig()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config error:", err)
 		fmt.Fprintln(os.Stderr, "Check ~/.awp/config.yaml.")
@@ -97,7 +97,7 @@ func loadAgent() *agent.Agent {
 	core := llm.NewRetryCore(throttled, llm.DefaultRetryConfig())
 
 	cwd, _ := os.Getwd()
-	ag := agent.NewAgent(core).
+	ag := agentcore.NewAgent(core).
 		WithModel(llm.Model{
 			ID:                cfg.Model,
 			SupportsTool:      true,
@@ -131,12 +131,12 @@ Planning rules:
 func runServe(args []string) {
 	socket := parseSocketFlag(args)
 	if socket == "" {
-		socket = storage.ClientSocketPath(os.Getpid())
+		socket = paths.ClientSocketPath(os.Getpid())
 	}
 	setupLog()
 	ag := loadAgent()
 
-	srv, err := server.New(ag, socket)
+	srv, err := agentserver.New(ag, socket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "server start:", err)
 		os.Exit(1)
@@ -197,15 +197,15 @@ func runConnect(args []string) {
 
 	setupLog()
 
-	socket := storage.ClientSocketPath(connectPID)
-	if !transport.IsRunning(socket) {
+	socket := paths.ClientSocketPath(connectPID)
+	if !ipc.IsRunning(socket) {
 		fmt.Fprintf(os.Stderr, "no server on %s (connect-pid=%d)\n", socket, connectPID)
 		os.Exit(1)
 	}
 
 	fmt.Printf("=== awp connect ===\nsocket: %s\n\n", socket)
 
-	events, err := client_sdk.SendPrompt(context.Background(), socket, "", prompt)
+	events, err := agentclient.SendPrompt(context.Background(), socket, "", prompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "prompt:", err)
 		os.Exit(1)
@@ -244,13 +244,13 @@ func runResume(args []string) {
 
 	setupLog()
 
-	socket := storage.ClientSocketPath(connectPID)
-	if !transport.IsRunning(socket) {
+	socket := paths.ClientSocketPath(connectPID)
+	if !ipc.IsRunning(socket) {
 		fmt.Fprintf(os.Stderr, "no server on %s (connect-pid=%d)\n", socket, connectPID)
 		os.Exit(1)
 	}
 
-	c, err := client_sdk.Dial(socket)
+	c, err := agentclient.Dial(socket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dial:", err)
 		os.Exit(1)
@@ -271,7 +271,7 @@ func runResume(args []string) {
 		return
 	}
 
-	events, err := client_sdk.SendPrompt(context.Background(), socket, sessionID, newPrompt)
+	events, err := agentclient.SendPrompt(context.Background(), socket, sessionID, newPrompt)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "prompt:", err)
 		os.Exit(1)
@@ -301,7 +301,7 @@ func spawnServer(socket string) (int, error) {
 func waitForServer(socketPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if transport.IsRunning(socketPath) {
+		if ipc.IsRunning(socketPath) {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -334,31 +334,31 @@ func runDemo() {
 	}
 }
 
-func printAgentEvent(ev agent.Event) {
+func printAgentEvent(ev agentcore.Event) {
 	switch ev.Category {
-	case agent.EventThoughtStart:
+	case agentcore.EventThoughtStart:
 		fmt.Println("--- turn ---")
-	case agent.EventThoughtChunk:
+	case agentcore.EventThoughtChunk:
 		if ev.Reasoning != "" {
 			fmt.Printf("[thinking] %s", ev.Reasoning)
 		}
 		if ev.Content != "" {
 			fmt.Printf("\n[text] %s", ev.Content)
 		}
-	case agent.EventThoughtEnd:
+	case agentcore.EventThoughtEnd:
 		fmt.Println()
-	case agent.EventTool:
+	case agentcore.EventTool:
 		fmt.Printf("\n[tool] %s(%s)\n", ev.ToolName, ev.ToolArgs)
-	case agent.EventObserve:
+	case agentcore.EventObserve:
 		if ev.ToolError != "" {
 			fmt.Printf("[observe] error: %s\n", ev.ToolError)
 		} else {
 			fmt.Printf("[observe] %s\n", ev.ToolResult)
 		}
-	case agent.EventFinalAnswer:
+	case agentcore.EventFinalAnswer:
 		fmt.Println("\n=== final answer ===")
 		fmt.Println(ev.Content)
-	case agent.EventError:
+	case agentcore.EventError:
 		fmt.Fprintf(os.Stderr, "\n[error] %s\n", ev.ToolError)
 	}
 }

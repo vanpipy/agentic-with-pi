@@ -17,10 +17,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/vanpiyp/awp/internal/client-sdk"
+	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	"github.com/vanpiyp/awp/internal/ipc"
 	"github.com/vanpiyp/awp/internal/log"
-	"github.com/vanpiyp/awp/internal/storage"
-	"github.com/vanpiyp/awp/internal/transport"
+	"github.com/vanpiyp/awp/internal/paths"
 	"golang.org/x/term"
 )
 
@@ -49,7 +49,7 @@ type Model struct {
 	err           error
 	width         int
 	height        int
-	conn          *client_sdk.Client
+	conn          *agentclient.Client
 	serverPID     int
 	ownServer     bool
 	session       string
@@ -59,7 +59,7 @@ type Model struct {
 	input         *inputModel
 	autocomplete  *autocompleteModel
 	picker        *sessionPickerModel
-	events        <-chan client_sdk.Event
+	events        <-chan agentclient.Event
 	lastKind      string
 	spinner       spinner.Model
 	help          help.Model
@@ -75,7 +75,7 @@ type promptSubmittedMsg struct {
 }
 
 type streamEventMsg struct {
-	ev   client_sdk.Event
+	ev   agentclient.Event
 	err  error
 	done bool
 }
@@ -92,17 +92,17 @@ func Run() error {
 	}
 
 	clientPID := os.Getpid()
-	socket := storage.ClientSocketPath(clientPID)
-	pidFile := storage.ServerPidPath(clientPID)
+	socket := paths.ClientSocketPath(clientPID)
+	pidFile := paths.ServerPidPath(clientPID)
 
 	ownServer := true
-	if pid, err := transport.ReadServerPID(pidFile); err == nil {
-		if transport.IsAlive(pid) {
+	if pid, err := ipc.ReadServerPID(pidFile); err == nil {
+		if ipc.IsAlive(pid) {
 			ownServer = false
 			fmt.Fprintf(os.Stderr, "reusing server pid=%d from %s\n", pid, pidFile)
 		} else {
 			fmt.Fprintf(os.Stderr, "stale pidfile %s -> pid %d gone, cleaning\n", pidFile, pid)
-			transport.RemoveServerPID(pidFile)
+			ipc.RemoveServerPID(pidFile)
 		}
 	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, "warning: read pidfile %s: %v\n", pidFile, err)
@@ -114,18 +114,18 @@ func Run() error {
 		if err != nil {
 			return fmt.Errorf("spawn server: %w", err)
 		}
-		if err := transport.WriteServerPID(pidFile, serverPID); err != nil {
+		if err := ipc.WriteServerPID(pidFile, serverPID); err != nil {
 			_ = syscall.Kill(serverPID, syscall.SIGTERM)
 			return fmt.Errorf("write pidfile: %w", err)
 		}
 		if err := waitForServer(socket, 5*time.Second); err != nil {
 			_ = syscall.Kill(serverPID, syscall.SIGTERM)
-			transport.RemoveServerPID(pidFile)
+			ipc.RemoveServerPID(pidFile)
 			return fmt.Errorf("wait server: %w", err)
 		}
 	}
 
-	conn, err := client_sdk.Dial(socket)
+	conn, err := agentclient.Dial(socket)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
@@ -158,12 +158,12 @@ func Run() error {
 }
 
 func ownServerPID(socket, pidFile string) int {
-	pid, err := transport.ReadServerPID(pidFile)
+	pid, err := ipc.ReadServerPID(pidFile)
 	if err != nil {
 		return 0
 	}
-	if !transport.IsAlive(pid) {
-		_ = transport.RemoveServerPID(pidFile)
+	if !ipc.IsAlive(pid) {
+		_ = ipc.RemoveServerPID(pidFile)
 		return 0
 	}
 	return pid
@@ -171,13 +171,17 @@ func ownServerPID(socket, pidFile string) int {
 
 func (m *Model) Init() tea.Cmd {
 	m.spinner = newSpinner()
-	return func() tea.Msg { return m.spinner.Tick() }
+	return m.spinner.Tick
 }
 
 func newSpinner() spinner.Model {
 	s := spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	s.Style = statusSpin
 	return s
+}
+
+func NewSpinnerForTest() spinner.Model {
+	return newSpinner()
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -476,13 +480,13 @@ func (m *Model) shutdown() {
 	if m.ownServer && m.serverPID > 0 {
 		_ = syscall.Kill(m.serverPID, syscall.SIGTERM)
 		deadline := time.Now().Add(2 * time.Second)
-		for transport.IsAlive(m.serverPID) && time.Now().Before(deadline) {
+		for ipc.IsAlive(m.serverPID) && time.Now().Before(deadline) {
 			time.Sleep(50 * time.Millisecond)
 		}
-		if transport.IsAlive(m.serverPID) {
+		if ipc.IsAlive(m.serverPID) {
 			_ = syscall.Kill(m.serverPID, syscall.SIGKILL)
 		}
-		transport.RemoveServerPID(storage.ServerPidPath(os.Getpid()))
+		ipc.RemoveServerPID(paths.ServerPidPath(os.Getpid()))
 	}
 }
 
@@ -625,7 +629,7 @@ func spawnServer(socket string) (int, error) {
 func waitForServer(socketPath string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if transport.IsRunning(socketPath) {
+		if ipc.IsRunning(socketPath) {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)

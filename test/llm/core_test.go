@@ -21,18 +21,20 @@ type fakeProvider struct {
 	mu           sync.Mutex
 }
 
-func (f *fakeProvider) Name() string                                              { return "fake" }
-func (f *fakeProvider) BaseURL() string                                           { return "https://fake" }
-func (f *fakeProvider) Path() string                                              { return "/v1/chat" }
-func (f *fakeProvider) Headers() map[string]string                                 { return nil }
+func (f *fakeProvider) Name() string               { return "fake" }
+func (f *fakeProvider) BaseURL() string            { return "https://fake" }
+func (f *fakeProvider) Path() string               { return "/v1/chat" }
+func (f *fakeProvider) Headers() map[string]string { return nil }
 func (f *fakeProvider) ConvertRequest(r *llm.ChatRequest) ([]byte, error) {
 	if f.convertReq == nil {
 		return []byte("{}"), nil
 	}
 	return f.convertReq(r)
 }
-func (f *fakeProvider) ConvertResponse(d []byte) (*llm.StreamChunk, bool, error) { return f.convertChunk(d) }
-func (f *fakeProvider) Models() []llm.Model                                       { return f.models }
+func (f *fakeProvider) ConvertResponse(d []byte) (*llm.StreamChunk, bool, error) {
+	return f.convertChunk(d)
+}
+func (f *fakeProvider) Models() []llm.Model { return f.models }
 
 type fakeProtocol struct {
 	streamItems []protocol.StreamItem
@@ -107,7 +109,9 @@ func TestChatAllowsToolsForSupportedModel(t *testing.T) {
 	}
 	content := ""
 	for ev := range events {
-		if ev.Err != nil { t.Fatal(ev.Err) }
+		if ev.Err != nil {
+			t.Fatal(ev.Err)
+		}
 		for _, c := range ev.Chunk.Choices {
 			content += c.Delta.Content
 		}
@@ -135,8 +139,8 @@ func TestStreamChatAssemblesToolCalls(t *testing.T) {
 			raw := json.RawMessage(d)
 			_ = raw
 			var ev struct {
-				Type        string `json:"type"`
-				Index       int    `json:"index"`
+				Type         string `json:"type"`
+				Index        int    `json:"index"`
 				ContentBlock *struct {
 					Type string `json:"type"`
 					ID   string `json:"id"`
@@ -164,8 +168,8 @@ func TestStreamChatAssemblesToolCalls(t *testing.T) {
 					Choices: []llm.StreamChoice{{
 						Index: ev.Index,
 						Delta: llm.Message{ToolCalls: []llm.ToolCall{{
-							ID:   ev.ContentBlock.ID,
-							Type: "function",
+							ID:       ev.ContentBlock.ID,
+							Type:     "function",
 							Function: llm.FunctionCall{Name: ev.ContentBlock.Name},
 						}}},
 					}},

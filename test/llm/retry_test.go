@@ -9,7 +9,6 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
-
 type recordingCore struct {
 	streamCalls  int
 	streamEvents []llm.StreamEvent

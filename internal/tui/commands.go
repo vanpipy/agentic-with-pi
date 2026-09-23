@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	client_sdk "github.com/vanpiyp/awp/internal/client-sdk"
+	agentclient "github.com/vanpiyp/awp/internal/agent-client"
 )
 
 type commandSpec struct {
@@ -169,4 +169,4 @@ func AllCommandSpecsForTest() []CommandSpec {
 }
 
 var _ tea.Cmd
-var _ client_sdk.Event
+var _ agentclient.Event

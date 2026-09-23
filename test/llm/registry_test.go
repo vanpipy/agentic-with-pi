@@ -11,13 +11,15 @@ type stubProvider struct {
 	models []llm.Model
 }
 
-func (s *stubProvider) Name() string                                              { return s.name }
-func (s *stubProvider) BaseURL() string                                           { return "" }
-func (s *stubProvider) Path() string                                              { return "" }
-func (s *stubProvider) Headers() map[string]string                                 { return nil }
-func (s *stubProvider) ConvertRequest(*llm.ChatRequest) ([]byte, error)           { return nil, nil }
-func (s *stubProvider) ConvertResponse([]byte) (*llm.StreamChunk, bool, error)  { return nil, false, nil }
-func (s *stubProvider) Models() []llm.Model                                       { return s.models }
+func (s *stubProvider) Name() string                                    { return s.name }
+func (s *stubProvider) BaseURL() string                                 { return "" }
+func (s *stubProvider) Path() string                                    { return "" }
+func (s *stubProvider) Headers() map[string]string                      { return nil }
+func (s *stubProvider) ConvertRequest(*llm.ChatRequest) ([]byte, error) { return nil, nil }
+func (s *stubProvider) ConvertResponse([]byte) (*llm.StreamChunk, bool, error) {
+	return nil, false, nil
+}
+func (s *stubProvider) Models() []llm.Model { return s.models }
 
 func TestRegisterAndGet(t *testing.T) {
 	r := llm.NewRegistry()

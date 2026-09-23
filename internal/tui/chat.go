@@ -1,15 +1,15 @@
 package tui
 
 import (
-	"charm.land/bubbles/v2/spinner"
-	"charm.land/bubbles/v2/viewport"
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/vanpiyp/awp/internal/agent/tools"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/vanpiyp/awp/internal/agent-core/tools"
 )
 
 type chatModel struct {
@@ -583,27 +583,4 @@ func (t ChatModelT) JumpToPromptForTest(direction int) {
 
 func (t ChatModelT) SetSizeForTest(w, h int) {
 	t.model.SetSize(w, h)
-}
-
-func NewSpinnerForTest() SpinnerT {
-	return SpinnerT{model: newSpinner()}
-}
-
-type SpinnerT struct {
-	model spinner.Model
-}
-
-func (s SpinnerT) View() string {
-	return s.model.View()
-}
-
-func (s SpinnerT) Update(msg tea.Msg) (SpinnerT, tea.Cmd) {
-	out, cmd := s.model.Update(msg)
-	return SpinnerT{model: out}, cmd
-}
-
-type SpinnerTickType = spinner.TickMsg
-
-func (s SpinnerT) TickForTest() SpinnerTickType {
-	return s.model.Tick().(SpinnerTickType)
 }

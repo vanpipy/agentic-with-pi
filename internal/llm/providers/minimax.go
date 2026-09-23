@@ -265,22 +265,22 @@ type anthropicStreamEvent struct {
 
 	Index        int `json:"index,omitzero"`
 	ContentBlock *struct {
-		Type string `json:"type"`
-		Text string `json:"text,omitzero"`
-		Thinking  string `json:"thinking,omitzero"`
-		Signature string `json:"signature,omitzero"`
-		Data      string `json:"data,omitzero"`
-		ID    string         `json:"id,omitzero"`
-		Name  string         `json:"name,omitzero"`
-		Input map[string]any `json:"input,omitzero"`
+		Type      string         `json:"type"`
+		Text      string         `json:"text,omitzero"`
+		Thinking  string         `json:"thinking,omitzero"`
+		Signature string         `json:"signature,omitzero"`
+		Data      string         `json:"data,omitzero"`
+		ID        string         `json:"id,omitzero"`
+		Name      string         `json:"name,omitzero"`
+		Input     map[string]any `json:"input,omitzero"`
 	} `json:"content_block,omitzero"`
 
 	Delta *struct {
-		Type         string `json:"type,omitzero"`
-		Text         string `json:"text,omitzero"`
-		Thinking     string `json:"thinking,omitzero"`
-		PartialJSON  string `json:"partial_json,omitzero"`
-		StopReason   string `json:"stop_reason,omitzero"`
+		Type        string `json:"type,omitzero"`
+		Text        string `json:"text,omitzero"`
+		Thinking    string `json:"thinking,omitzero"`
+		PartialJSON string `json:"partial_json,omitzero"`
+		StopReason  string `json:"stop_reason,omitzero"`
 	} `json:"delta,omitzero"`
 
 	Usage *struct {

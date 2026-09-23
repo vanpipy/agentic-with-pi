@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/vanpiyp/awp/internal/client-sdk"
+	agentclient "github.com/vanpiyp/awp/internal/agent-client"
 )
 
 type serverEventMsg struct {
@@ -43,7 +43,7 @@ func parseUsage(data []byte) *msgUsage {
 	}
 }
 
-func handleServerEvent(c *chatModel, sessionID *string, ev client_sdk.Event) {
+func handleServerEvent(c *chatModel, sessionID *string, ev agentclient.Event) {
 	switch ev.Kind {
 	case "session_started":
 		var d struct {
