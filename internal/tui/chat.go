@@ -135,7 +135,7 @@ func renderMsg(g chatMsg, width int) []string {
 
 func (g chatMsg) body(layout roleLayout, width int) []string {
 	if g.role == roleAssistant {
-		return wrapRender(layout.body.Width(width), renderMarkdownBody(g.text, width))
+		return renderAssistantSegments(g.text, layout, width)
 	}
 	if g.role == roleTool && g.toolData != nil {
 		return renderToolCard(g.toolData, g.collapsed, g.duration, width)
@@ -224,6 +224,80 @@ func renderAssistant(text string, width int) []string {
 		bodyWidth = 8
 	}
 	return wrapRender(layout.body.Width(bodyWidth), rendered)
+}
+
+type assistantSegment struct {
+	isPlan bool
+	text   string
+}
+
+func splitAssistantPlanSegments(text string) []assistantSegment {
+	var segments []assistantSegment
+	var pending []string
+	state := "markdown"
+	flushMarkdown := func() {
+		if len(pending) > 0 {
+			segments = append(segments, assistantSegment{isPlan: false, text: strings.Join(pending, "\n")})
+			pending = nil
+		}
+	}
+	flushPlan := func() {
+		if len(pending) > 0 {
+			segments = append(segments, assistantSegment{isPlan: true, text: strings.Join(pending, "\n")})
+			pending = nil
+		}
+	}
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if state == "markdown" {
+			if trimmed == "```plan" {
+				flushMarkdown()
+				state = "plan"
+				continue
+			}
+			pending = append(pending, line)
+			continue
+		}
+		if trimmed == "```" {
+			flushPlan()
+			state = "markdown"
+			continue
+		}
+		pending = append(pending, line)
+	}
+	if state == "plan" {
+		full := append([]string{"```plan"}, pending...)
+		segments = append(segments, assistantSegment{isPlan: false, text: strings.Join(full, "\n")})
+	} else {
+		flushMarkdown()
+	}
+	return segments
+}
+
+func renderAssistantSegments(text string, layout roleLayout, width int) []string {
+	if width < 8 {
+		width = 8
+	}
+	segments := splitAssistantPlanSegments(text)
+	if len(segments) == 0 {
+		return nil
+	}
+	var out []string
+	for _, seg := range segments {
+		var rendered string
+		if seg.isPlan {
+			inner := renderMarkdownBody(seg.text, width)
+			rendered = planBlock.Width(width).Render(inner)
+		} else {
+			md := renderMarkdownBody(seg.text, width)
+			rendered = layout.body.Width(width).Render(md)
+		}
+		if rendered == "" {
+			continue
+		}
+		out = append(out, strings.Split(strings.TrimRight(rendered, "\n"), "\n")...)
+	}
+	return out
 }
 
 func hintLines(g chatMsg) []string {

@@ -77,6 +77,11 @@ var (
 			Padding(0, 1)
 	toolCardArgs = lipgloss.NewStyle().Foreground(c.dim)
 
+	planBlock = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(c.accent).
+			Padding(0, 1)
+
 	observePrefix = lipgloss.NewStyle().Foreground(c.dim)
 	systemPrefix  = lipgloss.NewStyle().Foreground(c.system)
 	errorPrefix   = lipgloss.NewStyle().Foreground(c.error).Bold(true)
