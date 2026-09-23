@@ -84,6 +84,23 @@ func setupTest(t *testing.T) (*agentserver.Server, string) {
 	return nil, ""
 }
 
+func collectAssistantText(data []byte) (string, bool) {
+	var msg json_rpc.MessageEvent
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return "", false
+	}
+	if msg.Message.Role != "assistant" {
+		return "", false
+	}
+	var b strings.Builder
+	for _, part := range msg.Message.Content {
+		if part.Type == "text" {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String(), true
+}
+
 func TestServerSocketPath(t *testing.T) {
 	s, _ := setupTest(t)
 	defer s.Shutdown(context.Background())
@@ -227,13 +244,11 @@ func TestServerPrompt(t *testing.T) {
 			break
 		}
 		events = append(events, resp.Event)
-		if resp.Event == json_rpc.EventFinalAnswer {
-			var data struct {
-				Content string `json:"content"`
+		if resp.Event == json_rpc.EventMessage {
+			if text, ok := collectAssistantText(resp.Data); ok {
+				finalContent = text
+				break
 			}
-			json.Unmarshal(resp.Data, &data)
-			finalContent = data.Content
-			break
 		}
 	}
 
@@ -349,13 +364,11 @@ func TestServerCancelDoesNotTearDownServer(t *testing.T) {
 		if err != nil {
 			break
 		}
-		if resp.Event == json_rpc.EventFinalAnswer {
-			var data struct {
-				Content string `json:"content"`
+		if resp.Event == json_rpc.EventMessage {
+			if text, ok := collectAssistantText(resp.Data); ok {
+				finalContent = text
+				break
 			}
-			json.Unmarshal(resp.Data, &data)
-			finalContent = data.Content
-			break
 		}
 	}
 	if finalContent != "hello world" {
@@ -435,8 +448,10 @@ func TestServerPromptWritesSession(t *testing.T) {
 			json.Unmarshal(resp.Data, &data)
 			sessionID = data.SessionID
 		}
-		if resp.Event == "final_answer" {
-			sawFinal = true
+		if resp.Event == json_rpc.EventMessage {
+			if _, ok := collectAssistantText(resp.Data); ok {
+				sawFinal = true
+			}
 		}
 	}
 
@@ -444,7 +459,7 @@ func TestServerPromptWritesSession(t *testing.T) {
 		t.Fatal("did not receive session_started event")
 	}
 	if !sawFinal {
-		t.Fatal("did not receive final_answer event before timeout")
+		t.Fatal("did not receive assistant message before timeout")
 	}
 
 	conn2, err := net.Dial("unix", socketPath)
@@ -538,19 +553,17 @@ func TestRunResumeUsesCompactionHistory(t *testing.T) {
 		if err != nil {
 			break
 		}
-		if resp.Event == "final_answer" {
-			var d struct {
-				Content string `json:"content"`
+		if resp.Event == json_rpc.EventMessage {
+			if text, ok := collectAssistantText(resp.Data); ok {
+				if strings.Contains(text, "saw the compaction") {
+					gotSummary = true
+				}
+				break
 			}
-			json.Unmarshal(resp.Data, &d)
-			if strings.Contains(d.Content, "saw the compaction") {
-				gotSummary = true
-			}
-			break
 		}
 	}
 	if !gotSummary {
-		t.Errorf("expected final_answer to confirm compaction summary was visible to LLM")
+		t.Errorf("expected assistant message to confirm compaction summary was visible to LLM")
 	}
 }
 
@@ -630,12 +643,10 @@ func TestServerAccumulatesMessagesAcrossPromptsInSameSession(t *testing.T) {
 			if err != nil {
 				return ""
 			}
-			if resp.Event == "final_answer" {
-				var d struct {
-					Content string `json:"content"`
+			if resp.Event == json_rpc.EventMessage {
+				if text, ok := collectAssistantText(resp.Data); ok {
+					return text
 				}
-				json.Unmarshal(resp.Data, &d)
-				return d.Content
 			}
 		}
 	}
@@ -812,8 +823,10 @@ func TestServerNeverWritesToHomeLogSessions(t *testing.T) {
 		if err != nil {
 			break
 		}
-		if resp.Event == "final_answer" {
-			sawFinal = true
+		if resp.Event == json_rpc.EventMessage {
+			if _, ok := collectAssistantText(resp.Data); ok {
+				sawFinal = true
+			}
 		}
 	}
 
@@ -834,7 +847,7 @@ func TestServerNeverWritesToHomeLogSessions(t *testing.T) {
 		buf := make([]byte, 4096)
 		n, _ := f.Read(buf)
 		f.Close()
-		if bytes.Contains(buf[:n], []byte(`"event":"thought_chunk"`)) || bytes.Contains(buf[:n], []byte(`"event":"final_answer"`)) {
+		if bytes.Contains(buf[:n], []byte(`"event":"message"`)) || bytes.Contains(buf[:n], []byte(`"event":"custom"`)) {
 			serverWritten = append(serverWritten, e.Name())
 		}
 	}
@@ -922,8 +935,10 @@ func TestSessionStateAccumulatesAcrossPrompts(t *testing.T) {
 			if err != nil {
 				return
 			}
-			if resp.Event == "final_answer" {
-				return
+			if resp.Event == json_rpc.EventMessage {
+				if _, ok := collectAssistantText(resp.Data); ok {
+					return
+				}
 			}
 		}
 	}

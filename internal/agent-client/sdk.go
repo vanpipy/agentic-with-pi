@@ -98,12 +98,26 @@ func (c *Client) PromptWithSessionID(ctx context.Context, prompt, sessionID stri
 				return
 			}
 			events <- Event{Kind: resp.Event, Data: resp.Data}
-			if resp.Event == json_rpc.EventFinalAnswer {
+			if isStreamEnd(resp) {
 				return
 			}
 		}
 	}()
 	return events, nil
+}
+
+func isStreamEnd(resp *json_rpc.Response) bool {
+	switch resp.Event {
+	case json_rpc.EventCancelAck:
+		return true
+	case json_rpc.EventMessage:
+		var msg json_rpc.MessageEvent
+		if err := json.Unmarshal(resp.Data, &msg); err != nil {
+			return false
+		}
+		return msg.Message.Role == "assistant" && msg.StopReason != "toolUse"
+	}
+	return false
 }
 
 func (c *Client) Ping() error {
