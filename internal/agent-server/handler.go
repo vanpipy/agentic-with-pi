@@ -3,12 +3,13 @@ package agentserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
@@ -151,15 +152,17 @@ func (s *Server) handlePrompt(conn io.Writer, connCtx context.Context, req *json
 	s.agent.LogEventForTest(agentcore.Event{Category: agentcore.EventUserMessage, Content: params.Prompt})
 	events, snapshotCh = s.agent.RunStreamResumedWithSnapshot(runCtx, params.Prompt, seed)
 
+	var parentID string
+	var streamBuf *agentcore.StreamBuffer
 	cancelled := false
 	for ev := range events {
-		eventName, data := mapAgentEvent(ev)
-
-		if err := json_rpc.MarshalEvent(conn, req.ID, eventName, data); err != nil {
-			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "prompt_stream", "session_id", sessionID, "event", eventName, "err", err)
-			return
+		emits := marshalAgentEventForWire(ev, &parentID, &streamBuf)
+		for _, em := range emits {
+			if err := json_rpc.MarshalEvent(conn, req.ID, em.eventName, em.payload); err != nil {
+				slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "prompt_stream", "session_id", sessionID, "event", em.eventName, "err", err)
+				return
+			}
 		}
-
 		if runCtx.Err() != nil {
 			cancelled = true
 			break
@@ -360,69 +363,133 @@ func (s *Server) handleCancel(conn io.Writer, req *json_rpc.Request) {
 	}
 }
 
-func mapAgentEvent(ev agentcore.Event) (string, any) {
+type wireEmit struct {
+	eventName string
+	payload   any
+}
+
+func marshalAgentEventForWire(ev agentcore.Event, parentID *string, streamBuf **agentcore.StreamBuffer) []wireEmit {
 	switch ev.Category {
+	case agentcore.EventUserMessage:
+		buf := agentcore.NewStreamBuffer(*parentID)
+		buf.SetRole("user")
+		buf.AppendText(ev.Content)
+		buf.SetStopReason("end_turn")
+		msg := buf.Finalize()
+		*parentID = msg.ID
+		return []wireEmit{{eventName: json_rpc.EventMessage, payload: msg}}
+
 	case agentcore.EventThoughtStart:
-		return json_rpc.EventThoughtStart, nil
+		*streamBuf = agentcore.NewStreamBuffer(*parentID)
+		return nil
+
 	case agentcore.EventThoughtChunk:
-		return json_rpc.EventThoughtChunk, map[string]string{
-			"reasoning": ev.Reasoning,
-			"content":   ev.Content,
+		if *streamBuf != nil {
+			(*streamBuf).AppendThinking(ev.Reasoning, "")
 		}
+		return nil
+
 	case agentcore.EventThoughtEnd:
-		data := map[string]string{
-			"reasoning": ev.Reasoning,
-			"content":   ev.Content,
+		if *streamBuf != nil && ev.Usage != nil {
+			(*streamBuf).SetUsage(json_rpc.UsageStats{
+				PromptTokens:     ev.Usage.PromptTokens,
+				CompletionTokens: ev.Usage.CompletionTokens,
+				TotalTokens:      ev.Usage.TotalTokens,
+			})
 		}
-		if u := usageToMap(ev.Usage); u != nil {
-			for k, v := range u {
-				data[k] = v
-			}
-		}
-		return json_rpc.EventThoughtEnd, data
+		return nil
+
 	case agentcore.EventTool:
-		payload := map[string]string{
-			"name": ev.ToolName,
-			"args": ev.ToolArgs,
+		if *streamBuf == nil {
+			return nil
 		}
-		if intent := extractIntent(ev.ToolArgs); intent != "" {
-			payload["intent"] = intent
+		toolCallID := json_rpc.NewV7()
+		intent := ev.ToolIntent
+		if intent == "" {
+			intent = extractIntent(ev.ToolArgs)
 		}
-		return json_rpc.EventTool, payload
+		args := json.RawMessage(ev.ToolArgs)
+		if len(args) == 0 {
+			args = json.RawMessage("{}")
+		}
+		(*streamBuf).SetRole("assistant")
+		(*streamBuf).AppendToolCall(toolCallID, ev.ToolName, intent, args)
+		(*streamBuf).SetStopReason("toolUse")
+		assistantMsg := (*streamBuf).Finalize()
+		*parentID = assistantMsg.ID
+		emits := []wireEmit{{eventName: json_rpc.EventMessage, payload: assistantMsg}}
+		toolResultBuf := agentcore.NewStreamBuffer(toolCallID)
+		toolResultBuf.SetRole("toolResult")
+		if ev.ToolError != "" {
+			toolResultBuf.AppendText(ev.ToolError)
+		} else if ev.ToolResult != "" {
+			toolResultBuf.AppendText(ev.ToolResult)
+		}
+		toolResultBuf.SetDetails(json_rpc.MessageDetails{
+			ToolName: ev.ToolName,
+			Intent:   ev.ToolIntent,
+			Error:    ev.ToolError,
+		})
+		toolResultBuf.SetStopReason("toolUse")
+		toolResultMsg := toolResultBuf.Finalize()
+		*parentID = toolResultMsg.ID
+		emits = append(emits, wireEmit{eventName: json_rpc.EventMessage, payload: toolResultMsg})
+		*streamBuf = agentcore.NewStreamBuffer(toolResultMsg.ID)
+		return emits
+
 	case agentcore.EventObserve:
-		observe := map[string]string{
-			"tool_name": ev.ToolName,
-			"result":    ev.ToolResult,
-			"error":     ev.ToolError,
+		if *streamBuf == nil {
+			return nil
 		}
-		if ev.ToolIntent != "" {
-			observe["intent"] = ev.ToolIntent
-		}
-		return json_rpc.EventObserve, observe
+		(*streamBuf).SetStopReason("toolUse")
+		msg := (*streamBuf).Finalize()
+		*parentID = msg.ID
+		*streamBuf = agentcore.NewStreamBuffer(msg.ID)
+		return []wireEmit{{eventName: json_rpc.EventMessage, payload: msg}}
+
 	case agentcore.EventFinalAnswer:
-		data := map[string]string{"content": ev.Content}
-		if u := usageToMap(ev.Usage); u != nil {
-			for k, v := range u {
-				data[k] = v
-			}
+		if *streamBuf == nil {
+			return nil
 		}
-		return json_rpc.EventFinalAnswer, data
+		(*streamBuf).SetRole("assistant")
+		(*streamBuf).AppendText(ev.Content)
+		if ev.Usage != nil {
+			(*streamBuf).SetUsage(json_rpc.UsageStats{
+				PromptTokens:     ev.Usage.PromptTokens,
+				CompletionTokens: ev.Usage.CompletionTokens,
+				TotalTokens:      ev.Usage.TotalTokens,
+			})
+		}
+		(*streamBuf).SetStopReason("end_turn")
+		msg := (*streamBuf).Finalize()
+		*parentID = msg.ID
+		*streamBuf = nil
+		return []wireEmit{{eventName: json_rpc.EventMessage, payload: msg}}
+
 	case agentcore.EventError:
-		return json_rpc.EventError, map[string]string{
-			"error": ev.ToolError,
+		if *streamBuf == nil {
+			return nil
 		}
-	default:
-		return "unknown", nil
+		(*streamBuf).AppendText(ev.ToolError)
+		(*streamBuf).SetStopReason("end_turn")
+		msg := (*streamBuf).Finalize()
+		*parentID = msg.ID
+		*streamBuf = nil
+		customEv := json_rpc.CustomEvent{
+			ID:         json_rpc.NewV7(),
+			ParentID:   *parentID,
+			Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+			CustomType: "tool_error",
+			Data:       json.RawMessage(fmt.Sprintf(`{"error":%q}`, ev.ToolError)),
+		}
+		return []wireEmit{
+			{eventName: json_rpc.EventMessage, payload: msg},
+			{eventName: json_rpc.EventCustom, payload: customEv},
+		}
 	}
+	return nil
 }
 
 func usageToMap(u *llm.Usage) map[string]string {
-	if u == nil {
-		return nil
-	}
-	return map[string]string{
-		"prompt_tokens":     strconv.Itoa(u.PromptTokens),
-		"completion_tokens": strconv.Itoa(u.CompletionTokens),
-		"total_tokens":      strconv.Itoa(u.TotalTokens),
-	}
+	return nil
 }
