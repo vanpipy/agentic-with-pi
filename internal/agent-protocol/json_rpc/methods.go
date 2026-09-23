@@ -17,6 +17,10 @@ const (
 	EventFinalAnswer  = "final_answer"
 	EventError        = "error"
 	EventCancelAck    = "cancelled"
+
+	EventMessage       = "message"
+	EventCustom        = "custom"
+	EventCustomMessage = "custom_message"
 )
 
 type PromptParams struct {
