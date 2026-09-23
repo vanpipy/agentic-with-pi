@@ -215,3 +215,23 @@ func TestGetMdRendererEvictsBeyondCap(t *testing.T) {
 		t.Errorf("width=10 should have been evicted on the 9th distinct insertion; got same renderer pointer %p", r0)
 	}
 }
+
+func TestChatLineCountCachesPerMessage(t *testing.T) {
+	c := newChatModel()
+	c.SetSize(80, 40)
+	c.submit("first prompt")
+	c.submit("second prompt")
+	c.submit("third prompt")
+	if got := len(c.messages); got != 3 {
+		t.Fatalf("setup: expected 3 messages, got %d", got)
+	}
+	// submit() calls refresh() which clears the cache, so the counter is fresh
+	for i := 0; i < 100; i++ {
+		for j := range c.messages {
+			c.lineCount(c.messages[j])
+		}
+	}
+	if got := c.LineCountMissesForTest(); got != 3 {
+		t.Errorf("expected exactly 3 lineCount misses (one per message), got %d", got)
+	}
+}
