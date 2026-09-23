@@ -210,7 +210,7 @@ func (s *Server) handleResume(conn io.Writer, req *json_rpc.Request) {
 		return
 	}
 
-	loaded, err := Load(DefaultPath(paths.SessionsDir(), params.SessionID))
+	entries, err := LoadEntries(DefaultPath(paths.SessionsDir(), params.SessionID))
 	if err != nil {
 		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "session not found: " + params.SessionID,
@@ -220,18 +220,128 @@ func (s *Server) handleResume(conn io.Writer, req *json_rpc.Request) {
 		return
 	}
 
-	for _, ev := range loaded.Events {
-		if err := json_rpc.MarshalEvent(conn, req.ID, ev.Kind, json.RawMessage(ev.Data)); err != nil {
-			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
-			return
+	replayed := 0
+	for _, e := range entries {
+		switch e.Kind {
+		case "session", "compaction":
+			continue
+		case "event":
+			legacy, ok := e.Parsed.(LegacyEvent)
+			if !ok {
+				continue
+			}
+			eventName := legacyWireName(legacy.Category)
+			if eventName == "" {
+				eventName = legacy.Category
+			}
+			payload := marshalLegacyPayload(legacy)
+			if err := json_rpc.MarshalEvent(conn, req.ID, eventName, payload); err != nil {
+				slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
+				return
+			}
+			replayed++
+		case "message":
+			msg, ok := e.Parsed.(json_rpc.MessageEvent)
+			if !ok {
+				continue
+			}
+			if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventMessage, msg); err != nil {
+				slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
+				return
+			}
+			replayed++
+		case "custom":
+			evt, ok := e.Parsed.(json_rpc.CustomEvent)
+			if !ok {
+				continue
+			}
+			if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCustom, evt); err != nil {
+				slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
+				return
+			}
+			replayed++
+		case "custom_message":
+			cm, ok := e.Parsed.(json_rpc.CustomMessageEvent)
+			if !ok {
+				continue
+			}
+			if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCustomMessage, cm); err != nil {
+				slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_stream", "session_id", params.SessionID, "err", err)
+				return
+			}
+			replayed++
 		}
 	}
 
 	if err := json_rpc.MarshalEvent(conn, req.ID, "session_resumed", map[string]int{
-		"event_count": len(loaded.Events),
+		"event_count":    replayed,
+		"schema_version": 2,
 	}); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "resume_done", "session_id", params.SessionID, "err", err)
 	}
+}
+
+func legacyWireName(category string) string {
+	switch category {
+	case "thought_start":
+		return json_rpc.EventThoughtStart
+	case "thought_chunk":
+		return json_rpc.EventThoughtChunk
+	case "thought_end":
+		return json_rpc.EventThoughtEnd
+	case "tool":
+		return json_rpc.EventTool
+	case "observe":
+		return json_rpc.EventObserve
+	case "final_answer":
+		return json_rpc.EventFinalAnswer
+	case "error":
+		return json_rpc.EventError
+	}
+	return ""
+}
+
+func marshalLegacyPayload(legacy LegacyEvent) any {
+	switch legacy.Category {
+	case "thought_chunk":
+		return map[string]string{
+			"reasoning": legacy.Reasoning,
+			"content":   legacy.Content,
+		}
+	case "thought_start":
+		return nil
+	case "thought_end":
+		return map[string]string{
+			"reasoning": legacy.Reasoning,
+			"content":   legacy.Content,
+		}
+	case "tool":
+		payload := map[string]string{
+			"name": legacy.ToolName,
+			"args": legacy.ToolArgs,
+		}
+		if intent := extractIntent(legacy.ToolArgs); intent != "" {
+			payload["intent"] = intent
+		}
+		return payload
+	case "observe":
+		observe := map[string]string{
+			"tool_name": legacy.ToolName,
+			"result":    legacy.ToolResult,
+			"error":     legacy.ToolError,
+		}
+		if legacy.ToolName != "" {
+			if intent := extractIntent(legacy.ToolArgs); intent != "" {
+				observe["intent"] = intent
+			}
+		}
+		return observe
+	case "final_answer":
+		return map[string]string{"content": legacy.Content}
+	case "error":
+		return map[string]string{"error": legacy.ToolError}
+	}
+	return nil
 }
 
 func (s *Server) handleCancel(conn io.Writer, req *json_rpc.Request) {

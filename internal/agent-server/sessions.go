@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -136,7 +137,69 @@ type EventRecord struct {
 	Data json.RawMessage
 }
 
+type LegacyEvent struct {
+	Kind           string `json:"kind,omitempty"`
+	Event          string `json:"event,omitempty"`
+	Category       string `json:"category,omitempty"`
+	At             string `json:"at"`
+	Seq            int    `json:"seq,omitempty"`
+	Reasoning      string `json:"reasoning,omitempty"`
+	Content        string `json:"content,omitempty"`
+	ToolName       string `json:"tool_name,omitempty"`
+	ToolArgs       string `json:"tool_args,omitempty"`
+	ToolResult     string `json:"tool_result,omitempty"`
+	ToolError      string `json:"tool_error,omitempty"`
+	UserMessage    string `json:"user_message,omitempty"`
+	ToolCallsCount int    `json:"tool_calls_count,omitempty"`
+}
+
+type LoadedEntry struct {
+	SchemaVersion int
+	Raw           json.RawMessage
+	Parsed        any
+	Kind          string
+}
+
 func Load(path string) (*Loaded, error) {
+	entries, err := LoadEntries(path)
+	if err != nil {
+		return nil, err
+	}
+	var loaded Loaded
+	for _, e := range entries {
+		switch e.Kind {
+		case "session":
+			if meta, ok := e.Parsed.(SessionMeta); ok && meta.SessionID != "" {
+				loaded.Meta = meta
+			}
+		case "event":
+			legacy, ok := e.Parsed.(LegacyEvent)
+			if !ok {
+				continue
+			}
+			category := legacy.Category
+			if category == "" {
+				category = legacy.Event
+			}
+			data := extractLegacyDataField(e.Raw)
+			if data == nil {
+				data = json.RawMessage("null")
+			}
+			loaded.Events = append(loaded.Events, EventRecord{
+				Kind: category,
+				At:   legacy.At,
+				Data: data,
+			})
+		case "compaction":
+			if c, ok := e.Parsed.(CompactionRecord); ok {
+				loaded.Compactions = append(loaded.Compactions, c)
+			}
+		}
+	}
+	return &loaded, nil
+}
+
+func LoadEntries(path string) ([]LoadedEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
@@ -146,44 +209,163 @@ func Load(path string) (*Loaded, error) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
-	var loaded Loaded
+	var entries []LoadedEntry
+	lineNum := 0
 	for scanner.Scan() {
-		var e Entry
-		if err := json.Unmarshal(scanner.Bytes(), &e); err != nil {
-			return nil, fmt.Errorf("unmarshal: %w", err)
+		lineNum++
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		raw := json.RawMessage(append([]byte(nil), line...))
+
+		var kindProbe struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.Unmarshal(line, &kindProbe); err != nil {
+			return nil, fmt.Errorf("line %d: unmarshal kind: %w", lineNum, err)
 		}
 
-		switch e.Kind {
+		switch kindProbe.Kind {
 		case "session":
-			if e.Session.SessionID != "" {
-				loaded.Meta = e.Session
-			} else if e.ID != "" {
-				loaded.Meta = SessionMeta{
-					SessionID: e.ID,
-					Model:     e.Model,
-					MaxTurns:  e.MaxTurns,
-					System:    e.System,
-					Tools:     e.Tools,
-					StartedAt: e.StartedAt,
+			var probe struct {
+				Version int `json:"version"`
+			}
+			_ = json.Unmarshal(line, &probe)
+			version := probe.Version
+			if version == 0 {
+				version = 1
+			}
+			var entry Entry
+			if err := json.Unmarshal(line, &entry); err != nil {
+				return nil, fmt.Errorf("line %d: session: %w", lineNum, err)
+			}
+			meta := entry.Session
+			if meta.SessionID == "" {
+				meta = SessionMeta{
+					SessionID: entry.ID,
+					Model:     entry.Model,
+					MaxTurns:  entry.MaxTurns,
+					System:    entry.System,
+					Tools:     entry.Tools,
+					StartedAt: entry.StartedAt,
 				}
 			}
-		case "event":
-			loaded.Events = append(loaded.Events, EventRecord{
-				Kind: e.Event,
-				At:   e.At,
-				Data: e.Data,
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: version,
+				Raw:           raw,
+				Parsed:        meta,
+				Kind:          "session",
 			})
-		case "compaction":
-			var c CompactionRecord
-			if err := json.Unmarshal(e.Data, &c); err == nil {
-				loaded.Compactions = append(loaded.Compactions, c)
+
+		case "event":
+			var legacy LegacyEvent
+			if err := json.Unmarshal(line, &legacy); err != nil {
+				return nil, fmt.Errorf("line %d: event: %w", lineNum, err)
 			}
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: 1,
+				Raw:           raw,
+				Parsed:        legacy,
+				Kind:          "event",
+			})
+
+		case "message":
+			var wrap struct {
+				Version int             `json:"version"`
+				Entry   json.RawMessage `json:"entry"`
+			}
+			if err := json.Unmarshal(line, &wrap); err != nil {
+				return nil, fmt.Errorf("line %d: message envelope: %w", lineNum, err)
+			}
+			var msg json_rpc.MessageEvent
+			if err := json.Unmarshal(wrap.Entry, &msg); err != nil {
+				return nil, fmt.Errorf("line %d: message body: %w", lineNum, err)
+			}
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: 2,
+				Raw:           raw,
+				Parsed:        msg,
+				Kind:          "message",
+			})
+
+		case "custom":
+			var wrap struct {
+				Version int             `json:"version"`
+				Entry   json.RawMessage `json:"entry"`
+			}
+			if err := json.Unmarshal(line, &wrap); err != nil {
+				return nil, fmt.Errorf("line %d: custom envelope: %w", lineNum, err)
+			}
+			var evt json_rpc.CustomEvent
+			if err := json.Unmarshal(wrap.Entry, &evt); err != nil {
+				return nil, fmt.Errorf("line %d: custom body: %w", lineNum, err)
+			}
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: 2,
+				Raw:           raw,
+				Parsed:        evt,
+				Kind:          "custom",
+			})
+
+		case "custom_message":
+			var wrap struct {
+				Version int             `json:"version"`
+				Entry   json.RawMessage `json:"entry"`
+			}
+			if err := json.Unmarshal(line, &wrap); err != nil {
+				return nil, fmt.Errorf("line %d: custom_message envelope: %w", lineNum, err)
+			}
+			var cm json_rpc.CustomMessageEvent
+			if err := json.Unmarshal(wrap.Entry, &cm); err != nil {
+				return nil, fmt.Errorf("line %d: custom_message body: %w", lineNum, err)
+			}
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: 2,
+				Raw:           raw,
+				Parsed:        cm,
+				Kind:          "custom_message",
+			})
+
+		case "compaction":
+			var wrap struct {
+				Version int             `json:"version"`
+				Data    json.RawMessage `json:"data"`
+				Summary string          `json:"summary"`
+				At      string          `json:"at"`
+			}
+			if err := json.Unmarshal(line, &wrap); err != nil {
+				return nil, fmt.Errorf("line %d: compaction envelope: %w", lineNum, err)
+			}
+			var rec CompactionRecord
+			if len(wrap.Data) > 0 {
+				if err := json.Unmarshal(wrap.Data, &rec); err != nil {
+					return nil, fmt.Errorf("line %d: compaction data: %w", lineNum, err)
+				}
+			} else {
+				rec = CompactionRecord{Summary: wrap.Summary, At: wrap.At}
+			}
+			entries = append(entries, LoadedEntry{
+				SchemaVersion: 2,
+				Raw:           raw,
+				Parsed:        rec,
+				Kind:          "compaction",
+			})
+
+		case "":
+			if err := json.Unmarshal(line, &LegacyEvent{}); err == nil {
+				return nil, fmt.Errorf("line %d: missing kind field", lineNum)
+			}
+			return nil, fmt.Errorf("line %d: empty kind field", lineNum)
+
+		default:
+			return nil, fmt.Errorf("line %d: unknown kind %q", lineNum, kindProbe.Kind)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return &loaded, nil
+	return entries, nil
 }
 
 func DefaultPath(sessionsDir, sessionID string) string {
@@ -194,6 +376,16 @@ func NewID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+func extractLegacyDataField(raw json.RawMessage) json.RawMessage {
+	var d struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &d); err == nil && len(d.Data) > 0 {
+		return d.Data
+	}
+	return nil
 }
 
 type sessionStateStore struct {
