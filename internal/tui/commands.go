@@ -58,7 +58,7 @@ func (m *Model) startResume(sessionID string) tea.Cmd {
 	}
 	m.session = sessionID
 	m.chat.reset()
-	m.state = stateStreaming
+	m.state = StateStreaming
 	m.events = events
 	return m.readNextEvent()
 }

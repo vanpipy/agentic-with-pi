@@ -26,26 +26,6 @@ import (
 	"golang.org/x/term"
 )
 
-type State int
-
-const (
-	stateReady State = iota
-	stateStreaming
-	stateError
-)
-
-func (s State) String() string {
-	switch s {
-	case stateReady:
-		return "ready"
-	case stateStreaming:
-		return "streaming"
-	case stateError:
-		return "error"
-	}
-	return "unknown"
-}
-
 type Model struct {
 	state        State
 	width        int
@@ -137,7 +117,7 @@ func Run() error {
 	}
 
 	m := &Model{
-		state:        stateReady,
+		state:        StateReady,
 		conn:         conn,
 		serverPID:    ownServerPID(socket, pidFile),
 		ownServer:    ownServer,
@@ -221,7 +201,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picker.hide()
 				break
 			}
-			if m.state == stateStreaming {
+			if m.state == StateStreaming {
 				m.cancel()
 				break
 			}
@@ -242,7 +222,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
-			if m.state == stateStreaming {
+			if m.state == StateStreaming {
 				break
 			}
 			text := m.input.Value()
@@ -267,7 +247,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.submit(text)
 			m.chat.GotoBottom()
 			m.lastPrompt = text
-			m.state = stateStreaming
+			m.state = StateStreaming
 			cmds = append(cmds, m.startStream(text))
 		case "up":
 			if m.picker.visible {
@@ -304,7 +284,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case streamEventMsg:
 		if msg.err != nil {
-			m.state = stateError
+			m.state = StateError
 			m.events = nil
 			m.chat.appendError(msg.err.Error())
 			break
@@ -315,16 +295,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.GotoBottom()
 		}
 		if msg.done {
-			m.state = stateReady
+			m.state = StateReady
 			drainEvents(m.events)
 			m.events = nil
 		} else if msg.ev.Kind == json_rpc.EventMessage {
 			if isAbortMessage(msg.ev.Data) {
-				m.state = stateError
+				m.state = StateError
 			}
 		} else if msg.ev.Kind == json_rpc.EventCustom {
 			if isAbortCustom(msg.ev.Data) {
-				m.state = stateError
+				m.state = StateError
 			}
 		}
 		if m.events != nil {
@@ -333,7 +313,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case errMsg:
-		m.state = stateError
+		m.state = StateError
 		m.chat.appendError(msg.err.Error())
 
 	case sessionPickerMsg:
@@ -351,7 +331,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case promptDoneMsg:
-		m.state = stateReady
+		m.state = StateReady
 	}
 
 	m.layout()
@@ -463,7 +443,7 @@ func drainEvents(ch <-chan agentclient.Event) {
 
 func NewModelForTest() *Model {
 	m := &Model{
-		state:        stateReady,
+		state:        StateReady,
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
@@ -521,7 +501,7 @@ func (m *Model) cancel() {
 	drainEvents(m.events)
 	m.events = nil
 	m.chat.appendSystem(systemPrefix.Render(" cancelled by user"))
-	m.state = stateReady
+	m.state = StateReady
 }
 
 type promptDoneMsg struct{}
@@ -559,9 +539,9 @@ func RenderHeaderWithPromptForTest(width int, status, lastPrompt, sessionID stri
 
 func (m *Model) statusRender() string {
 	switch m.state {
-	case stateStreaming:
+	case StateStreaming:
 		return m.spinner.View() + " " + m.state.String()
-	case stateError:
+	case StateError:
 		return statusErr.Render("● ") + m.state.String()
 	default:
 		return statusOK.Render("● ") + m.state.String()
