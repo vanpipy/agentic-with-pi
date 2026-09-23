@@ -82,6 +82,15 @@ var (
 			BorderForeground(c.accent).
 			Padding(0, 1)
 
+	diffAdd     = lipgloss.NewStyle().Foreground(c.success)
+	diffRemove  = lipgloss.NewStyle().Foreground(c.error)
+	diffContext = lipgloss.NewStyle().Foreground(c.dim)
+	diffNeutral = lipgloss.NewStyle().Foreground(c.aiText)
+	diffBlock   = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(c.dim).
+			Padding(0, 1)
+
 	observePrefix = lipgloss.NewStyle().Foreground(c.dim)
 	systemPrefix  = lipgloss.NewStyle().Foreground(c.system)
 	errorPrefix   = lipgloss.NewStyle().Foreground(c.error).Bold(true)

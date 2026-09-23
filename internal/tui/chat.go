@@ -226,69 +226,111 @@ func renderAssistant(text string, width int) []string {
 	return wrapRender(layout.body.Width(bodyWidth), rendered)
 }
 
+type assistantSegmentKind string
+
+const (
+	segmentMarkdown assistantSegmentKind = "markdown"
+	segmentPlan     assistantSegmentKind = "plan"
+	segmentDiff     assistantSegmentKind = "diff"
+)
+
 type assistantSegment struct {
-	isPlan bool
-	text   string
+	kind assistantSegmentKind
+	text string
 }
 
-func splitAssistantPlanSegments(text string) []assistantSegment {
+func splitAssistantSegments(text string) []assistantSegment {
 	var segments []assistantSegment
 	var pending []string
-	state := "markdown"
-	flushMarkdown := func() {
+	state := segmentMarkdown
+	flush := func(kind assistantSegmentKind) {
 		if len(pending) > 0 {
-			segments = append(segments, assistantSegment{isPlan: false, text: strings.Join(pending, "\n")})
-			pending = nil
-		}
-	}
-	flushPlan := func() {
-		if len(pending) > 0 {
-			segments = append(segments, assistantSegment{isPlan: true, text: strings.Join(pending, "\n")})
+			segments = append(segments, assistantSegment{kind: kind, text: strings.Join(pending, "\n")})
 			pending = nil
 		}
 	}
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if state == "markdown" {
-			if trimmed == "```plan" {
-				flushMarkdown()
-				state = "plan"
+		if state == segmentMarkdown {
+			switch trimmed {
+			case "```plan":
+				flush(segmentMarkdown)
+				state = segmentPlan
+				continue
+			case "```diff":
+				flush(segmentMarkdown)
+				state = segmentDiff
 				continue
 			}
 			pending = append(pending, line)
 			continue
 		}
 		if trimmed == "```" {
-			flushPlan()
-			state = "markdown"
+			wasEmpty := len(pending) == 0
+			flush(state)
+			if wasEmpty {
+				segments = append(segments, assistantSegment{kind: state, text: ""})
+			}
+			state = segmentMarkdown
 			continue
 		}
 		pending = append(pending, line)
 	}
-	if state == "plan" {
-		full := append([]string{"```plan"}, pending...)
-		segments = append(segments, assistantSegment{isPlan: false, text: strings.Join(full, "\n")})
+	if state != segmentMarkdown {
+		opening := "```" + string(state)
+		full := append([]string{opening}, pending...)
+		segments = append(segments, assistantSegment{kind: segmentMarkdown, text: strings.Join(full, "\n")})
 	} else {
-		flushMarkdown()
+		flush(segmentMarkdown)
 	}
 	return segments
+}
+
+func splitAssistantPlanSegments(text string) []assistantSegment {
+	return splitAssistantSegments(text)
+}
+
+func renderDiffBody(text string) string {
+	if text == "" {
+		return ""
+	}
+	var b strings.Builder
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		switch {
+		case strings.HasPrefix(line, "+"):
+			b.WriteString(diffAdd.Render(line))
+		case strings.HasPrefix(line, "-"):
+			b.WriteString(diffRemove.Render(line))
+		case strings.HasPrefix(line, " "):
+			b.WriteString(diffContext.Render(line))
+		default:
+			b.WriteString(diffNeutral.Render(line))
+		}
+	}
+	return b.String()
 }
 
 func renderAssistantSegments(text string, layout roleLayout, width int) []string {
 	if width < 8 {
 		width = 8
 	}
-	segments := splitAssistantPlanSegments(text)
+	segments := splitAssistantSegments(text)
 	if len(segments) == 0 {
 		return nil
 	}
 	var out []string
 	for _, seg := range segments {
 		var rendered string
-		if seg.isPlan {
+		switch seg.kind {
+		case segmentPlan:
 			inner := renderMarkdownBody(seg.text, width)
 			rendered = planBlock.Width(width).Render(inner)
-		} else {
+		case segmentDiff:
+			rendered = diffBlock.Width(width).Render(renderDiffBody(seg.text))
+		default:
 			md := renderMarkdownBody(seg.text, width)
 			rendered = layout.body.Width(width).Render(md)
 		}
