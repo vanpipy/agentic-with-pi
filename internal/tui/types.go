@@ -1,6 +1,10 @@
 package tui
 
-import "time"
+import (
+	"time"
+
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
+)
 
 type role int
 
@@ -57,6 +61,9 @@ type chatMsg struct {
 	usage     *msgUsage
 	promptNum int
 	collapsed bool
+	title     string
+	toolCalls []string
+	toolData  *json_rpc.MessageContentPart
 }
 
 type msgUsage struct {
