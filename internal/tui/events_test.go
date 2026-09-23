@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"errors"
 	"testing"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 func newTestChatModel() *chatModel {
@@ -109,5 +111,86 @@ func TestHandleServerEventAssistantEndTurnCommitsStream(t *testing.T) {
 	}
 	if last.usage == nil {
 		t.Errorf("expected usage to be populated")
+	}
+}
+
+func TestStreamEventSchedulesExactlyOneFollowUpRead(t *testing.T) {
+	m := NewModelForTest()
+	events := make(chan agentclient.Event, 3)
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"a"}`)}
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"b"}`)}
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"c"}`)}
+	m.events = events
+
+	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"a"}`)}})
+	m = out.(*Model)
+	if got := m.ReadsScheduledThisUpdateForTest(); got != 1 {
+		t.Errorf("non-done streamEventMsg: expected 1 follow-up read, got %d", got)
+	}
+
+	out, _ = m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"b"}`)}})
+	m = out.(*Model)
+	if got := m.ReadsScheduledThisUpdateForTest(); got != 1 {
+		t.Errorf("2nd non-done streamEventMsg: expected 1 follow-up read, got %d", got)
+	}
+}
+
+func TestStreamEventDoneSchedulesNoFollowUpRead(t *testing.T) {
+	m := NewModelForTest()
+	events := make(chan agentclient.Event, 1)
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}
+	m.events = events
+
+	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}, done: true})
+	m = out.(*Model)
+	if got := m.ReadsScheduledThisUpdateForTest(); got != 0 {
+		t.Errorf("done streamEventMsg: expected 0 follow-up reads, got %d", got)
+	}
+	if m.EventsForTest() != nil {
+		t.Errorf("done streamEventMsg: m.events should be nil")
+	}
+}
+
+func TestStreamEventErrorClearsEvents(t *testing.T) {
+	m := NewModelForTest()
+	m.state = StateStreamingForTestValue()
+	events := make(chan agentclient.Event, 1)
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"orphan"}`)}
+	m.events = events
+
+	out, _ := m.Update(streamEventMsg{err: errors.New("boom")})
+	m = out.(*Model)
+	if got := m.ReadsScheduledThisUpdateForTest(); got != 0 {
+		t.Errorf("error streamEventMsg: expected 0 follow-up reads, got %d", got)
+	}
+	if m.EventsForTest() != nil {
+		t.Errorf("error streamEventMsg: m.events should be nil")
+	}
+	if m.StateForTest() != StateError {
+		t.Errorf("error streamEventMsg: state should be StateError, got %v", m.StateForTest())
+	}
+}
+
+func TestCancelDrainsInFlightEvents(t *testing.T) {
+	m := NewModelForTest()
+	m.state = StateStreamingForTestValue()
+	events := make(chan agentclient.Event, 4)
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"1"}`)}
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"2"}`)}
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"3"}`)}
+	m.events = events
+	// stub out the cancel RPC by leaving m.conn nil
+	m.conn = nil
+
+	m.cancel()
+
+	if got := len(events); got != 0 {
+		t.Errorf("cancel: expected events channel drained, %d buffered remain", got)
+	}
+	if m.EventsForTest() != nil {
+		t.Errorf("cancel: m.events should be nil after cancel")
+	}
+	if m.StateForTest() != StateReady {
+		t.Errorf("cancel: state should be StateReady, got %v", m.StateForTest())
 	}
 }
