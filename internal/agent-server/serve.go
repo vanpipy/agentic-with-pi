@@ -17,6 +17,9 @@ func (s *Server) SocketPath() string {
 }
 
 func (s *Server) Serve() error {
+	s.wg.Add(1)
+	defer s.wg.Done()
+
 	for {
 		conn, err := s.listener.Accept()
 		if err != nil {

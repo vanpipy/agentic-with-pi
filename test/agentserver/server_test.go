@@ -93,6 +93,16 @@ func TestServerSocketPath(t *testing.T) {
 	}
 }
 
+func TestShutdownIsRaceFree(t *testing.T) {
+	s, _ := setupTest(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.Shutdown(ctx); err != nil {
+		t.Errorf("shutdown: %v", err)
+	}
+}
+
 type brokenPipeWriter struct {
 	mu       sync.Mutex
 	written  []byte
