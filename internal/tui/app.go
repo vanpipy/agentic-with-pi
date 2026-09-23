@@ -409,6 +409,9 @@ func (m *Model) layout() {
 }
 
 func (m *Model) startStream(text string) tea.Cmd {
+	if m.conn == nil {
+		return func() tea.Msg { return errMsg{fmt.Errorf("startStream: no active connection")} }
+	}
 	ctx := context.Background()
 	conn := m.conn
 

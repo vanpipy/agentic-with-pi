@@ -9,18 +9,18 @@ import (
 	"github.com/vanpiyp/awp/internal/agent-core/skills"
 )
 
+func skillBodyFor(name string) string {
+	return "name: " + name + "\ndescription: d\n"
+}
+
 func skillBody() string {
-	return "---\nname: x\ndescription: y\n---\nbody\n"
+	return skillBodyFor("x")
 }
 
 func writeSkill(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skillBody()), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	name := filepath.Base(dir)
+	writeSkillWith(t, dir, skillBodyFor(name))
 }
 
 func TestDiscoverAllThreeRoots(t *testing.T) {

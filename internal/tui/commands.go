@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	"github.com/vanpiyp/awp/internal/agent-core/skills"
 )
 
 type commandSpec struct {
@@ -51,6 +52,9 @@ var registry = []commandSpec{
 }
 
 func (m *Model) startResume(sessionID string) tea.Cmd {
+	if m.conn == nil {
+		return nil
+	}
 	events, err := m.conn.Resume(context.Background(), sessionID)
 	if err != nil {
 		m.chat.appendError("resume: " + err.Error())
@@ -129,12 +133,17 @@ func (m *Model) executeCommand(text string) (quit bool, cmd tea.Cmd) {
 	}
 
 	spec, found := findCommand(parsed.name)
-	if !found {
-		m.chat.appendSystem(errorPrefix.Render(" unknown command: /"+parsed.name) +
-			"\n  available: /quit /new /resume")
-		return false, nil
+	if found {
+		return spec.Run(m, parsed.arg)
 	}
-	return spec.Run(m, parsed.arg)
+
+	if skill, prompt, ok := matchSkillFor(text); ok {
+		return m.executeSkill(skill, prompt)
+	}
+
+	m.chat.appendSystem(errorPrefix.Render(" unknown command: /"+parsed.name) +
+		"\n  available: /quit /new /resume")
+	return false, nil
 }
 
 type ParsedCommand struct {
@@ -166,6 +175,99 @@ func AllCommandSpecsForTest() []CommandSpec {
 		}
 	}
 	return out
+}
+
+var skillRegistry *skills.Registry
+
+func SetSkillRegistryForTest(r *skills.Registry) {
+	skillRegistry = r
+}
+
+func matchSkillFor(text string) (*skills.Skill, string, bool) {
+	if skillRegistry == nil {
+		return nil, "", false
+	}
+	name, prompt, ok := skillRegistry.ResolveInvocation(text)
+	if !ok {
+		return nil, "", false
+	}
+	s, ok := skillRegistry.Get(name)
+	if !ok {
+		return nil, "", false
+	}
+	return s, prompt, true
+}
+
+func renderSkillPrompt(skill *skills.Skill, userPrompt string) string {
+	body := strings.TrimSpace(skill.Content)
+	user := strings.TrimSpace(userPrompt)
+
+	var b strings.Builder
+	if body != "" {
+		b.WriteString("[skill: ")
+		b.WriteString(skill.Name)
+		b.WriteString("]\n\n")
+		b.WriteString(body)
+	}
+	if user != "" {
+		if body != "" {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(user)
+	}
+	return b.String()
+}
+
+func (m *Model) executeSkill(skill *skills.Skill, userPrompt string) (bool, tea.Cmd) {
+	rendered := renderSkillPrompt(skill, userPrompt)
+	if rendered == "" {
+		return false, nil
+	}
+	m.chat.submit(rendered)
+	m.chat.GotoBottom()
+	m.state = StateStreaming
+	return false, m.startStream(rendered)
+}
+
+func ExecuteCommandForTest(m *Model, text string) (bool, tea.Cmd) {
+	return m.executeCommand(text)
+}
+
+func ChatMessagesForTest(m *Model) []string {
+	if m == nil || m.chat == nil {
+		return nil
+	}
+	out := make([]string, 0, len(m.chat.messages))
+	for _, msg := range m.chat.messages {
+		out = append(out, msg.text)
+	}
+	return out
+}
+
+func (m *Model) ChatMessagesForTest() []string {
+	return ChatMessagesForTest(m)
+}
+
+func (m *Model) LastChatMessageForTest() string {
+	msgs := ChatMessagesForTest(m)
+	if len(msgs) == 0 {
+		return ""
+	}
+	return msgs[len(msgs)-1]
+}
+
+func (m *Model) LastPromptForTest() string {
+	if m == nil {
+		return ""
+	}
+	return m.lastPrompt
+}
+
+func SetLastPromptForTest(m *Model, val string) {
+	if m == nil {
+		return
+	}
+	m.lastPrompt = val
 }
 
 var _ tea.Cmd
