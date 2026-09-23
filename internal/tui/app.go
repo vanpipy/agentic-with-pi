@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/ipc"
 	"github.com/vanpiyp/awp/internal/log"
 	"github.com/vanpiyp/awp/internal/paths"
@@ -317,10 +319,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.done {
 			m.state = stateReady
 			m.events = nil
-		} else if msg.ev.Kind == "final_answer" {
-			m.state = stateReady
-		} else if msg.ev.Kind == "error" {
-			m.state = stateError
+		} else if msg.ev.Kind == json_rpc.EventMessage {
+			if isAbortMessage(msg.ev.Data) {
+				m.state = stateError
+			}
+		} else if msg.ev.Kind == json_rpc.EventCustom {
+			if isAbortCustom(msg.ev.Data) {
+				m.state = stateError
+			}
+		}
+		if m.events != nil {
+			cmds = append(cmds, m.readNextEvent())
 		}
 		if m.events != nil {
 			cmds = append(cmds, m.readNextEvent())
@@ -635,4 +644,20 @@ func waitForServer(socketPath string, timeout time.Duration) error {
 		time.Sleep(50 * time.Millisecond)
 	}
 	return fmt.Errorf("server did not start within %v", timeout)
+}
+
+func isAbortMessage(data []byte) bool {
+	var msg json_rpc.MessageEvent
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return false
+	}
+	return msg.StopReason == "abort"
+}
+
+func isAbortCustom(data []byte) bool {
+	var ev json_rpc.CustomEvent
+	if err := json.Unmarshal(data, &ev); err != nil {
+		return false
+	}
+	return ev.CustomType == "abort"
 }
