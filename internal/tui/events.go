@@ -2,45 +2,14 @@ package tui
 
 import (
 	"encoding/json"
-	"strconv"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 type serverEventMsg struct {
 	Kind string
 	Data []byte
-}
-
-func parseUsage(data []byte) *msgUsage {
-	var d struct {
-		PromptTokens        int    `json:"prompt_tokens"`
-		CompletionTokens    int    `json:"completion_tokens"`
-		TotalTokens         int    `json:"total_tokens"`
-		PromptTokensStr     string `json:"-"`
-		CompletionTokensStr string `json:"-"`
-		TotalTokensStr      string `json:"-"`
-	}
-	_ = json.Unmarshal(data, &d)
-	if d.TotalTokens == 0 {
-		var s struct {
-			PromptTokens     string `json:"prompt_tokens"`
-			CompletionTokens string `json:"completion_tokens"`
-			TotalTokens      string `json:"total_tokens"`
-		}
-		_ = json.Unmarshal(data, &s)
-		d.PromptTokens, _ = strconv.Atoi(s.PromptTokens)
-		d.CompletionTokens, _ = strconv.Atoi(s.CompletionTokens)
-		d.TotalTokens, _ = strconv.Atoi(s.TotalTokens)
-	}
-	if d.TotalTokens == 0 {
-		return nil
-	}
-	return &msgUsage{
-		prompt:     d.PromptTokens,
-		completion: d.CompletionTokens,
-		total:      d.TotalTokens,
-	}
 }
 
 func handleServerEvent(c *chatModel, sessionID *string, ev agentclient.Event) {
@@ -51,55 +20,11 @@ func handleServerEvent(c *chatModel, sessionID *string, ev agentclient.Event) {
 		}
 		json.Unmarshal(ev.Data, &d)
 		*sessionID = d.SessionID
-	case "thought_chunk":
-		var d struct {
-			Reasoning string `json:"reasoning"`
-			Content   string `json:"content"`
-		}
-		json.Unmarshal(ev.Data, &d)
-		if d.Reasoning != "" {
-			c.appendReasoning(d.Reasoning)
-		}
-		if d.Content != "" {
-			c.appendStream(d.Content)
-		}
-	case "thought_end":
-		c.commitStream()
-	case "tool":
-		var d struct {
-			Name   string `json:"name"`
-			Args   string `json:"args"`
-			Intent string `json:"intent"`
-		}
-		json.Unmarshal(ev.Data, &d)
-		c.appendTool(d.Name, d.Args, d.Intent)
-	case "observe":
-		var d struct {
-			ToolName string `json:"tool_name"`
-			Result   string `json:"result"`
-			Error    string `json:"error"`
-			Intent   string `json:"intent"`
-		}
-		json.Unmarshal(ev.Data, &d)
-		if d.Error != "" {
-			c.appendError(d.Error)
-		} else {
-			c.appendObserve(d.Result, d.Intent)
-		}
-	case "final_answer":
-		c.commitStream()
-		usage := parseUsage(ev.Data)
-		if usage != nil {
-			if len(c.messages) > 0 {
-				c.messages[len(c.messages)-1].usage = usage
-			}
-		}
-	case "error":
-		var d struct {
-			Error string `json:"error"`
-		}
-		json.Unmarshal(ev.Data, &d)
-		c.appendError(d.Error)
+	case json_rpc.EventMessage:
+		handleMessageEvent(c, ev.Data)
+	case json_rpc.EventCustom:
+		handleCustomEvent(c, ev.Data)
+	case json_rpc.EventCustomMessage:
 	case "cancelled":
 		c.commitStream()
 		var d struct {
@@ -107,5 +32,72 @@ func handleServerEvent(c *chatModel, sessionID *string, ev agentclient.Event) {
 		}
 		json.Unmarshal(ev.Data, &d)
 		c.appendSystem(systemPrefix.Render(" cancelled") + durationHint.Render(" ("+d.Reason+")"))
+	}
+}
+
+func handleMessageEvent(c *chatModel, data []byte) {
+	var msg json_rpc.MessageEvent
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return
+	}
+	for _, part := range msg.Message.Content {
+		switch part.Type {
+		case "thinking":
+			if part.Text != "" {
+				c.appendReasoning(part.Text)
+			}
+		case "text":
+			if part.Text != "" {
+				c.appendStream(part.Text)
+			}
+		case "toolCall":
+			c.appendTool(part.Name, string(part.Arguments), part.Intent)
+		}
+	}
+	if msg.Details != nil {
+		if msg.Details.Error != "" {
+			c.appendError(msg.Details.Error)
+		} else if msg.Message.Role == "toolResult" {
+			text := ""
+			if len(msg.Message.Content) > 0 {
+				text = msg.Message.Content[0].Text
+			}
+			c.appendObserve(text, msg.Details.Intent)
+		}
+	}
+	if msg.StopReason == "end_turn" || (msg.Message.Role == "assistant" && msg.StopReason == "") {
+		if msg.Message.Role == "assistant" {
+			c.commitStream()
+		}
+		if msg.Usage != nil && len(c.messages) > 0 {
+			c.messages[len(c.messages)-1].usage = &msgUsage{
+				prompt:     msg.Usage.PromptTokens,
+				completion: msg.Usage.CompletionTokens,
+				total:      msg.Usage.TotalTokens,
+			}
+		}
+	}
+}
+
+func handleCustomEvent(c *chatModel, data []byte) {
+	var ev json_rpc.CustomEvent
+	if err := json.Unmarshal(data, &ev); err != nil {
+		return
+	}
+	switch ev.CustomType {
+	case "tool_error":
+		var d struct {
+			Error string `json:"error"`
+		}
+		json.Unmarshal(ev.Data, &d)
+		if d.Error != "" {
+			c.appendError(d.Error)
+		}
+	case "abort":
+		var d struct {
+			Reason string `json:"reason"`
+		}
+		json.Unmarshal(ev.Data, &d)
+		c.appendSystem(systemPrefix.Render(" aborted") + durationHint.Render(" ("+d.Reason+")"))
 	}
 }
