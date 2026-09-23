@@ -137,6 +137,9 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 	if g.role == roleAssistant {
 		return wrapRender(layout.body.Width(width), renderMarkdownBody(g.text, width))
 	}
+	if g.role == roleTool && g.toolData != nil {
+		return renderToolCard(g.toolData, g.collapsed, g.duration, width)
+	}
 	if g.role == roleThinking && g.collapsed {
 		dur := g.duration.Round(time.Second)
 		if dur == 0 {
@@ -152,6 +155,40 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		return wrapRender(layout.body.Width(width), "▸ "+truncateMid(summary, 60))
 	}
 	return wrapRender(layout.body.Width(width), g.text)
+}
+
+func renderToolCard(td *json_rpc.MessageContentPart, collapsed bool, dur time.Duration, width int) []string {
+	if width < 8 {
+		width = 8
+	}
+	var body strings.Builder
+	body.WriteString(toolCardHeader(td, dur))
+	body.WriteByte('\n')
+	if collapsed {
+		body.WriteString("▸ result")
+	} else {
+		body.WriteString(toolCardArgs.Render(tools.TruncateMiddle(string(td.Arguments), 60)))
+	}
+	rendered := toolCard.Width(width).Render(body.String())
+	if rendered == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+}
+
+func toolCardHeader(td *json_rpc.MessageContentPart, dur time.Duration) string {
+	var b strings.Builder
+	b.WriteString("⚙ ")
+	if td.Intent != "" {
+		b.WriteString(td.Intent)
+		b.WriteString("  ")
+	}
+	b.WriteString(td.Name)
+	if dur > 0 {
+		b.WriteString("  ")
+		b.WriteString(durationHint.Render("⏱ " + dur.Round(time.Millisecond).String()))
+	}
+	return b.String()
 }
 
 func truncateMid(s string, max int) string {

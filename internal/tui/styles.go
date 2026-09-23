@@ -71,6 +71,12 @@ var (
 	toolPrefix = lipgloss.NewStyle().Foreground(c.tool).Bold(true)
 	toolName   = lipgloss.NewStyle().Foreground(c.accent)
 
+	toolCard = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(c.border).
+			Padding(0, 1)
+	toolCardArgs = lipgloss.NewStyle().Foreground(c.dim)
+
 	observePrefix = lipgloss.NewStyle().Foreground(c.dim)
 	systemPrefix  = lipgloss.NewStyle().Foreground(c.system)
 	errorPrefix   = lipgloss.NewStyle().Foreground(c.error).Bold(true)

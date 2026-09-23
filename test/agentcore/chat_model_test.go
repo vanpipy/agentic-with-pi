@@ -136,12 +136,12 @@ func TestAppendToolTextMatchesWithoutIntent(t *testing.T) {
 	}
 }
 
-func TestAppendToolRenderMatchesLegacyShape(t *testing.T) {
-	before := tui.RenderMsgForTest(tui.ChatMsg{
+func TestAppendToolRenderUsesCardPathWhenToolDataPopulated(t *testing.T) {
+	legacy := tui.RenderMsgForTest(tui.ChatMsg{
 		Role: tui.RoleTool,
 		Text: "list /tmp · bash({\"path\":\"/tmp\"})",
 	}, 80)
-	if len(before) == 0 {
+	if len(legacy) == 0 {
 		t.Fatal("legacy render produced zero lines; cannot compare")
 	}
 
@@ -155,18 +155,14 @@ func TestAppendToolRenderMatchesLegacyShape(t *testing.T) {
 	tui.AppendToolForTest(m, part)
 	last := tui.LastChatMsgForTest(m)
 
-	after := tui.RenderMsgForTest(last, 80)
-	if len(before) != len(after) {
-		t.Fatalf("render line count drift: before=%d after=%d", len(before), len(after))
-	}
-	for i := range before {
-		if before[i] != after[i] {
-			t.Errorf("render line %d drift:\n before=%q\n  after=%q", i, before[i], after[i])
-		}
+	card := tui.RenderMsgForTest(last, 80)
+	if len(card) <= len(legacy) {
+		t.Fatalf("card render must produce more lines than legacy: legacy=%d card=%d",
+			len(legacy), len(card))
 	}
 }
 
-func TestAppendToolRenderIgnoresNewFields(t *testing.T) {
+func TestAppendToolRenderIgnoresTitleAndToolCallsWhenToolDataNil(t *testing.T) {
 	baseline := tui.RenderMsgForTest(tui.ChatMsg{
 		Role: tui.RoleTool,
 		Text: "list /tmp · bash({\"path\":\"/tmp\"})",
@@ -176,20 +172,14 @@ func TestAppendToolRenderIgnoresNewFields(t *testing.T) {
 		Text:      "list /tmp · bash({\"path\":\"/tmp\"})",
 		Title:     "ignored title",
 		ToolCalls: []string{"bash", "read"},
-		ToolData: &json_rpc.MessageContentPart{
-			Type:      "toolCall",
-			Name:      "bash",
-			Intent:    "list /tmp",
-			Arguments: json.RawMessage(`{"path":"/tmp"}`),
-		},
 	}, 80)
 	if len(baseline) != len(enriched) {
-		t.Fatalf("render line count drift with NewFields populated: baseline=%d enriched=%d",
+		t.Fatalf("render line count drift with Title/ToolCalls populated: baseline=%d enriched=%d",
 			len(baseline), len(enriched))
 	}
 	for i := range baseline {
 		if baseline[i] != enriched[i] {
-			t.Errorf("render line %d drift with NewFields populated:\n baseline=%q\n enriched=%q",
+			t.Errorf("render line %d drift with Title/ToolCalls populated:\n baseline=%q\n enriched=%q",
 				i, baseline[i], enriched[i])
 		}
 	}
