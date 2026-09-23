@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,12 +125,21 @@ func TestPromptStreamEvents(t *testing.T) {
 	var finalContent string
 	for ev := range events {
 		kinds = append(kinds, ev.Kind)
-		if ev.Kind == json_rpc.EventFinalAnswer {
-			var data struct {
-				Content string `json:"content"`
+		if ev.Kind == json_rpc.EventMessage {
+			var msg json_rpc.MessageEvent
+			if err := json.Unmarshal(ev.Data, &msg); err != nil {
+				continue
 			}
-			json.Unmarshal(ev.Data, &data)
-			finalContent = data.Content
+			if msg.Message.Role != "assistant" || msg.StopReason == "toolUse" {
+				continue
+			}
+			var b strings.Builder
+			for _, part := range msg.Message.Content {
+				if part.Type == "text" {
+					b.WriteString(part.Text)
+				}
+			}
+			finalContent = b.String()
 		}
 	}
 
@@ -137,22 +147,14 @@ func TestPromptStreamEvents(t *testing.T) {
 		t.Errorf("content = %q, want hello world", finalContent)
 	}
 
-	hasThought := false
-	hasChunk := false
 	hasFinal := false
 	for _, k := range kinds {
-		if k == json_rpc.EventThoughtStart {
-			hasThought = true
-		}
-		if k == json_rpc.EventThoughtChunk {
-			hasChunk = true
-		}
-		if k == json_rpc.EventFinalAnswer {
+		if k == json_rpc.EventMessage {
 			hasFinal = true
 		}
 	}
-	if !hasThought || !hasChunk || !hasFinal {
-		t.Errorf("missing events: thought=%v chunk=%v final=%v", hasThought, hasChunk, hasFinal)
+	if !hasFinal {
+		t.Errorf("missing message event: kinds=%v", kinds)
 	}
 }
 
@@ -180,12 +182,21 @@ func TestSendPromptOneShot(t *testing.T) {
 
 	var finalContent string
 	for ev := range events {
-		if ev.Kind == json_rpc.EventFinalAnswer {
-			var data struct {
-				Content string `json:"content"`
+		if ev.Kind == json_rpc.EventMessage {
+			var msg json_rpc.MessageEvent
+			if err := json.Unmarshal(ev.Data, &msg); err != nil {
+				continue
 			}
-			json.Unmarshal(ev.Data, &data)
-			finalContent = data.Content
+			if msg.Message.Role != "assistant" || msg.StopReason == "toolUse" {
+				continue
+			}
+			var b strings.Builder
+			for _, part := range msg.Message.Content {
+				if part.Type == "text" {
+					b.WriteString(part.Text)
+				}
+			}
+			finalContent = b.String()
 		}
 	}
 	if finalContent != "hello world" {

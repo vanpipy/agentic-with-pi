@@ -43,14 +43,14 @@ func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer("")
 	emits := marshalAgentEventForWire(agentcore.Event{
-		Category: agentcore.EventThoughtChunk,
+		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "hello ",
 	}, &parentID, &buf)
 	if len(emits) != 0 {
 		t.Errorf("expected 0 emits during chunk, got %d", len(emits))
 	}
 	emits = marshalAgentEventForWire(agentcore.Event{
-		Category: agentcore.EventThoughtChunk,
+		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "world",
 	}, &parentID, &buf)
 	if len(emits) != 0 {
@@ -62,7 +62,7 @@ func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) 
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
 	marshalAgentEventForWire(agentcore.Event{
-		Category: agentcore.EventThoughtChunk,
+		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "I should answer",
 	}, &parentID, &buf)
 	emits := marshalAgentEventForWire(agentcore.Event{
@@ -100,9 +100,9 @@ func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
 	emits := marshalAgentEventForWire(agentcore.Event{
-		Category: agentcore.EventTool,
-		ToolName: "bash",
-		ToolArgs: `{"command":"date","intent":"Get time"}`,
+		Category:   agentcore.EventTool,
+		ToolName:   "bash",
+		ToolArgs:   `{"command":"date","intent":"Get time"}`,
 		ToolIntent: "Get time",
 	}, &parentID, &buf)
 	if len(emits) != 2 {
@@ -137,7 +137,7 @@ func TestMarshalAgentEventForWireErrorEmitsMessageAndCustom(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
 	emits := marshalAgentEventForWire(agentcore.Event{
-		Category: agentcore.EventError,
+		Category:  agentcore.EventError,
 		ToolError: "boom",
 	}, &parentID, &buf)
 	if len(emits) != 2 {
