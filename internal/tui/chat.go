@@ -243,12 +243,11 @@ func renderThinking(text string, width int, collapsed bool) []string {
 
 func renderAssistant(text string, width int) []string {
 	layout := roleLayoutFor(roleAssistant)
-	rendered := renderMarkdownBody(text, width)
 	bodyWidth := width - lipgloss.Width(" ✦ ")
 	if bodyWidth < 8 {
 		bodyWidth = 8
 	}
-	return wrapRender(layout.body.Width(bodyWidth), rendered)
+	return renderAssistantSegments(text, layout, bodyWidth)
 }
 
 type assistantSegmentKind string
@@ -257,6 +256,7 @@ const (
 	segmentMarkdown assistantSegmentKind = "markdown"
 	segmentPlan     assistantSegmentKind = "plan"
 	segmentDiff     assistantSegmentKind = "diff"
+	segmentImage    assistantSegmentKind = "image"
 )
 
 type assistantSegment struct {
@@ -315,6 +315,235 @@ func splitAssistantPlanSegments(text string) []assistantSegment {
 	return splitAssistantSegments(text)
 }
 
+func expandImageSegments(in []assistantSegment) []assistantSegment {
+	if len(in) == 0 {
+		return in
+	}
+	var out []assistantSegment
+	for _, seg := range in {
+		if seg.kind != segmentMarkdown {
+			out = append(out, seg)
+			continue
+		}
+		parts := splitMarkdownForImages(seg.text)
+		if len(parts) == 0 {
+			out = append(out, seg)
+			continue
+		}
+		out = append(out, parts...)
+	}
+	return out
+}
+
+type imageMatch struct {
+	match string
+	url   string
+}
+
+func splitMarkdownForImages(text string) []assistantSegment {
+	lines := strings.Split(text, "\n")
+	var out []assistantSegment
+	var mdLines []string
+	inFence := false
+	flushMarkdown := func() {
+		if len(mdLines) > 0 {
+			out = append(out, assistantSegment{kind: segmentMarkdown, text: strings.Join(mdLines, "\n")})
+			mdLines = nil
+		}
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			mdLines = append(mdLines, line)
+			continue
+		}
+		if inFence {
+			mdLines = append(mdLines, line)
+			continue
+		}
+		rest := line
+		for len(rest) > 0 {
+			match, prefixLen, ok := scanImageRef(rest)
+			if !ok {
+				break
+			}
+			prefix := rest[:prefixLen]
+			if prefix != "" {
+				mdLines = append(mdLines, prefix)
+			}
+			flushMarkdown()
+			typeName := inferImageType(match.url)
+			if match.url != "" && typeName != "" {
+				out = append(out, assistantSegment{kind: segmentImage, text: typeName})
+			}
+			rest = rest[prefixLen+len(match.match):]
+		}
+		if rest != "" {
+			mdLines = append(mdLines, rest)
+		} else if len(rest) == 0 && len(line) == 0 {
+			mdLines = append(mdLines, "")
+		}
+	}
+	flushMarkdown()
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func scanImageRef(s string) (imageMatch, int, bool) {
+	best := imageMatch{}
+	bestPos := -1
+	for i := 0; i+1 < len(s); i++ {
+		if s[i] != '!' || s[i+1] != '[' {
+			continue
+		}
+		m, ok := parseMarkdownImage(s, i)
+		if !ok {
+			continue
+		}
+		best = m
+		bestPos = i
+		break
+	}
+	for i := 0; i < len(s); i++ {
+		if i > 0 {
+			prev := s[i-1]
+			if prev != ' ' && prev != '\t' {
+				continue
+			}
+		}
+		if !strings.HasPrefix(s[i:], "data:image/") {
+			continue
+		}
+		end := i
+		for end < len(s) && !isImageTokenBoundary(s[end]) {
+			end++
+		}
+		if end == i {
+			continue
+		}
+		token := s[i:end]
+		if !strings.Contains(token, ";base64,") {
+			continue
+		}
+		typeName := inferImageType(token)
+		if typeName == "" {
+			continue
+		}
+		if bestPos == -1 || i < bestPos {
+			best = imageMatch{match: token, url: token}
+			bestPos = i
+		}
+		break
+	}
+	if bestPos == -1 {
+		return imageMatch{}, 0, false
+	}
+	return best, bestPos, true
+}
+
+func parseMarkdownImage(s string, start int) (imageMatch, bool) {
+	if start+1 >= len(s) || s[start] != '!' || s[start+1] != '[' {
+		return imageMatch{}, false
+	}
+	altStart := start + 2
+	altEnd := -1
+	j := altStart
+	for j < len(s) {
+		if s[j] == '\\' && j+1 < len(s) {
+			j += 2
+			continue
+		}
+		if s[j] == ']' {
+			if j+1 < len(s) && s[j+1] == '(' {
+				altEnd = j
+				break
+			}
+		}
+		j++
+	}
+	if altEnd == -1 {
+		return imageMatch{}, false
+	}
+	urlStart := altEnd + 1
+	if urlStart >= len(s) || s[urlStart] != '(' {
+		return imageMatch{}, false
+	}
+	urlEnd := -1
+	k := urlStart + 1
+	for k < len(s) {
+		if s[k] == '\\' && k+1 < len(s) {
+			k += 2
+			continue
+		}
+		if s[k] == ')' {
+			urlEnd = k
+			break
+		}
+		k++
+	}
+	if urlEnd == -1 {
+		return imageMatch{}, false
+	}
+	url := s[urlStart+1 : urlEnd]
+	full := s[start : urlEnd+1]
+	return imageMatch{match: full, url: url}, true
+}
+
+func isImageTokenBoundary(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ')'
+}
+
+func inferImageType(url string) string {
+	if url == "" {
+		return ""
+	}
+	if strings.HasPrefix(url, "data:image/") {
+		rest := url[len("data:image/"):]
+		for i := 0; i < len(rest); i++ {
+			c := rest[i]
+			if c == ';' || c == ',' {
+				return rest[:i]
+			}
+		}
+		return rest
+	}
+	clean := url
+	if idx := strings.IndexAny(clean, "?#"); idx != -1 {
+		clean = clean[:idx]
+	}
+	lastSlash := strings.LastIndex(clean, "/")
+	base := clean
+	if lastSlash != -1 {
+		base = clean[lastSlash+1:]
+	}
+	lastDot := strings.LastIndex(base, ".")
+	if lastDot == -1 || lastDot == len(base)-1 {
+		return ""
+	}
+	ext := base[lastDot+1:]
+	if len(ext) == 0 || len(ext) > 5 {
+		return ""
+	}
+	for i := 0; i < len(ext); i++ {
+		c := ext[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			return ""
+		}
+	}
+	return strings.ToLower(ext)
+}
+
+func renderImageBody(typeName string, width int) string {
+	if typeName == "" {
+		typeName = "image"
+	}
+	label := "▣ image: " + typeName
+	return imagePlaceholder.Width(width).Render(label)
+}
+
 func renderDiffBody(text string) string {
 	if text == "" {
 		return ""
@@ -343,6 +572,7 @@ func renderAssistantSegments(text string, layout roleLayout, width int) []string
 		width = 8
 	}
 	segments := splitAssistantSegments(text)
+	segments = expandImageSegments(segments)
 	if len(segments) == 0 {
 		return nil
 	}
@@ -355,6 +585,8 @@ func renderAssistantSegments(text string, layout roleLayout, width int) []string
 			rendered = planBlock.Width(width).Render(inner)
 		case segmentDiff:
 			rendered = diffBlock.Width(width).Render(renderDiffBody(seg.text))
+		case segmentImage:
+			rendered = renderImageBody(seg.text, width)
 		default:
 			md := renderMarkdownBody(seg.text, width)
 			rendered = layout.body.Width(width).Render(md)
