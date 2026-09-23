@@ -194,3 +194,24 @@ func TestCancelDrainsInFlightEvents(t *testing.T) {
 		t.Errorf("cancel: state should be StateReady, got %v", m.StateForTest())
 	}
 }
+
+func TestGetMdRendererEvictsBeyondCap(t *testing.T) {
+	resetMdRenderersForTest()
+	defer resetMdRenderersForTest()
+
+	const cap = 8
+
+	r0 := getMdRenderer(10)
+	for i := 1; i < cap; i++ {
+		getMdRenderer(20 + i)
+	}
+	// cache now holds widths {10, 21..27} (=cap entries)
+
+	getMdRenderer(30)
+	// 10 should have been evicted (oldest insert)
+
+	r0Again := getMdRenderer(10)
+	if r0Again == r0 {
+		t.Errorf("width=10 should have been evicted on the 9th distinct insertion; got same renderer pointer %p", r0)
+	}
+}

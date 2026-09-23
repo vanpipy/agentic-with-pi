@@ -8,9 +8,12 @@ import (
 	"github.com/charmbracelet/glamour/styles"
 )
 
+const mdRendererCacheCap = 8
+
 var (
-	mdRenderersMu sync.Mutex
-	mdRenderers   = make(map[int]*glamour.TermRenderer)
+	mdRenderersMu    sync.Mutex
+	mdRenderers      = make(map[int]*glamour.TermRenderer)
+	mdRenderersOrder []int
 )
 
 func getMdRenderer(width int) *glamour.TermRenderer {
@@ -31,7 +34,22 @@ func getMdRenderer(width int) *glamour.TermRenderer {
 		return nil
 	}
 	mdRenderers[width] = r
+	mdRenderersOrder = append(mdRenderersOrder, width)
+	if len(mdRenderersOrder) > mdRendererCacheCap {
+		evict := mdRenderersOrder[0]
+		mdRenderersOrder = mdRenderersOrder[1:]
+		delete(mdRenderers, evict)
+	}
 	return r
+}
+
+func resetMdRenderersForTest() {
+	mdRenderersMu.Lock()
+	defer mdRenderersMu.Unlock()
+	for k := range mdRenderers {
+		delete(mdRenderers, k)
+	}
+	mdRenderersOrder = nil
 }
 
 func renderMarkdownBody(text string, width int) string {
