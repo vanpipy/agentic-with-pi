@@ -187,11 +187,31 @@ func TestCancelDrainsInFlightEvents(t *testing.T) {
 	if got := len(events); got != 0 {
 		t.Errorf("cancel: expected events channel drained, %d buffered remain", got)
 	}
-	if m.EventsForTest() != nil {
-		t.Errorf("cancel: m.events should be nil after cancel")
+}
+
+func TestCancelTransitionsThroughCancellingToReady(t *testing.T) {
+	m := NewModelForTest()
+	m.state = StateStreamingForTestValue()
+	events := make(chan agentclient.Event, 1)
+	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}
+	m.events = events
+	m.conn = nil
+
+	cmd := m.cancel()
+	if cmd == nil {
+		t.Fatalf("cancel: expected a follow-up readNextEvent cmd to be scheduled, got nil")
 	}
+	if m.StateForTest() != StateCancelling {
+		t.Errorf("after cancel: expected StateCancelling, got %v", m.StateForTest())
+	}
+	if m.EventsForTest() == nil {
+		t.Errorf("after cancel: m.events must stay referenced so the natural stream-close can deliver done=true")
+	}
+
+	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}})
+	m = out.(*Model)
 	if m.StateForTest() != StateReady {
-		t.Errorf("cancel: state should be StateReady, got %v", m.StateForTest())
+		t.Errorf("after trailing streamEventMsg: expected StateReady, got %v", m.StateForTest())
 	}
 }
 

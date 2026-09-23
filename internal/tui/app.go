@@ -201,8 +201,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picker.hide()
 				break
 			}
-			if m.state == StateStreaming {
-				m.cancel()
+			if m.state == StateStreaming || m.state == StateCancelling {
+				if cmd := m.cancel(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
@@ -222,7 +224,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
-			if m.state == StateStreaming {
+			if m.state == StateStreaming || m.state == StateCancelling {
 				break
 			}
 			text := m.input.Value()
@@ -283,6 +285,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.autocomplete.setQuery(m.input.Value())
 
 	case streamEventMsg:
+		if m.state == StateCancelling {
+			m.state = StateReady
+		}
 		if msg.err != nil {
 			m.state = StateError
 			m.events = nil
@@ -492,16 +497,19 @@ func (m *Model) shutdown() {
 	}
 }
 
-func (m *Model) cancel() {
+func (m *Model) cancel() tea.Cmd {
 	if m.conn != nil {
 		if err := m.conn.Cancel(context.Background()); err != nil {
 			m.chat.appendError("cancel: " + err.Error())
 		}
 	}
 	drainEvents(m.events)
-	m.events = nil
 	m.chat.appendSystem(systemPrefix.Render(" cancelled by user"))
-	m.state = StateReady
+	m.state = StateCancelling
+	if m.events != nil {
+		return m.readNextEvent()
+	}
+	return nil
 }
 
 type promptDoneMsg struct{}

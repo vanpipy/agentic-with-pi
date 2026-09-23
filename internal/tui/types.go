@@ -29,6 +29,7 @@ type State int
 const (
 	StateReady State = iota
 	StateStreaming
+	StateCancelling
 	StateError
 )
 
@@ -38,6 +39,8 @@ func (s State) String() string {
 		return "ready"
 	case StateStreaming:
 		return "streaming"
+	case StateCancelling:
+		return "cancelling"
 	case StateError:
 		return "error"
 	}
