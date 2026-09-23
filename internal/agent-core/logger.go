@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/paths"
 )
 
@@ -154,6 +155,252 @@ func writeJSONLine(w *bufio.Writer, v any) error {
 	line = append(line, '\n')
 	_, err = w.Write(line)
 	return err
+}
+
+type alignedMessageEntry struct {
+	Kind    string          `json:"kind"`
+	Version int             `json:"version"`
+	Entry   json.RawMessage `json:"entry"`
+}
+
+type alignedCustomEntry struct {
+	Kind    string          `json:"kind"`
+	Version int             `json:"version"`
+	Entry   json.RawMessage `json:"entry"`
+}
+
+type alignedCustomMessageEntry struct {
+	Kind    string          `json:"kind"`
+	Version int             `json:"version"`
+	Entry   json.RawMessage `json:"entry"`
+}
+
+func (a *Agent) WriteMessage(msg json_rpc.MessageEvent) error {
+	if a.LogWriter == nil || a.logBuf == nil {
+		return fmt.Errorf("log writer not initialized")
+	}
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	if msg.ID == "" {
+		msg.ID = json_rpc.NewV7()
+	}
+	if msg.Timestamp == "" {
+		msg.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	entry := alignedMessageEntry{Kind: "message", Version: 2, Entry: raw}
+	if err := writeJSONLine(a.logBuf, entry); err != nil {
+		return err
+	}
+	a.currentParentID = msg.ID
+	return nil
+}
+
+func (a *Agent) WriteCustom(parentID, customType string, data json.RawMessage) error {
+	if a.LogWriter == nil || a.logBuf == nil {
+		return fmt.Errorf("log writer not initialized")
+	}
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	custom := json_rpc.CustomEvent{
+		ID:         json_rpc.NewV7(),
+		ParentID:   parentID,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		CustomType: customType,
+		Data:       data,
+	}
+	raw, err := json.Marshal(custom)
+	if err != nil {
+		return err
+	}
+	entry := alignedCustomEntry{Kind: "custom", Version: 2, Entry: raw}
+	return writeJSONLine(a.logBuf, entry)
+}
+
+func (a *Agent) WriteCustomMessage(parentID, customType, content string, details json.RawMessage) error {
+	if a.LogWriter == nil || a.logBuf == nil {
+		return fmt.Errorf("log writer not initialized")
+	}
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	custom := json_rpc.CustomMessageEvent{
+		ID:         json_rpc.NewV7(),
+		ParentID:   parentID,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		CustomType: customType,
+		Content:    content,
+		Details:    details,
+	}
+	raw, err := json.Marshal(custom)
+	if err != nil {
+		return err
+	}
+	entry := alignedCustomMessageEntry{Kind: "custom_message", Version: 2, Entry: raw}
+	return writeJSONLine(a.logBuf, entry)
+}
+
+func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
+	a.logMu.Lock()
+	parentID := a.currentParentID
+	buf := a.currentStreamBuf
+	a.logMu.Unlock()
+
+	switch ev.Category {
+	case EventUserMessage:
+		userBuf := NewStreamBuffer(parentID)
+		userBuf.SetRole("user")
+		userBuf.AppendText(ev.Content)
+		userBuf.SetStopReason("end_turn")
+		userMsg := userBuf.Finalize()
+		if err := a.WriteMessage(userMsg); err != nil {
+			slog.Debug("agent: aligned write failed", "err", err)
+			return nil
+		}
+		return nil
+
+	case EventThoughtStart:
+		newBuf := NewStreamBuffer(parentID)
+		newBuf.SetRole("assistant")
+		a.logMu.Lock()
+		a.currentStreamBuf = newBuf
+		a.logMu.Unlock()
+		return newBuf
+
+	case EventThoughtChunk:
+		if buf == nil {
+			return nil
+		}
+		buf.AppendThinking(ev.Reasoning, "")
+		return buf
+
+	case EventThoughtEnd:
+		if buf == nil {
+			return nil
+		}
+		if ev.Usage != nil {
+			buf.SetUsage(json_rpc.UsageStats{
+				PromptTokens:     ev.Usage.PromptTokens,
+				CompletionTokens: ev.Usage.CompletionTokens,
+				TotalTokens:      ev.Usage.TotalTokens,
+			})
+		}
+		return buf
+
+	case EventTool:
+		if buf == nil {
+			return nil
+		}
+		toolCallID := json_rpc.NewV7()
+		intent := ev.ToolIntent
+		if intent == "" {
+			intent = extractToolIntent(ev.ToolArgs)
+		}
+		var args json.RawMessage
+		if ev.ToolArgs != "" {
+			args = json.RawMessage(ev.ToolArgs)
+		} else {
+			args = json.RawMessage("{}")
+		}
+		buf.AppendToolCall(toolCallID, ev.ToolName, intent, args)
+		a.logMu.Lock()
+		a.currentToolCallID = toolCallID
+		a.logMu.Unlock()
+		return buf
+
+	case EventObserve:
+		a.logMu.Lock()
+		toolCallID := a.currentToolCallID
+		a.logMu.Unlock()
+		if buf != nil {
+			buf.SetStopReason("toolUse")
+			assistantMsg := buf.Finalize()
+			if err := a.WriteMessage(assistantMsg); err != nil {
+				slog.Debug("agent: aligned write failed", "err", err)
+			} else {
+				a.logMu.Lock()
+				a.currentParentID = assistantMsg.ID
+				a.logMu.Unlock()
+			}
+		}
+		toolResultBuf := NewStreamBuffer(toolCallID)
+		toolResultBuf.SetRole("toolResult")
+		if ev.ToolError != "" {
+			toolResultBuf.AppendText(ev.ToolError)
+		} else if ev.ToolResult != "" {
+			toolResultBuf.AppendText(ev.ToolResult)
+		}
+		toolResultBuf.SetDetails(json_rpc.MessageDetails{
+			ToolName: ev.ToolName,
+			Intent:   ev.ToolIntent,
+			Error:    ev.ToolError,
+		})
+		toolResultBuf.SetStopReason("toolUse")
+		toolResultMsg := toolResultBuf.Finalize()
+		if err := a.WriteMessage(toolResultMsg); err != nil {
+			slog.Debug("agent: aligned write failed", "err", err)
+			return nil
+		}
+		a.logMu.Lock()
+		a.currentParentID = toolResultMsg.ID
+		nextBuf := NewStreamBuffer(toolResultMsg.ID)
+		nextBuf.SetRole("assistant")
+		a.currentStreamBuf = nextBuf
+		a.logMu.Unlock()
+		return a.currentStreamBuf
+
+	case EventFinalAnswer:
+		if buf == nil {
+			return nil
+		}
+		buf.AppendText(ev.Content)
+		if ev.Usage != nil {
+			buf.SetUsage(json_rpc.UsageStats{
+				PromptTokens:     ev.Usage.PromptTokens,
+				CompletionTokens: ev.Usage.CompletionTokens,
+				TotalTokens:      ev.Usage.TotalTokens,
+			})
+		}
+		buf.SetStopReason("end_turn")
+		msg := buf.Finalize()
+		if err := a.WriteMessage(msg); err != nil {
+			slog.Debug("agent: aligned write failed", "err", err)
+			return nil
+		}
+		a.logMu.Lock()
+		a.currentParentID = msg.ID
+		a.currentStreamBuf = nil
+		a.logMu.Unlock()
+		return nil
+
+	case EventError:
+		var anchorID string
+		if buf != nil {
+			buf.AppendText(ev.ToolError)
+			buf.SetStopReason("end_turn")
+			msg := buf.Finalize()
+			if err := a.WriteMessage(msg); err != nil {
+				slog.Debug("agent: aligned write failed", "err", err)
+				return nil
+			}
+			a.logMu.Lock()
+			a.currentParentID = msg.ID
+			a.currentStreamBuf = nil
+			a.logMu.Unlock()
+			anchorID = msg.ID
+		} else {
+			a.logMu.Lock()
+			anchorID = a.currentParentID
+			a.logMu.Unlock()
+		}
+		if err := a.WriteCustom(anchorID, "tool_error", json.RawMessage(fmt.Sprintf(`{"error":%q}`, ev.ToolError))); err != nil {
+			slog.Debug("agent: aligned custom write failed", "err", err)
+		}
+		return nil
+	}
+	return nil
 }
 
 func (a *Agent) flushLog() {
