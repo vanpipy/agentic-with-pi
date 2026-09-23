@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/vanpiyp/awp/internal/agent-core/tools"
+	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 type chatModel struct {
@@ -386,13 +387,32 @@ func (c *chatModel) scrollYOffsetFor(idx int) int {
 }
 
 type lineCountKey struct {
-	width int
-	msg   chatMsg
+	width     int
+	role      role
+	text      string
+	intent    string
+	duration  time.Duration
+	usage     *msgUsage
+	promptNum int
+	collapsed bool
+}
+
+func lineCountKeyFrom(g chatMsg, width int) lineCountKey {
+	return lineCountKey{
+		width:     width,
+		role:      g.role,
+		text:      g.text,
+		intent:    g.intent,
+		duration:  g.duration,
+		usage:     g.usage,
+		promptNum: g.promptNum,
+		collapsed: g.collapsed,
+	}
 }
 
 func (c *chatModel) lineCount(g chatMsg) int {
 	width := c.viewport.Width()
-	key := lineCountKey{width: width, msg: g}
+	key := lineCountKeyFrom(g, width)
 	if c.lineCountCache != nil {
 		if v, ok := c.lineCountCache[key]; ok {
 			return v
@@ -435,11 +455,12 @@ func (c *chatModel) appendReasoning(text string) {
 	c.refresh()
 }
 
-func (c *chatModel) appendTool(name, args, intent string) {
-	prefix := intentPrefix(intent)
+func (c *chatModel) appendTool(part json_rpc.MessageContentPart) {
+	prefix := intentPrefix(part.Intent)
 	c.messages = append(c.messages, chatMsg{
-		role: roleTool,
-		text: fmt.Sprintf("%s%s(%s)", prefix, name, args),
+		role:     roleTool,
+		text:     fmt.Sprintf("%s%s(%s)", prefix, part.Name, string(part.Arguments)),
+		toolData: &part,
 	})
 	c.refresh()
 }
@@ -532,6 +553,9 @@ type ChatMsg struct {
 	Usage     *msgUsage
 	PromptNum int
 	Collapsed bool
+	Title     string
+	ToolCalls []string
+	ToolData  *json_rpc.MessageContentPart
 }
 
 func toChatMsg(c ChatMsg) chatMsg {
@@ -543,6 +567,24 @@ func toChatMsg(c ChatMsg) chatMsg {
 		usage:     c.Usage,
 		promptNum: c.PromptNum,
 		collapsed: c.Collapsed,
+		title:     c.Title,
+		toolCalls: c.ToolCalls,
+		toolData:  c.ToolData,
+	}
+}
+
+func fromChatMsg(m chatMsg) ChatMsg {
+	return ChatMsg{
+		Role:      m.role,
+		Text:      m.text,
+		Intent:    m.intent,
+		Duration:  m.duration,
+		Usage:     m.usage,
+		PromptNum: m.promptNum,
+		Collapsed: m.collapsed,
+		Title:     m.title,
+		ToolCalls: m.toolCalls,
+		ToolData:  m.toolData,
 	}
 }
 
@@ -606,4 +648,20 @@ func (t ChatModelT) JumpToPromptForTest(direction int) {
 
 func (t ChatModelT) SetSizeForTest(w, h int) {
 	t.model.SetSize(w, h)
+}
+
+func ChatMsgFromTest(c ChatMsg) ChatMsg {
+	return fromChatMsg(toChatMsg(c))
+}
+
+func AppendToolForTest(t ChatModelT, part json_rpc.MessageContentPart) {
+	t.model.appendTool(part)
+}
+
+func LastChatMsgForTest(t ChatModelT) ChatMsg {
+	m := t.model
+	if len(m.messages) == 0 {
+		return ChatMsg{}
+	}
+	return fromChatMsg(m.messages[len(m.messages)-1])
 }

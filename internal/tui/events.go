@@ -51,7 +51,7 @@ func handleMessageEvent(c *chatModel, data []byte) {
 				c.appendStream(part.Text)
 			}
 		case "toolCall":
-			c.appendTool(part.Name, string(part.Arguments), part.Intent)
+			c.appendTool(part)
 		}
 	}
 	if msg.Details != nil {
