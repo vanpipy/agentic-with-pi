@@ -245,13 +245,20 @@ func TestChatLineCountCachesPerMessage(t *testing.T) {
 	if got := len(c.messages); got != 3 {
 		t.Fatalf("setup: expected 3 messages, got %d", got)
 	}
-	// submit() calls refresh() which clears the cache, so the counter is fresh
+	// submit() calls refresh() which pre-warms the cache via content().
+	// Each submit's refresh re-renders all current messages through renderedLines,
+	// producing 1+2+3 = 6 cumulative cache misses (no longer lineCount-specific).
+	missesBefore := c.LineCountMissesForTest()
 	for i := 0; i < 100; i++ {
 		for j := range c.messages {
 			c.lineCount(c.messages[j])
 		}
 	}
-	if got := c.LineCountMissesForTest(); got != 3 {
-		t.Errorf("expected exactly 3 lineCount misses (one per message), got %d", got)
+	got := c.LineCountMissesForTest() - missesBefore
+	if got != 0 {
+		t.Errorf("expected 0 lineCount misses after pre-warm (per-message cache hits), got %d", got)
+	}
+	if total := c.LineCountMissesForTest(); total != 6 {
+		t.Errorf("expected 6 cumulative renderedLines misses (1+2+3 from submit pre-warm), got %d", total)
 	}
 }

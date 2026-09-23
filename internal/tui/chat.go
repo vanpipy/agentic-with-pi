@@ -22,7 +22,7 @@ type chatModel struct {
 	height          int
 	following       bool
 	promptNum       int
-	lineCountCache  map[lineCountKey]int
+	linesCache      map[string][]string
 	lineCountMisses int
 }
 
@@ -42,7 +42,7 @@ func (c *chatModel) SetSize(w, h int) {
 	c.height = h
 	c.viewport.SetWidth(w)
 	c.viewport.SetHeight(h)
-	c.lineCountCache = nil
+	c.linesCache = nil
 	c.refresh()
 }
 
@@ -57,7 +57,7 @@ func (c *chatModel) View() string {
 }
 
 func (c *chatModel) refresh() {
-	c.lineCountCache = nil
+	c.linesCache = nil
 	c.viewport.SetContent(c.content())
 	if c.following {
 		c.viewport.GotoBottom()
@@ -65,17 +65,42 @@ func (c *chatModel) refresh() {
 }
 
 func (c *chatModel) content() string {
+	width := c.viewport.Width()
 	var lines []string
 	for _, m := range c.messages {
-		lines = append(lines, renderMsg(m, c.viewport.Width())...)
+		lines = append(lines, c.renderedLines(m, width)...)
 	}
 	if c.reasoning.Len() > 0 {
-		lines = append(lines, renderThinking(c.reasoning.String(), c.viewport.Width(), false)...)
+		lines = append(lines, renderThinking(c.reasoning.String(), width, false)...)
 	}
 	if c.streaming.Len() > 0 {
-		lines = append(lines, renderAssistant(c.streaming.String(), c.viewport.Width())...)
+		lines = append(lines, renderAssistant(c.streaming.String(), width)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (c *chatModel) renderedLines(m chatMsg, width int) []string {
+	key := linesCacheKey(m, width)
+	if c.linesCache == nil {
+		c.linesCache = make(map[string][]string)
+	}
+	if v, ok := c.linesCache[key]; ok {
+		return v
+	}
+	c.lineCountMisses++
+	v := renderMsg(m, width)
+	c.linesCache[key] = v
+	return v
+}
+
+func linesCacheKey(m chatMsg, width int) string {
+	hasTool := m.toolData != nil
+	usageStr := ""
+	if m.usage != nil {
+		usageStr = fmt.Sprintf("%d,%d,%d", m.usage.prompt, m.usage.completion, m.usage.total)
+	}
+	return fmt.Sprintf("%d|%d|%v|%v|%d|%d|%s|%s|%s",
+		width, m.role, m.collapsed, hasTool, m.promptNum, m.duration, m.text, m.intent, usageStr)
 }
 
 type roleLayout struct {
@@ -539,47 +564,15 @@ func (c *chatModel) scrollYOffsetFor(idx int) int {
 	return offset
 }
 
-type lineCountKey struct {
-	width     int
-	role      role
-	text      string
-	intent    string
-	duration  time.Duration
-	usage     *msgUsage
-	promptNum int
-	collapsed bool
-}
-
-func lineCountKeyFrom(g chatMsg, width int) lineCountKey {
-	return lineCountKey{
-		width:     width,
-		role:      g.role,
-		text:      g.text,
-		intent:    g.intent,
-		duration:  g.duration,
-		usage:     g.usage,
-		promptNum: g.promptNum,
-		collapsed: g.collapsed,
-	}
-}
-
 func (c *chatModel) lineCount(g chatMsg) int {
-	width := c.viewport.Width()
-	key := lineCountKeyFrom(g, width)
-	if c.lineCountCache != nil {
-		if v, ok := c.lineCountCache[key]; ok {
-			return v
-		}
-	} else {
-		c.lineCountCache = make(map[lineCountKey]int)
-	}
-	c.lineCountMisses++
-	v := len(renderMsg(g, width))
-	c.lineCountCache[key] = v
-	return v
+	return len(c.renderedLines(g, c.viewport.Width()))
 }
 
 func (c *chatModel) LineCountMissesForTest() int { return c.lineCountMisses }
+
+func (c *chatModel) LinesCacheSizeForTest() int {
+	return len(c.linesCache)
+}
 
 func (c *chatModel) IsFollowing() bool {
 	return c.following
@@ -801,6 +794,30 @@ func (t ChatModelT) JumpToPromptForTest(direction int) {
 
 func (t ChatModelT) SetSizeForTest(w, h int) {
 	t.model.SetSize(w, h)
+}
+
+func (t ChatModelT) RenderedLinesForTest(g ChatMsg, width int) []string {
+	return t.model.renderedLines(toChatMsg(g), width)
+}
+
+func (t ChatModelT) ContentForTest() string {
+	return t.model.content()
+}
+
+func (t ChatModelT) LineCountForTest(g ChatMsg) int {
+	return t.model.lineCount(toChatMsg(g))
+}
+
+func (t ChatModelT) AppendStreamForTest(text string) {
+	t.model.appendStream(text)
+}
+
+func (t ChatModelT) LinesCacheSizeForTest() int {
+	return t.model.LinesCacheSizeForTest()
+}
+
+func (t ChatModelT) LineCountMissesForTest() int {
+	return t.model.LineCountMissesForTest()
 }
 
 func ChatMsgFromTest(c ChatMsg) ChatMsg {
