@@ -124,6 +124,9 @@ type Agent struct {
 	compaction             CompactionSettings
 	repeatedToolErrorLimit int
 	strategy               Strategy
+	currentParentID        string
+	currentStreamBuf       *StreamBuffer
+	currentToolCallID      string
 }
 
 type Strategy interface {
