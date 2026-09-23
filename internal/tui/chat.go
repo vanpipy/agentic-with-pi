@@ -13,14 +13,16 @@ import (
 )
 
 type chatModel struct {
-	viewport  viewport.Model
-	messages  []chatMsg
-	streaming strings.Builder
-	reasoning strings.Builder
-	width     int
-	height    int
-	following bool
-	promptNum int
+	viewport        viewport.Model
+	messages        []chatMsg
+	streaming       strings.Builder
+	reasoning       strings.Builder
+	width           int
+	height          int
+	following       bool
+	promptNum       int
+	lineCountCache  map[lineCountKey]int
+	lineCountMisses int
 }
 
 func newChatModel() *chatModel {
@@ -39,6 +41,7 @@ func (c *chatModel) SetSize(w, h int) {
 	c.height = h
 	c.viewport.SetWidth(w)
 	c.viewport.SetHeight(h)
+	c.lineCountCache = nil
 	c.refresh()
 }
 
@@ -53,6 +56,7 @@ func (c *chatModel) View() string {
 }
 
 func (c *chatModel) refresh() {
+	c.lineCountCache = nil
 	c.viewport.SetContent(c.content())
 	if c.following {
 		c.viewport.GotoBottom()
@@ -381,9 +385,28 @@ func (c *chatModel) scrollYOffsetFor(idx int) int {
 	return offset
 }
 
-func (c *chatModel) lineCount(g chatMsg) int {
-	return len(renderMsg(g, c.viewport.Width()))
+type lineCountKey struct {
+	width int
+	msg   chatMsg
 }
+
+func (c *chatModel) lineCount(g chatMsg) int {
+	width := c.viewport.Width()
+	key := lineCountKey{width: width, msg: g}
+	if c.lineCountCache != nil {
+		if v, ok := c.lineCountCache[key]; ok {
+			return v
+		}
+	} else {
+		c.lineCountCache = make(map[lineCountKey]int)
+	}
+	c.lineCountMisses++
+	v := len(renderMsg(g, width))
+	c.lineCountCache[key] = v
+	return v
+}
+
+func (c *chatModel) LineCountMissesForTest() int { return c.lineCountMisses }
 
 func (c *chatModel) IsFollowing() bool {
 	return c.following

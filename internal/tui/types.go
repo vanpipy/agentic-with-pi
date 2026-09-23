@@ -24,11 +24,28 @@ var (
 	roleThinking  = RoleThinking
 )
 
+type State int
+
 const (
 	StateReady State = iota
 	StateStreaming
+	StateCancelling
 	StateError
 )
+
+func (s State) String() string {
+	switch s {
+	case StateReady:
+		return "ready"
+	case StateStreaming:
+		return "streaming"
+	case StateCancelling:
+		return "cancelling"
+	case StateError:
+		return "error"
+	}
+	return "unknown"
+}
 
 func StateStreamingForTestValue() State { return StateStreaming }
 

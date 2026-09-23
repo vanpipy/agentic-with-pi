@@ -26,46 +26,25 @@ import (
 	"golang.org/x/term"
 )
 
-type State int
-
-const (
-	stateReady State = iota
-	stateStreaming
-	stateError
-)
-
-func (s State) String() string {
-	switch s {
-	case stateReady:
-		return "ready"
-	case stateStreaming:
-		return "streaming"
-	case stateError:
-		return "error"
-	}
-	return "unknown"
-}
-
 type Model struct {
-	state         State
-	err           error
-	width         int
-	height        int
-	conn          *agentclient.Client
-	serverPID     int
-	ownServer     bool
-	session       string
-	lastPrompt    string
-	lastPromptNum int
-	chat          *chatModel
-	input         *inputModel
-	autocomplete  *autocompleteModel
-	picker        *sessionPickerModel
-	events        <-chan agentclient.Event
-	lastKind      string
-	spinner       spinner.Model
-	help          help.Model
-	keys          keyBindings
+	state        State
+	width        int
+	height       int
+	conn         *agentclient.Client
+	serverPID    int
+	ownServer    bool
+	session      string
+	lastPrompt   string
+	chat         *chatModel
+	input        *inputModel
+	autocomplete *autocompleteModel
+	picker       *sessionPickerModel
+	events       <-chan agentclient.Event
+	spinner      spinner.Model
+	help         help.Model
+	keys         keyBindings
+
+	readsScheduledThisUpdate int
 }
 
 type errMsg struct{ err error }
@@ -138,7 +117,7 @@ func Run() error {
 	}
 
 	m := &Model{
-		state:        stateReady,
+		state:        StateReady,
 		conn:         conn,
 		serverPID:    ownServerPID(socket, pidFile),
 		ownServer:    ownServer,
@@ -188,6 +167,7 @@ func NewSpinnerForTest() spinner.Model {
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	m.readsScheduledThisUpdate = 0
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -221,8 +201,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.picker.hide()
 				break
 			}
-			if m.state == stateStreaming {
-				m.cancel()
+			if m.state == StateStreaming || m.state == StateCancelling {
+				if cmd := m.cancel(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 				break
 			}
 			cmds = append(cmds, m.input.Update(msg))
@@ -242,7 +224,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
-			if m.state == stateStreaming {
+			if m.state == StateStreaming || m.state == StateCancelling {
 				break
 			}
 			text := m.input.Value()
@@ -267,8 +249,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chat.submit(text)
 			m.chat.GotoBottom()
 			m.lastPrompt = text
-			m.lastPromptNum = m.chat.promptNum
-			m.state = stateStreaming
+			m.state = StateStreaming
 			cmds = append(cmds, m.startStream(text))
 		case "up":
 			if m.picker.visible {
@@ -304,9 +285,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.autocomplete.setQuery(m.input.Value())
 
 	case streamEventMsg:
+		if m.state == StateCancelling {
+			m.state = StateReady
+		}
 		if msg.err != nil {
-			m.err = msg.err
-			m.state = stateError
+			m.state = StateError
+			m.events = nil
 			m.chat.appendError(msg.err.Error())
 			break
 		}
@@ -315,29 +299,26 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if wasAtBottom {
 			m.chat.GotoBottom()
 		}
-		m.lastKind = msg.ev.Kind
 		if msg.done {
-			m.state = stateReady
+			m.state = StateReady
+			drainEvents(m.events)
 			m.events = nil
 		} else if msg.ev.Kind == json_rpc.EventMessage {
 			if isAbortMessage(msg.ev.Data) {
-				m.state = stateError
+				m.state = StateError
 			}
 		} else if msg.ev.Kind == json_rpc.EventCustom {
 			if isAbortCustom(msg.ev.Data) {
-				m.state = stateError
+				m.state = StateError
 			}
 		}
 		if m.events != nil {
-			cmds = append(cmds, m.readNextEvent())
-		}
-		if m.events != nil {
+			m.readsScheduledThisUpdate++
 			cmds = append(cmds, m.readNextEvent())
 		}
 
 	case errMsg:
-		m.err = msg.err
-		m.state = stateError
+		m.state = StateError
 		m.chat.appendError(msg.err.Error())
 
 	case sessionPickerMsg:
@@ -355,7 +336,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case promptDoneMsg:
-		m.state = stateReady
+		m.state = StateReady
 	}
 
 	m.layout()
@@ -452,9 +433,22 @@ func (m *Model) readNextEvent() tea.Cmd {
 	}
 }
 
+func drainEvents(ch <-chan agentclient.Event) {
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		default:
+			return
+		}
+	}
+}
+
 func NewModelForTest() *Model {
 	m := &Model{
-		state:        stateReady,
+		state:        StateReady,
 		chat:         newChatModel(),
 		input:        newInputModel(),
 		autocomplete: newAutocompleteModel(),
@@ -482,6 +476,10 @@ func (m *Model) InputValueForTest() string { return m.input.Value() }
 
 func (m *Model) AutocompleteViewForTest() string { return m.autocomplete.View() }
 
+func (m *Model) ReadsScheduledThisUpdateForTest() int { return m.readsScheduledThisUpdate }
+
+func (m *Model) EventsForTest() <-chan agentclient.Event { return m.events }
+
 func (m *Model) shutdown() {
 	if m.conn != nil {
 		m.conn.Close()
@@ -499,22 +497,19 @@ func (m *Model) shutdown() {
 	}
 }
 
-func (m *Model) cancel() {
+func (m *Model) cancel() tea.Cmd {
 	if m.conn != nil {
 		if err := m.conn.Cancel(context.Background()); err != nil {
 			m.chat.appendError("cancel: " + err.Error())
 		}
 	}
+	drainEvents(m.events)
 	m.chat.appendSystem(systemPrefix.Render(" cancelled by user"))
-	m.state = stateReady
-	m.events = nil
-}
-
-func (m *Model) submit(text string) tea.Cmd {
-	m.state = stateStreaming
-	m.chat.submit(text)
-	m.chat.GotoBottom()
-	return m.startStream(text)
+	m.state = StateCancelling
+	if m.events != nil {
+		return m.readNextEvent()
+	}
+	return nil
 }
 
 type promptDoneMsg struct{}
@@ -552,9 +547,9 @@ func RenderHeaderWithPromptForTest(width int, status, lastPrompt, sessionID stri
 
 func (m *Model) statusRender() string {
 	switch m.state {
-	case stateStreaming:
+	case StateStreaming:
 		return m.spinner.View() + " " + m.state.String()
-	case stateError:
+	case StateError:
 		return statusErr.Render("● ") + m.state.String()
 	default:
 		return statusOK.Render("● ") + m.state.String()
