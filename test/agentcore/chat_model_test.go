@@ -110,14 +110,20 @@ func TestAppendToolTextMatchesLegacyFormat(t *testing.T) {
 	part := json_rpc.MessageContentPart{
 		Type:      "toolCall",
 		Name:      "bash",
-		Intent:    "list /tmp",
-		Arguments: json.RawMessage(`{"path":"/tmp"}`),
+		Intent:    "list /dagger",
+		Arguments: json.RawMessage(`{"path":"/dagger"}`),
 	}
 	tui.AppendToolForTest(m, part)
 	last := tui.LastChatMsgForTest(m)
-	want := "list /tmp · bash({\"path\":\"/tmp\"})"
-	if last.Text != want {
-		t.Errorf("AppendTool text = %q, want %q (zero render regression)", last.Text, want)
+	if last.Text != "" {
+		t.Errorf("AppendTool text = %q, want empty (new format renders from ToolData)", last.Text)
+	}
+	lines := tui.RenderMsgForTest(last, 80)
+	combined := strings.Join(lines, "\n")
+	for _, want := range []string{"list /dagger", "bash", "/dagger"} {
+		if !strings.Contains(combined, want) {
+			t.Errorf("rendered output missing %q, got %q", want, combined)
+		}
 	}
 }
 
@@ -130,16 +136,20 @@ func TestAppendToolTextMatchesWithoutIntent(t *testing.T) {
 	}
 	tui.AppendToolForTest(m, part)
 	last := tui.LastChatMsgForTest(m)
-	want := "bash({\"path\":\"/tmp\"})"
-	if last.Text != want {
-		t.Errorf("AppendTool text (no intent) = %q, want %q", last.Text, want)
+	if last.Text != "" {
+		t.Errorf("AppendTool text (no intent) = %q, want empty", last.Text)
+	}
+	lines := tui.RenderMsgForTest(last, 80)
+	combined := strings.Join(lines, "\n")
+	if !strings.Contains(combined, "bash") {
+		t.Errorf("rendered output missing %q, got %q", "bash", combined)
 	}
 }
 
 func TestAppendToolRenderUsesCardPathWhenToolDataPopulated(t *testing.T) {
 	legacy := tui.RenderMsgForTest(tui.ChatMsg{
 		Role: tui.RoleTool,
-		Text: "list /tmp · bash({\"path\":\"/tmp\"})",
+		Text: "list /dagger · bash({\"path\":\"/dagger\"})",
 	}, 80)
 	if len(legacy) == 0 {
 		t.Fatal("legacy render produced zero lines; cannot compare")
@@ -149,15 +159,15 @@ func TestAppendToolRenderUsesCardPathWhenToolDataPopulated(t *testing.T) {
 	part := json_rpc.MessageContentPart{
 		Type:      "toolCall",
 		Name:      "bash",
-		Intent:    "list /tmp",
-		Arguments: json.RawMessage(`{"path":"/tmp"}`),
+		Intent:    "list /dagger",
+		Arguments: json.RawMessage(`{"path":"/dagger"}`),
 	}
 	tui.AppendToolForTest(m, part)
 	last := tui.LastChatMsgForTest(m)
 
 	card := tui.RenderMsgForTest(last, 80)
-	if len(card) <= len(legacy) {
-		t.Fatalf("card render must produce more lines than legacy: legacy=%d card=%d",
+	if len(card) < len(legacy) {
+		t.Fatalf("card render must produce at least as many lines as legacy: legacy=%d card=%d",
 			len(legacy), len(card))
 	}
 }

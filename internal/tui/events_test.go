@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -38,6 +39,11 @@ func TestHandleServerEventMessageWithThinkingAndTextAndToolCall(t *testing.T) {
 
 func TestHandleServerEventToolResultAppearsAsObserve(t *testing.T) {
 	c := newTestChatModel()
+	c.appendTool(json_rpc.MessageContentPart{
+		Type:      "toolCall",
+		Name:      "bash",
+		Arguments: json.RawMessage(`{"command":"date"}`),
+	})
 	data := []byte(`{
 		"id":"0190a3b7-0001-7c8a-9000-000000000002",
 		"parentId":"call-abc",
@@ -50,14 +56,27 @@ func TestHandleServerEventToolResultAppearsAsObserve(t *testing.T) {
 		"stopReason":"toolUse"
 	}`)
 	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	last := c.messages[len(c.messages)-1]
-	if last.role != roleObserve {
-		t.Errorf("expected roleObserve, got %v", last.role)
+	if len(c.messages) != 1 {
+		t.Fatalf("expected tool call entry merged with result (1 message), got %d", len(c.messages))
+	}
+	if c.messages[0].role != roleTool {
+		t.Errorf("expected roleTool, got %v", c.messages[0].role)
+	}
+	if c.messages[0].result != "Wed Sep 23 14:00" {
+		t.Errorf("expected tool result to be merged into call, got %q", c.messages[0].result)
+	}
+	if c.messages[0].resultFailed {
+		t.Errorf("expected resultFailed to be false, got true")
 	}
 }
 
 func TestHandleServerEventToolResultErrorAppearsAsError(t *testing.T) {
 	c := newTestChatModel()
+	c.appendTool(json_rpc.MessageContentPart{
+		Type:      "toolCall",
+		Name:      "bash",
+		Arguments: json.RawMessage(`{"command":"false"}`),
+	})
 	data := []byte(`{
 		"id":"0190a3b7-0001-7c8a-9000-000000000003",
 		"timestamp":"2026-09-23T13:00:00.000Z",
@@ -68,9 +87,14 @@ func TestHandleServerEventToolResultErrorAppearsAsError(t *testing.T) {
 		"details":{"toolName":"bash","error":"boom"}
 	}`)
 	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	last := c.messages[len(c.messages)-1]
-	if last.role != roleError {
-		t.Errorf("expected roleError, got %v", last.role)
+	if len(c.messages) != 1 {
+		t.Fatalf("expected tool call entry merged with error (1 message), got %d", len(c.messages))
+	}
+	if c.messages[0].role != roleTool {
+		t.Errorf("expected roleTool, got %v", c.messages[0].role)
+	}
+	if !c.messages[0].resultFailed {
+		t.Errorf("expected resultFailed to be true after tool error")
 	}
 }
 
@@ -85,7 +109,7 @@ func TestHandleServerEventCustomToolErrorAppendsError(t *testing.T) {
 	handleServerEvent(c, new(string), agentclient.Event{Kind: "custom", Data: data})
 	last := c.messages[len(c.messages)-1]
 	if last.role != roleError {
-		t.Errorf("expected roleError, got %v", last.role)
+		t.Errorf("expected roleError when no running tool, got %v", last.role)
 	}
 }
 

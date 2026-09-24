@@ -27,9 +27,11 @@ func TestRenderMsgToolCardHasMultipleLines(t *testing.T) {
 		Text:     "test · bash({})",
 		ToolData: part,
 	}, 80)
-	if len(card) <= len(legacy) {
-		t.Errorf("card render should produce more lines than legacy single-line: legacy=%d card=%d",
-			len(legacy), len(card))
+	if len(card) < 1 {
+		t.Errorf("card render must produce at least one line, got %d", len(card))
+	}
+	if len(legacy) == 0 {
+		t.Errorf("legacy render must produce at least one line, got 0")
 	}
 }
 
@@ -69,9 +71,13 @@ func TestRenderMsgToolCardHasBorderedFrame(t *testing.T) {
 		Text:     "test · bash({})",
 		ToolData: part,
 	}, 80)
-	if len(lines) < 3 {
-		t.Fatalf("card should produce at least 3 lines (top border + body + bottom border), got %d: %v",
-			len(lines), lines)
+	if len(lines) < 1 {
+		t.Fatalf("card must produce at least one line, got 0")
+	}
+	for _, line := range lines {
+		if strings.ContainsRune(line, '\u2502') || strings.ContainsRune(line, '\u256d') || strings.ContainsRune(line, '\u256e') {
+			t.Errorf("flat row should not contain box-drawing border characters, got %q", line)
+		}
 	}
 }
 
@@ -88,8 +94,11 @@ func TestRenderMsgToolCardContainsGlyph(t *testing.T) {
 		ToolData: part,
 	}, 80)
 	combined := strings.Join(lines, "\n")
-	if !strings.Contains(combined, "⚙") {
-		t.Errorf("tool card should contain ⚙ glyph, got %q", combined)
+	hasIcon := strings.ContainsRune(combined, '\u2713') ||
+		strings.ContainsRune(combined, '\u25b8') ||
+		strings.ContainsRune(combined, '\u2717')
+	if !hasIcon {
+		t.Errorf("tool row should contain status icon (✓/▸/✗), got %q", combined)
 	}
 }
 
@@ -148,19 +157,19 @@ func TestRenderMsgToolExpandedShowsArgsPreview(t *testing.T) {
 		Type:      "toolCall",
 		Name:      "bash",
 		Intent:    "list",
-		Arguments: json.RawMessage(`{"path":"/tmp"}`),
+		Arguments: json.RawMessage(`{"command":"ls /tmp"}`),
 	}
 	lines := tui.RenderMsgForTest(tui.ChatMsg{
 		Role:     tui.RoleTool,
-		Text:     "list · bash({\"path\":\"/tmp\"})",
+		Text:     "list · bash({\"command\":\"ls /tmp\"})",
 		ToolData: part,
 	}, 80)
 	if len(lines) == 0 {
 		t.Fatal("expected at least one line")
 	}
 	combined := strings.Join(lines, "\n")
-	if !strings.Contains(combined, "/tmp") {
-		t.Errorf("expanded card should expose args preview, got %q", combined)
+	if !strings.Contains(combined, "ls /tmp") {
+		t.Errorf("expanded row should expose args preview, got %q", combined)
 	}
 }
 

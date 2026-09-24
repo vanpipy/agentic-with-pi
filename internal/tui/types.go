@@ -54,16 +54,18 @@ func (s State) String() string {
 func StateStreamingForTestValue() State { return StateStreaming }
 
 type chatMsg struct {
-	role      role
-	text      string
-	intent    string
-	duration  time.Duration
-	usage     *msgUsage
-	promptNum int
-	collapsed bool
-	title     string
-	toolCalls []string
-	toolData  *json_rpc.MessageContentPart
+	role         role
+	text         string
+	intent       string
+	duration     time.Duration
+	usage        *msgUsage
+	promptNum    int
+	collapsed    bool
+	title        string
+	toolCalls    []string
+	toolData     *json_rpc.MessageContentPart
+	result       string
+	resultFailed bool
 }
 
 type msgUsage struct {

@@ -71,6 +71,18 @@ var (
 	toolPrefix = lipgloss.NewStyle().Foreground(c.tool).Bold(true)
 	toolName   = lipgloss.NewStyle().Foreground(c.accent)
 
+	toolIntentStyle       = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
+	toolNameStyle         = lipgloss.NewStyle().Foreground(c.accent).Bold(true)
+	toolErrorNameStyle    = lipgloss.NewStyle().Foreground(c.error).Bold(true)
+	toolDimStyle          = lipgloss.NewStyle().Foreground(c.dim)
+	toolSuccessIconStyle  = lipgloss.NewStyle().Foreground(c.success).Bold(true)
+	toolErrorIconStyle    = lipgloss.NewStyle().Foreground(c.error).Bold(true)
+	toolRunningIconStyle  = lipgloss.NewStyle().Foreground(c.accent).Bold(true)
+	toolTokenNormalStyle  = lipgloss.NewStyle().Foreground(c.dim)
+	toolTokenWarningStyle = lipgloss.NewStyle().Foreground(c.warning)
+	toolTokenDangerStyle  = lipgloss.NewStyle().Foreground(c.error)
+	toolErrorPreviewStyle = lipgloss.NewStyle().Foreground(c.error)
+
 	toolCard = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(c.border).

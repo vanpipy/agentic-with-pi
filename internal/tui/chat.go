@@ -99,8 +99,8 @@ func linesCacheKey(m chatMsg, width int) string {
 	if m.usage != nil {
 		usageStr = fmt.Sprintf("%d,%d,%d", m.usage.prompt, m.usage.completion, m.usage.total)
 	}
-	return fmt.Sprintf("%d|%d|%v|%v|%d|%d|%s|%s|%s",
-		width, m.role, m.collapsed, hasTool, m.promptNum, m.duration, m.text, m.intent, usageStr)
+	return fmt.Sprintf("%d|%d|%v|%v|%d|%d|%s|%s|%s|%s|%v",
+		width, m.role, m.collapsed, hasTool, m.promptNum, m.duration, m.text, m.intent, usageStr, m.result, m.resultFailed)
 }
 
 type roleLayout struct {
@@ -115,7 +115,7 @@ func roleLayoutFor(r role) roleLayout {
 	case roleAssistant:
 		return roleLayout{body: aiText, glyph: " ✦ "}
 	case roleTool:
-		return roleLayout{body: lipgloss.NewStyle(), glyph: " ⚙ "}
+		return roleLayout{body: lipgloss.NewStyle(), glyph: "   "}
 	case roleObserve:
 		return roleLayout{body: lipgloss.NewStyle(), glyph: " ← "}
 	case roleError:
@@ -163,7 +163,16 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		return renderAssistantSegments(g.text, layout, width)
 	}
 	if g.role == roleTool && g.toolData != nil {
-		return renderToolCard(g.toolData, g.collapsed, g.duration, width)
+		status := toolRunning
+		switch {
+		case g.resultFailed:
+			status = toolFailed
+		case g.result != "":
+			status = toolSuccess
+		}
+		row := renderToolRow(g.toolData, status, g.result, width)
+		preview := renderToolResultPreview(g.result, g.collapsed, g.resultFailed, width)
+		return append(row, preview...)
 	}
 	if g.role == roleThinking && g.collapsed {
 		dur := g.duration.Round(time.Second)
@@ -180,40 +189,6 @@ func (g chatMsg) body(layout roleLayout, width int) []string {
 		return wrapRender(layout.body.Width(width), "▸ "+truncateMid(summary, 60))
 	}
 	return wrapRender(layout.body.Width(width), g.text)
-}
-
-func renderToolCard(td *json_rpc.MessageContentPart, collapsed bool, dur time.Duration, width int) []string {
-	if width < 8 {
-		width = 8
-	}
-	var body strings.Builder
-	body.WriteString(toolCardHeader(td, dur))
-	body.WriteByte('\n')
-	if collapsed {
-		body.WriteString("▸ result")
-	} else {
-		body.WriteString(toolCardArgs.Render(tools.TruncateMiddle(string(td.Arguments), 60)))
-	}
-	rendered := toolCard.Width(width).Render(body.String())
-	if rendered == "" {
-		return nil
-	}
-	return strings.Split(strings.TrimRight(rendered, "\n"), "\n")
-}
-
-func toolCardHeader(td *json_rpc.MessageContentPart, dur time.Duration) string {
-	var b strings.Builder
-	b.WriteString("⚙ ")
-	if td.Intent != "" {
-		b.WriteString(td.Intent)
-		b.WriteString("  ")
-	}
-	b.WriteString(td.Name)
-	if dur > 0 {
-		b.WriteString("  ")
-		b.WriteString(durationHint.Render("⏱ " + dur.Round(time.Millisecond).String()))
-	}
-	return b.String()
 }
 
 func truncateMid(s string, max int) string {
@@ -834,10 +809,8 @@ func (c *chatModel) appendReasoning(text string) {
 }
 
 func (c *chatModel) appendTool(part json_rpc.MessageContentPart) {
-	prefix := intentPrefix(part.Intent)
 	c.messages = append(c.messages, chatMsg{
 		role:     roleTool,
-		text:     fmt.Sprintf("%s%s(%s)", prefix, part.Name, string(part.Arguments)),
 		toolData: &part,
 	})
 	c.refresh()
@@ -853,14 +826,27 @@ func shouldCollapseResult(result string) bool {
 	return false
 }
 
-func intentPrefix(intent string) string {
-	if intent == "" {
-		return ""
+func (c *chatModel) lastRunningTool() int {
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		m := c.messages[i]
+		if m.role != roleTool {
+			continue
+		}
+		if m.result == "" && !m.resultFailed {
+			return i
+		}
 	}
-	return intent + " · "
+	return -1
 }
 
 func (c *chatModel) appendObserve(text, intent string) {
+	if idx := c.lastRunningTool(); idx >= 0 {
+		c.messages[idx].result = text
+		c.messages[idx].resultFailed = tools.ToolOutputLooksFailed(text)
+		c.messages[idx].collapsed = shouldCollapseResult(text)
+		c.refresh()
+		return
+	}
 	preview := text
 	if tools.ToolOutputLooksFailed(text) {
 		if summary, ok := tools.ConciseToolErrorSummary(text); ok {
@@ -879,6 +865,13 @@ func (c *chatModel) appendObserve(text, intent string) {
 }
 
 func (c *chatModel) appendError(text string) {
+	if idx := c.lastRunningTool(); idx >= 0 {
+		c.messages[idx].result = text
+		c.messages[idx].resultFailed = true
+		c.messages[idx].collapsed = shouldCollapseResult(text)
+		c.refresh()
+		return
+	}
 	c.messages = append(c.messages, chatMsg{role: roleError, text: text})
 	c.refresh()
 }
@@ -924,45 +917,51 @@ func (c *chatModel) reset() {
 type Role = role
 
 type ChatMsg struct {
-	Role      Role
-	Text      string
-	Intent    string
-	Duration  time.Duration
-	Usage     *msgUsage
-	PromptNum int
-	Collapsed bool
-	Title     string
-	ToolCalls []string
-	ToolData  *json_rpc.MessageContentPart
+	Role         Role
+	Text         string
+	Intent       string
+	Duration     time.Duration
+	Usage        *msgUsage
+	PromptNum    int
+	Collapsed    bool
+	Title        string
+	ToolCalls    []string
+	ToolData     *json_rpc.MessageContentPart
+	Result       string
+	ResultFailed bool
 }
 
 func toChatMsg(c ChatMsg) chatMsg {
 	return chatMsg{
-		role:      c.Role,
-		text:      c.Text,
-		intent:    c.Intent,
-		duration:  c.Duration,
-		usage:     c.Usage,
-		promptNum: c.PromptNum,
-		collapsed: c.Collapsed,
-		title:     c.Title,
-		toolCalls: c.ToolCalls,
-		toolData:  c.ToolData,
+		role:         c.Role,
+		text:         c.Text,
+		intent:       c.Intent,
+		duration:     c.Duration,
+		usage:        c.Usage,
+		promptNum:    c.PromptNum,
+		collapsed:    c.Collapsed,
+		title:        c.Title,
+		toolCalls:    c.ToolCalls,
+		toolData:     c.ToolData,
+		result:       c.Result,
+		resultFailed: c.ResultFailed,
 	}
 }
 
 func fromChatMsg(m chatMsg) ChatMsg {
 	return ChatMsg{
-		Role:      m.role,
-		Text:      m.text,
-		Intent:    m.intent,
-		Duration:  m.duration,
-		Usage:     m.usage,
-		PromptNum: m.promptNum,
-		Collapsed: m.collapsed,
-		Title:     m.title,
-		ToolCalls: m.toolCalls,
-		ToolData:  m.toolData,
+		Role:         m.role,
+		Text:         m.text,
+		Intent:       m.intent,
+		Duration:     m.duration,
+		Usage:        m.usage,
+		PromptNum:    m.promptNum,
+		Collapsed:    m.collapsed,
+		Title:        m.title,
+		ToolCalls:    m.toolCalls,
+		ToolData:     m.toolData,
+		Result:       m.result,
+		ResultFailed: m.resultFailed,
 	}
 }
 
@@ -1062,6 +1061,18 @@ func ChatMsgFromTest(c ChatMsg) ChatMsg {
 
 func AppendToolForTest(t ChatModelT, part json_rpc.MessageContentPart) {
 	t.model.appendTool(part)
+}
+
+func AppendObserveForTest(t ChatModelT, text, intent string) {
+	t.model.appendObserve(text, intent)
+}
+
+func RenderLastMessageForTest(t ChatModelT, width int) []string {
+	c := t.model
+	if len(c.messages) == 0 {
+		return nil
+	}
+	return c.renderedLines(c.messages[len(c.messages)-1], width)
 }
 
 func LastChatMsgForTest(t ChatModelT) ChatMsg {
