@@ -26,7 +26,7 @@ func TestSlashNewUnchangedAfterSkillWiring(t *testing.T) {
 
 func TestSlashUnknownCommandStillErrorsAfterSkillWiring(t *testing.T) {
 	m := tui.NewModelForTest()
-	tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(nil)
 
 	before := len(m.ChatMessagesForTest())
 	quit, _ := tui.ExecuteCommandForTest(m, "/nosuchcmd")
@@ -50,8 +50,8 @@ func TestSkillMatchSubmitsRenderedPrompt(t *testing.T) {
 			},
 		},
 	}
-	tui.SetSkillRegistryForTest(reg)
-	defer tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
 
 	before := len(m.ChatMessagesForTest())
 
@@ -81,8 +81,8 @@ func TestSkillMatchQuotedPromptUnquoted(t *testing.T) {
 			"foo": {Name: "foo", Description: "d", Content: "CONTENT"},
 		},
 	}
-	tui.SetSkillRegistryForTest(reg)
-	defer tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
 
 	_, _ = tui.ExecuteCommandForTest(m, `/foo "quoted prompt"`)
 
@@ -109,8 +109,8 @@ func TestSkillDoesNotChangeLastPrompt(t *testing.T) {
 			"foo": {Name: "foo", Description: "d", Content: "C"},
 		},
 	}
-	tui.SetSkillRegistryForTest(reg)
-	defer tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
 
 	_, _ = tui.ExecuteCommandForTest(m, "/foo whatever")
 
@@ -127,8 +127,8 @@ func TestSkillLongestPrefixPreferredOverBuiltinMiss(t *testing.T) {
 			"foo deep": {Name: "foo deep", Content: "LONG"},
 		},
 	}
-	tui.SetSkillRegistryForTest(reg)
-	defer tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
 
 	_, _ = tui.ExecuteCommandForTest(m, "/foo deep my prompt")
 
@@ -148,8 +148,8 @@ func TestSkillMatchWithoutUserArgSubmitsContentOnly(t *testing.T) {
 			"foo": {Name: "foo", Content: "ONLY_CONTENT"},
 		},
 	}
-	tui.SetSkillRegistryForTest(reg)
-	defer tui.SetSkillRegistryForTest(nil)
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
 
 	_, _ = tui.ExecuteCommandForTest(m, "/foo")
 

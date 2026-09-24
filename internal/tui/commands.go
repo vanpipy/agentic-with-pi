@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -179,8 +181,38 @@ func AllCommandSpecsForTest() []CommandSpec {
 
 var skillRegistry *skills.Registry
 
-func SetSkillRegistryForTest(r *skills.Registry) {
+func SetSkillRegistry(r *skills.Registry) {
 	skillRegistry = r
+}
+
+func SkillRegistryForTest() *skills.Registry {
+	return skillRegistry
+}
+
+func LoadSkillsForCwdForTest(cwd, homeDir string) {
+	loadSkillsForCwd(cwd, homeDir)
+}
+
+func loadSkillsForCwd(cwd, homeDir string) {
+	reg, err := skills.LoadForCwd(cwd, homeDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "skills: load failed: %v\n", err)
+		SetSkillRegistry(nil)
+		return
+	}
+	SetSkillRegistry(reg)
+	fmt.Fprintf(os.Stderr, "skills: loaded %d (", len(reg.Skills))
+	for i, name := range reg.Names() {
+		if i > 0 {
+			fmt.Fprint(os.Stderr, ", ")
+		}
+		fmt.Fprintf(os.Stderr, "/%s", name)
+	}
+	fmt.Fprint(os.Stderr, ")")
+	for _, e := range reg.Errors {
+		fmt.Fprintf(os.Stderr, "; %v", e)
+	}
+	fmt.Fprintln(os.Stderr)
 }
 
 func matchSkillFor(text string) (*skills.Skill, string, bool) {

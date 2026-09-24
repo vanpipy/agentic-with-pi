@@ -72,6 +72,12 @@ func Run() error {
 		fmt.Fprintln(os.Stderr, "log setup:", err)
 	}
 
+	if cwd, err := os.Getwd(); err == nil {
+		loadSkillsForCwd(cwd, paths.Home())
+	} else {
+		fmt.Fprintf(os.Stderr, "skills: getwd: %v\n", err)
+	}
+
 	clientPID := os.Getpid()
 	socket := paths.ClientSocketPath(clientPID)
 	pidFile := paths.ServerPidPath(clientPID)
