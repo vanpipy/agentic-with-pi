@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -130,6 +131,14 @@ type Agent struct {
 	currentToolCallID      string
 	ToolCacheSize          int
 	toolResultCache        *ToolResultCache
+	currentTurn            int
+	turnStartAt            time.Time
+	turnFirstChunkAt       time.Time
+	observedInputTokens    int
+	currentMsgs            []llm.Message
+	logFileOpened          bool
+	v3LogWriter            io.Writer
+	v3LogBuf               *bufio.Writer
 }
 
 type Strategy interface {
@@ -152,6 +161,7 @@ type Step struct {
 	ReasoningSig string
 	ToolCalls    []llm.ToolCall
 	Usage        *llm.Usage
+	FinishReason string
 }
 
 type ReActStrategy struct {
@@ -232,6 +242,7 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 			ReasoningSig: result.reasoningSig,
 			ToolCalls:    result.toolCalls,
 			Usage:        result.usage,
+			FinishReason: result.finishReason.String(),
 		}, nil
 	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) == 0:
 		emit(ctx, Event{Category: EventError, ToolError: "tool_use finish reason with no tool calls"})
@@ -239,9 +250,10 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 	case (result.finishReason == llm.FinishReasonStop || (result.finishReason == llm.FinishReasonLength && result.content != "")) && len(result.toolCalls) == 0:
 		emit(ctx, Event{Category: EventFinalAnswer, Content: result.content, Usage: result.usage})
 		return Step{
-			Kind:    StepFinal,
-			Content: result.content,
-			Usage:   result.usage,
+			Kind:         StepFinal,
+			Content:      result.content,
+			Usage:        result.usage,
+			FinishReason: result.finishReason.String(),
 		}, nil
 	}
 	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.finishReason, len(result.toolCalls))
@@ -462,17 +474,36 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 	const maxToolsPerTurn = 6
 	emit := a.bindEmit(ch)
 	for turn := 0; turn < a.SafetyNet; turn++ {
+		a.currentTurn = turn + 1
+		a.turnStartAt = time.Now()
+		a.turnFirstChunkAt = time.Time{}
+		a.currentMsgs = msgs
+		userMsgID := fmt.Sprintf("turn-%d", turn+1)
+		if last := lastUserMessageID(msgs); last != "" {
+			userMsgID = last
+		}
+		a.logMu.Lock()
+		a.writeTurnStartLocked(userMsgID)
+		a.logMu.Unlock()
+
 		settings := a.compaction
 		settings.MaxContextTokens = a.Model.MaxContextTokens
 		compacted, action, err := SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
 		if err != nil {
+			a.logMu.Lock()
+			a.writeErrorV3Locked("compaction", "", "compact: "+err.Error(), 0, false)
+			a.logMu.Unlock()
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
 			return
 		}
 		if action != ActionNone {
 			msgs = compacted
+			a.currentMsgs = msgs
 		}
 		step, err := a.strategy.Step(ctx, msgs, emit)
+		a.logMu.Lock()
+		a.writeTurnResponseEnded(step, a.turnStartAt, a.turnFirstChunkAt)
+		a.logMu.Unlock()
 		if err != nil {
 			return
 		}
@@ -481,26 +512,72 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 		}
 		toolCalls := step.ToolCalls
 		if len(toolCalls) > maxToolsPerTurn {
+			a.logMu.Lock()
+			a.writeErrorV3Locked("tool_invoke", "", fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn), 0, false)
+			a.logMu.Unlock()
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
 			toolCalls = toolCalls[:maxToolsPerTurn]
 		}
 		msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
+		a.currentMsgs = msgs
 		var ok bool
 		msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
 		if !ok {
 			return
 		}
+		a.currentMsgs = msgs
 		lastFailed := lastFailedToolError(msgs)
 		if abortErr := a.strategy.ShouldAbort(msgs, lastFailed); abortErr != nil {
+			a.logMu.Lock()
+			a.writeErrorV3Locked("tool_invoke", "", abortErr.Error(), 0, false)
+			a.logMu.Unlock()
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: abortErr.Error()})
 			return
 		}
 	}
+	a.logMu.Lock()
+	a.writeErrorV3Locked("safety_net", "", fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet), 0, false)
+	a.logMu.Unlock()
 	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet)})
+}
+
+func lastUserMessageID(msgs []llm.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == "user" {
+			return msgs[i].ToolCallID
+		}
+	}
+	return ""
+}
+
+func (a *Agent) writeTurnResponseEnded(step Step, startAt, firstChunkAt time.Time) {
+	finishReason := step.FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+	durMS := time.Since(startAt).Milliseconds()
+	var ttft *int64
+	if !firstChunkAt.IsZero() {
+		v := firstChunkAt.Sub(startAt).Milliseconds()
+		ttft = &v
+	}
+	var prompt, completion, total int
+	if step.Usage != nil {
+		prompt = step.Usage.PromptTokens
+		completion = step.Usage.CompletionTokens
+		total = step.Usage.TotalTokens
+	}
+	a.writeTurnResponseLocked(a.Model.ID, a.Model.Vendor, finishReason, durMS, ttft, prompt, completion, total)
+	if prompt > 0 {
+		a.observedInputTokens = prompt
+	}
 }
 
 func (a *Agent) bindEmit(ch chan<- Event) func(context.Context, Event) bool {
 	return func(ctx context.Context, ev Event) bool {
+		if ev.Category == EventThoughtChunk && a.turnFirstChunkAt.IsZero() {
+			a.turnFirstChunkAt = time.Now()
+		}
 		return a.emit(ctx, ch, ev)
 	}
 }
@@ -551,8 +628,19 @@ func (a *Agent) openLogLocked() {
 	a.LogWriter = f
 	a.logBuf = bufio.NewWriterSize(f, 4096)
 	a.writeHeaderLocked()
+	a.logFileOpened = true
 	_ = a.logBuf.Flush()
 	slog.Debug("agent: session log opened", "path", path)
+
+	v3Path := strings.TrimSuffix(path, ".jsonl") + ".v3.ndjson"
+	v3f, v3err := os.OpenFile(v3Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if v3err != nil {
+		slog.Debug("agent: v3 log open skipped", "path", v3Path, "err", v3err)
+	} else {
+		a.v3LogWriter = v3f
+		a.v3LogBuf = bufio.NewWriterSize(v3f, 4096)
+		slog.Debug("agent: v3 log opened", "path", v3Path)
+	}
 }
 
 type turnResult struct {
@@ -714,6 +802,9 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			if !a.emit(ctx, ch, Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: cached, ToolIntent: extractToolIntent(tc.Function.Arguments), FromCache: true}) {
 				return msgs, false
 			}
+			a.logMu.Lock()
+			a.writeToolDedupHitLocked(tc.Function.Name, sig, a.logSeq)
+			a.logMu.Unlock()
 			slog.Debug("agent: tool dedup hit", "tool", tc.Function.Name, "sig", sig[:8])
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(cached, tc.Function.Arguments, tc.Function.Name)})
 			continue

@@ -12,12 +12,13 @@ import (
 )
 
 type AftBackend struct {
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	reader *bufio.Reader
-	mu     sync.Mutex
-	nextID atomic.Int64
-	closed bool
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	reader  *bufio.Reader
+	mu      sync.Mutex
+	nextID  atomic.Int64
+	closed  bool
+	OnCrash func(msg string)
 }
 
 var (
@@ -25,6 +26,18 @@ var (
 	aftInst *AftBackend
 	aftErr  error
 )
+
+var aftCrashReporter = func(msg string) {}
+
+func SetAftCrashReporter(fn func(msg string)) {
+	if fn == nil {
+		fn = func(msg string) {}
+	}
+	aftCrashReporter = fn
+	if aftInst != nil && aftInst.OnCrash == nil {
+		aftInst.OnCrash = fn
+	}
+}
 
 func initAftBackend() {
 	if os.Getenv("AWP_NO_AFT") == "1" {
@@ -41,6 +54,9 @@ func initAftBackend() {
 		binPath = resolved
 	}
 	aftInst, aftErr = NewAftBackend(binPath)
+	if aftInst != nil && aftInst.OnCrash == nil {
+		aftInst.OnCrash = aftCrashReporter
+	}
 }
 
 func AftBackendForTest() (*AftBackend, bool) {
@@ -115,12 +131,18 @@ func (a *AftBackend) call(name string, params map[string]any, nested bool) (stri
 		return "", fmt.Errorf("aft backend closed")
 	}
 	if _, err := a.stdin.Write(append(b, '\n')); err != nil {
+		if a.OnCrash != nil {
+			a.OnCrash("aft write: " + err.Error())
+		}
 		return "", fmt.Errorf("aft write: %w", err)
 	}
 
 	for {
 		line, err := a.reader.ReadBytes('\n')
 		if err != nil {
+			if a.OnCrash != nil {
+				a.OnCrash("aft read: " + err.Error())
+			}
 			return "", fmt.Errorf("aft read: %w", err)
 		}
 		var resp map[string]any

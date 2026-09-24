@@ -417,6 +417,16 @@ func (a *Agent) flushLog() {
 		f.Close()
 		a.LogWriter = nil
 	}
+	if a.v3LogBuf != nil {
+		if err := a.v3LogBuf.Flush(); err != nil {
+			slog.Debug("agent: v3 log flush failed", "err", err)
+		}
+		a.v3LogBuf = nil
+	}
+	if f, ok := a.v3LogWriter.(*os.File); ok {
+		f.Close()
+		a.v3LogWriter = nil
+	}
 }
 
 func categoryName(c EventCategory) string {

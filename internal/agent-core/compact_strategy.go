@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -73,6 +74,8 @@ func runReactiveCompaction(ctx context.Context, a *Agent, msgs []llm.Message, pr
 	if len(msgs) == 0 {
 		return msgs, nil
 	}
+
+	compactionStart := time.Now()
 
 	systemMsg := msgs[0]
 	restMsgs := msgs[1:]
@@ -156,6 +159,8 @@ func runReactiveCompaction(ctx context.Context, a *Agent, msgs []llm.Message, pr
 		FirstKeptSeq:    a.logSeq,
 		CompactionModel: a.Model.ID,
 	})
+	durMS := time.Since(compactionStart).Milliseconds()
+	a.writeCompactionV3Locked("reactive_threshold", "", string(StrategyReactive), tokensBefore, tokensAfter, a.logSeq, a.Model.ID, durMS)
 	if a.logBuf != nil {
 		_ = a.logBuf.Flush()
 	}
