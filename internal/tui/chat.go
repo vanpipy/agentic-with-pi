@@ -24,6 +24,7 @@ type chatModel struct {
 	promptNum       int
 	linesCache      map[string][]string
 	lineCountMisses int
+	refreshCount    int
 }
 
 func newChatModel() *chatModel {
@@ -57,6 +58,7 @@ func (c *chatModel) View() string {
 }
 
 func (c *chatModel) refresh() {
+	c.refreshCount++
 	c.linesCache = nil
 	c.viewport.SetContent(c.content())
 	if c.following {
@@ -71,12 +73,30 @@ func (c *chatModel) content() string {
 		lines = append(lines, c.renderedLines(m, width)...)
 	}
 	if c.reasoning.Len() > 0 {
-		lines = append(lines, renderThinking(c.reasoning.String(), width, false)...)
+		lines = append(lines, c.renderLiveReasoning(width)...)
 	}
 	if c.streaming.Len() > 0 {
 		lines = append(lines, renderAssistant(c.streaming.String(), width)...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+const (
+	liveReasoningCollapseLines = 8
+	liveReasoningKeepLines     = 3
+)
+
+func (c *chatModel) renderLiveReasoning(width int) []string {
+	text := c.reasoning.String()
+	if text == "" {
+		return nil
+	}
+	full := renderThinking(text, width, false)
+	if len(full) <= liveReasoningCollapseLines {
+		return full
+	}
+	summary := fmt.Sprintf("▸ thinking (%d more lines)", len(full)-liveReasoningKeepLines)
+	return append([]string{summary}, full[len(full)-liveReasoningKeepLines:]...)
 }
 
 func (c *chatModel) renderedLines(m chatMsg, width int) []string {
@@ -804,6 +824,12 @@ func (c *chatModel) appendStream(text string) {
 }
 
 func (c *chatModel) appendReasoning(text string) {
+	if text == "" {
+		return
+	}
+	if text == c.reasoning.String() {
+		return
+	}
 	c.reasoning.WriteString(text)
 	c.refresh()
 }
@@ -1045,6 +1071,47 @@ func (t ChatModelT) LineCountForTest(g ChatMsg) int {
 
 func (t ChatModelT) AppendStreamForTest(text string) {
 	t.model.appendStream(text)
+}
+
+func (t ChatModelT) AppendReasoningForTest(text string) {
+	t.model.appendReasoning(text)
+}
+
+func (t ChatModelT) CommitStreamForTest() {
+	t.model.commitStream()
+}
+
+func (t ChatModelT) DiscardStreamForTest() {
+	t.model.discardStream()
+}
+
+func (t ChatModelT) ReasoningLenForTest() int {
+	return t.model.reasoning.Len()
+}
+
+func (t ChatModelT) StreamingLenForTest() int {
+	return t.model.streaming.Len()
+}
+
+func (t ChatModelT) RefreshCountForTest() int {
+	return t.model.refreshCount
+}
+
+func (t ChatModelT) MessagesForTest() []ChatMsg {
+	out := make([]ChatMsg, len(t.model.messages))
+	for i, m := range t.model.messages {
+		out[i] = fromChatMsg(m)
+	}
+	return out
+}
+
+func (t ChatModelT) SetMessagesForTest(msgs []ChatMsg) {
+	out := make([]chatMsg, len(msgs))
+	for i, m := range msgs {
+		out[i] = toChatMsg(m)
+	}
+	t.model.messages = out
+	t.model.refresh()
 }
 
 func (t ChatModelT) LinesCacheSizeForTest() int {
