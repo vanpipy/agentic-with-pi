@@ -9,9 +9,12 @@ import (
 )
 
 type CompactionSettings struct {
-	Enabled         bool
-	ReserveTokens   int
-	KeepRecentTurns int
+	Enabled          bool
+	ReserveTokens    int
+	KeepRecentTurns  int
+	MaxContextTokens int
+	Proactive        bool
+	Semantic         bool
 }
 
 type Config struct {
