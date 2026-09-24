@@ -1012,6 +1012,10 @@ type ChatModelT struct {
 	model *chatModel
 }
 
+func (t ChatModelT) ViewForTest() string {
+	return t.model.View()
+}
+
 func (t ChatModelT) SubmitForTest(text string) {
 	t.model.submit(text)
 }

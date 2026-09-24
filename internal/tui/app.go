@@ -361,12 +361,7 @@ func (m *Model) View() tea.View {
 	footer := m.help.ShortHelpView(m.keys.ShortHelp())
 	footerLines := 1
 
-	popup := ""
-	if m.picker.visible {
-		popup = m.picker.View()
-	} else if m.autocomplete.visible {
-		popup = m.autocomplete.View()
-	}
+	popup := m.popupView()
 	popupLineCount := 0
 	if popup != "" {
 		popupLineCount = strings.Count(popup, "\n") + 1
@@ -405,13 +400,31 @@ func (m *Model) layout() {
 	}
 	footerLines := 1
 	staticLines := 1 + 1 + 1 + m.input.Height() + 1 + footerLines
-	bodyHeight := m.height - staticLines
+	bodyHeight := m.height - staticLines - m.popupLineCount()
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
 	m.chat.SetSize(m.width-4, bodyHeight)
 	m.help.SetWidth(m.width)
 	m.input.SetWidth(m.width - 2)
+}
+
+func (m *Model) popupView() string {
+	if m.picker.visible {
+		return m.picker.View()
+	}
+	if m.autocomplete.visible {
+		return m.autocomplete.View()
+	}
+	return ""
+}
+
+func (m *Model) popupLineCount() int {
+	p := m.popupView()
+	if p == "" {
+		return 0
+	}
+	return strings.Count(p, "\n") + 1
 }
 
 func (m *Model) startStream(text string) tea.Cmd {
@@ -495,6 +508,41 @@ func (m *Model) AutocompleteItemsForTest() []AutocompleteItemForTest {
 }
 
 func (m *Model) PickerVisibleForTest() bool { return m.picker.visible }
+
+func (m *Model) SetSizeForTest(w, h int) {
+	m.width = w
+	m.height = h
+	m.layout()
+}
+
+func (m *Model) ViewForTest() string {
+	return m.View().Content
+}
+
+func (m *Model) SubmitPromptForTest(text string) {
+	m.input.SetValue(text)
+	m.chat.submit(text)
+	m.lastPrompt = text
+}
+
+func (m *Model) EnterForTest(text string) {
+	m.input.SetValue(text)
+	m.input.Reset()
+	m.chat.submit(text)
+	m.lastPrompt = text
+}
+
+func (m *Model) InputHeightForTest() int {
+	return m.input.Height()
+}
+
+func (m *Model) InputAppendForTest(s string) {
+	v := m.input.Value() + s
+	m.input.SetValue(v)
+}
+
+func (m *Model) LayoutForTest()              { m.layout() }
+func (m *Model) AutocompleteRefreshForTest() { m.autocomplete.setQuery(m.input.Value()) }
 
 func (m *Model) PickerViewForTest() string { return m.picker.View() }
 
