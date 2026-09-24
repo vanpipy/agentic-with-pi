@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/ipc"
@@ -167,6 +168,41 @@ func (c *Client) ListSessions(ctx context.Context) ([]json_rpc.SessionSummary, e
 		return nil, fmt.Errorf("decode list_sessions: %w", err)
 	}
 	return out.Sessions, nil
+}
+
+func (c *Client) Compact(ctx context.Context, sessionID string, force bool) (json_rpc.CompactResult, error) {
+	deadline := time.Now().Add(60 * time.Second)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	_ = c.conn.SetDeadline(deadline)
+
+	req, err := json_rpc.NewRequest("1", json_rpc.MethodCompact, json_rpc.CompactParams{
+		SessionID: sessionID,
+		Force:     force,
+	})
+	if err != nil {
+		return json_rpc.CompactResult{}, fmt.Errorf("build compact request: %w", err)
+	}
+	if err := json_rpc.MarshalRequest(c.conn, req); err != nil {
+		return json_rpc.CompactResult{}, fmt.Errorf("send compact: %w", err)
+	}
+	resp, err := json_rpc.ReadEvent(c.reader)
+	_ = c.conn.SetDeadline(time.Time{})
+	if err != nil {
+		return json_rpc.CompactResult{}, fmt.Errorf("read compact: %w", err)
+	}
+	if resp.Event == json_rpc.EventError {
+		return json_rpc.CompactResult{}, fmt.Errorf("compact: %s", string(resp.Data))
+	}
+	if resp.Event != "compact_result" {
+		return json_rpc.CompactResult{}, fmt.Errorf("compact: unexpected event: %s", resp.Event)
+	}
+	var out json_rpc.CompactResult
+	if err := json.Unmarshal(resp.Data, &out); err != nil {
+		return json_rpc.CompactResult{}, fmt.Errorf("decode compact result: %w", err)
+	}
+	return out, nil
 }
 
 func (c *Client) Resume(ctx context.Context, sessionID string) (<-chan Event, error) {

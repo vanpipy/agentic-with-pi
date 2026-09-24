@@ -39,6 +39,8 @@ func (s *Server) dispatch(conn io.Writer, connCtx context.Context, req *json_rpc
 		s.handleCancel(conn, req)
 	case json_rpc.MethodListSessions:
 		s.handleListSessions(conn, req)
+	case json_rpc.MethodCompact:
+		s.handleCompact(conn, req)
 	default:
 		if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
 			"error": "unknown method: " + req.Method,
@@ -361,6 +363,66 @@ func (s *Server) handleCancel(conn io.Writer, req *json_rpc.Request) {
 	if err := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCancelAck, nil); err != nil {
 		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "cancel_ack", "err", err)
 	}
+}
+
+func (s *Server) handleCompact(conn io.Writer, req *json_rpc.Request) {
+	var params json_rpc.CompactParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
+			"error": "invalid params",
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "compact_invalid_params", "err", mErr)
+		}
+		return
+	}
+	if params.SessionID == "" {
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
+			"error": "session_id required",
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "compact_missing_session", "err", mErr)
+		}
+		return
+	}
+
+	if !s.compactSessionExists(params.SessionID) {
+		if mErr := json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventError, map[string]string{
+			"error": "session not found: " + params.SessionID,
+		}); mErr != nil {
+			slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "compact_not_found", "err", mErr)
+		}
+		return
+	}
+
+	strategy := "reactive"
+	if params.Force {
+		strategy = "forced"
+	}
+
+	_ = json_rpc.MarshalEvent(conn, req.ID, json_rpc.EventCustom, json_rpc.CustomEvent{
+		ID:         json_rpc.NewV7(),
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		CustomType: "compaction_requested",
+		Data:       json.RawMessage(fmt.Sprintf(`{"session_id":%q,"strategy":%q,"force":%t}`, params.SessionID, strategy, params.Force)),
+	})
+
+	result := json_rpc.CompactResult{
+		Triggered:    false,
+		Strategy:     strategy,
+		TokensBefore: 0,
+		TokensAfter:  0,
+		DurationMS:   0,
+	}
+	if err := json_rpc.MarshalEvent(conn, req.ID, "compact_result", result); err != nil {
+		slog.Debug("server: marshal event failed", "req_id", req.ID, "method", req.Method, "stage", "compact_result", "err", err)
+	}
+}
+
+func (s *Server) compactSessionExists(sessionID string) bool {
+	if _, ok := s.sessionStates.snapshot(sessionID); ok {
+		return true
+	}
+	loaded, err := Load(DefaultPath(paths.SessionsDir(), sessionID))
+	return err == nil && loaded != nil
 }
 
 type wireEmit struct {

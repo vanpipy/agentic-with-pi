@@ -282,6 +282,76 @@ func TestCustomMessageEventRoundtrip(t *testing.T) {
 	}
 }
 
+func TestCompactParamsRoundtrip(t *testing.T) {
+	params := CompactParams{SessionID: "abc-123", Force: true}
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"session_id":"abc-123","force":true}`
+	if string(data) != want {
+		t.Fatalf("CompactParams marshal mismatch:\nwant %q\ngot  %q", want, data)
+	}
+	var back CompactParams
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.SessionID != params.SessionID || back.Force != params.Force {
+		t.Fatalf("roundtrip mismatch: want %+v got %+v", params, back)
+	}
+}
+
+func TestCompactParamsForceOmittedWhenFalse(t *testing.T) {
+	params := CompactParams{SessionID: "sess"}
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"force":`) {
+		t.Fatalf("expected force omitted when false, got %q", data)
+	}
+	want := `{"session_id":"sess"}`
+	if string(data) != want {
+		t.Fatalf("marshal mismatch:\nwant %q\ngot  %q", want, data)
+	}
+}
+
+func TestCompactResultRoundtrip(t *testing.T) {
+	res := CompactResult{
+		Triggered:    true,
+		Strategy:     "forced",
+		TokensBefore: 12000,
+		TokensAfter:  4200,
+		DurationMS:   1500,
+	}
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	want := `{"triggered":true,"strategy":"forced","tokens_before":12000,"tokens_after":4200,"duration_ms":1500}`
+	if string(data) != want {
+		t.Fatalf("CompactResult marshal mismatch:\nwant %q\ngot  %q", want, data)
+	}
+	var back CompactResult
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back != res {
+		t.Fatalf("roundtrip mismatch: want %+v got %+v", res, back)
+	}
+}
+
+func TestCompactResultStrategyOmittedWhenEmpty(t *testing.T) {
+	res := CompactResult{Triggered: false, TokensBefore: 1, TokensAfter: 1, DurationMS: 0}
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"strategy":`) {
+		t.Fatalf("expected strategy omitted when empty, got %q", data)
+	}
+}
+
 func TestCustomMessageEventDisplayFalseOmitted(t *testing.T) {
 	ev := CustomMessageEvent{
 		ID:         "cm-1",
