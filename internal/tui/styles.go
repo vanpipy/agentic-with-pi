@@ -101,4 +101,6 @@ var (
 
 	thinkingCollapsed = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
 	thinkingExpanded  = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
+
+	imagePlaceholder = lipgloss.NewStyle().Foreground(c.dim)
 )
