@@ -11,7 +11,7 @@ import (
 func NewRequest(id, method string, params any) (*Request, error) {
 	var raw json.RawMessage
 	if params != nil {
-		b, err := json.Marshal(params)
+		b, err := marshalNoHTMLEscape(params)
 		if err != nil {
 			return nil, fmt.Errorf("marshal params: %w", err)
 		}
@@ -26,7 +26,7 @@ func NewRequest(id, method string, params any) (*Request, error) {
 }
 
 func MarshalRequest(w io.Writer, req *Request) error {
-	b, err := json.Marshal(req)
+	b, err := marshalNoHTMLEscape(req)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func ReadRequest(r *bufio.Reader) (*Request, error) {
 func MarshalEvent(w io.Writer, id, event string, data any) error {
 	var raw json.RawMessage
 	if data != nil {
-		b, err := json.Marshal(data)
+		b, err := marshalNoHTMLEscape(data)
 		if err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ func MarshalEvent(w io.Writer, id, event string, data any) error {
 		Event:   event,
 		Data:    raw,
 	}
-	b, err := json.Marshal(resp)
+	b, err := marshalNoHTMLEscape(resp)
 	if err != nil {
 		return err
 	}
@@ -96,4 +96,18 @@ func ReadEvent(r *bufio.Reader) (*Response, error) {
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
 	return &resp, nil
+}
+
+func marshalNoHTMLEscape(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	out := buf.Bytes()
+	if n := len(out); n > 0 && out[n-1] == '\n' {
+		out = out[:n-1]
+	}
+	return out, nil
 }
