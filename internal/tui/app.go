@@ -473,6 +473,27 @@ func NewModelForTest() *Model {
 
 func (m *Model) AutocompleteVisibleForTest() bool { return m.autocomplete.visible }
 
+type AutocompleteItemForTest struct {
+	Title       string
+	Description string
+	Category    string
+}
+
+func (m *Model) AutocompleteItemsForTest() []AutocompleteItemForTest {
+	if m == nil || m.autocomplete == nil {
+		return nil
+	}
+	out := make([]AutocompleteItemForTest, 0, len(m.autocomplete.all))
+	for _, item := range m.autocomplete.all {
+		out = append(out, AutocompleteItemForTest{
+			Title:       item.title,
+			Description: item.description,
+			Category:    item.category,
+		})
+	}
+	return out
+}
+
 func (m *Model) PickerVisibleForTest() bool { return m.picker.visible }
 
 func (m *Model) PickerViewForTest() string { return m.picker.View() }

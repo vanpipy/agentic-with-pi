@@ -257,6 +257,7 @@ func (m *Model) executeSkill(skill *skills.Skill, userPrompt string) (bool, tea.
 	}
 	m.chat.submit(rendered)
 	m.chat.GotoBottom()
+	m.lastPrompt = rendered
 	m.state = StateStreaming
 	return false, m.startStream(rendered)
 }

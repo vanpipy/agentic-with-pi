@@ -98,24 +98,43 @@ func TestSkillMatchQuotedPromptUnquoted(t *testing.T) {
 	}
 }
 
-func TestSkillDoesNotChangeLastPrompt(t *testing.T) {
+func TestSkillSetsLastPromptToRendered(t *testing.T) {
 	m := tui.NewModelForTest()
-	m.LastPromptForTest() // ensure exists
-	original := "before skill"
-	tui.SetLastPromptForTest(m, original)
-
 	reg := &skills.Registry{
 		Skills: map[string]*skills.Skill{
-			"foo": {Name: "foo", Description: "d", Content: "C"},
+			"foo": {Name: "foo", Description: "d", Content: "BODY"},
 		},
 	}
 	tui.SetSkillRegistry(reg)
 	defer tui.SetSkillRegistry(nil)
 
+	tui.SetLastPromptForTest(m, "")
+
 	_, _ = tui.ExecuteCommandForTest(m, "/foo whatever")
 
-	if got := m.LastPromptForTest(); got != original {
-		t.Errorf("lastPrompt must NOT change on skill invocation, got %q, want %q", got, original)
+	want := "[skill: foo]\n\nBODY\n\nwhatever"
+	if got := m.LastPromptForTest(); got != want {
+		t.Errorf("lastPrompt = %q, want %q", got, want)
+	}
+}
+
+func TestSkillSetsLastPromptWithoutUserArg(t *testing.T) {
+	m := tui.NewModelForTest()
+	reg := &skills.Registry{
+		Skills: map[string]*skills.Skill{
+			"foo": {Name: "foo", Description: "d", Content: "BODY"},
+		},
+	}
+	tui.SetSkillRegistry(reg)
+	defer tui.SetSkillRegistry(nil)
+
+	tui.SetLastPromptForTest(m, "")
+
+	_, _ = tui.ExecuteCommandForTest(m, "/foo")
+
+	want := "[skill: foo]\n\nBODY"
+	if got := m.LastPromptForTest(); got != want {
+		t.Errorf("lastPrompt = %q, want %q", got, want)
 	}
 }
 

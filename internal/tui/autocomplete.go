@@ -134,12 +134,25 @@ func allCommands() []string {
 
 func commandsToItems() []commandItem {
 	specs := allCommandSpecs()
-	out := make([]commandItem, len(specs))
-	for i, s := range specs {
-		out[i] = commandItem{
+	out := make([]commandItem, 0, len(specs)+8)
+	for _, s := range specs {
+		out = append(out, commandItem{
 			title:       s.Name,
 			description: s.Description,
 			category:    s.Category,
+		})
+	}
+	if reg := skillRegistry; reg != nil {
+		for _, name := range reg.Names() {
+			s, ok := reg.Get(name)
+			if !ok {
+				continue
+			}
+			out = append(out, commandItem{
+				title:       name,
+				description: s.Description,
+				category:    "skill",
+			})
 		}
 	}
 	return out
