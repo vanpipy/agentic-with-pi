@@ -462,13 +462,14 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 	const maxToolsPerTurn = 6
 	emit := a.bindEmit(ch)
 	for turn := 0; turn < a.SafetyNet; turn++ {
-		if ShouldCompactWithModel(msgs, a.Model, a.compaction) {
-			previousSummary := ExtractPreviousSummary(msgs)
-			compacted, err := a.compact(ctx, msgs, previousSummary)
-			if err != nil {
-				a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
-				return
-			}
+		settings := a.compaction
+		settings.MaxContextTokens = a.Model.MaxContextTokens
+		compacted, action, err := SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
+		if err != nil {
+			a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
+			return
+		}
+		if action != ActionNone {
 			msgs = compacted
 		}
 		step, err := a.strategy.Step(ctx, msgs, emit)
