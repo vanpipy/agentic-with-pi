@@ -6,6 +6,7 @@ const (
 	MethodCancel       = "cancel"
 	MethodPing         = "ping"
 	MethodListSessions = "list_sessions"
+	MethodCompact      = "compact"
 )
 
 const (
@@ -45,4 +46,17 @@ type ListSessionsParams struct{}
 
 type ListSessionsResult struct {
 	Sessions []SessionSummary `json:"sessions"`
+}
+
+type CompactParams struct {
+	SessionID string `json:"session_id"`
+	Force     bool   `json:"force,omitempty"`
+}
+
+type CompactResult struct {
+	Triggered    bool   `json:"triggered"`
+	Strategy     string `json:"strategy,omitempty"`
+	TokensBefore int    `json:"tokens_before"`
+	TokensAfter  int    `json:"tokens_after"`
+	DurationMS   int64  `json:"duration_ms"`
 }

@@ -343,6 +343,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case promptDoneMsg:
 		m.state = StateReady
+
+	case compactDoneMsg:
+		strategy := msg.result.Strategy
+		if strategy == "" {
+			strategy = "none"
+		}
+		text := fmt.Sprintf(" compaction done: strategy=%s, triggered=%t, tokens %d → %d in %dms",
+			strategy, msg.result.Triggered, msg.result.TokensBefore, msg.result.TokensAfter, msg.result.DurationMS)
+		m.chat.appendSystem(text)
 	}
 
 	m.layout()
