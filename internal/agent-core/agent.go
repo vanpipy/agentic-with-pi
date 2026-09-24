@@ -44,6 +44,7 @@ type Event struct {
 	ToolIntent string
 	ToolCalls  []llm.ToolCall
 	Usage      *llm.Usage
+	FromCache  bool
 
 	Summary         string
 	TokensBefore    int
@@ -127,6 +128,8 @@ type Agent struct {
 	currentParentID        string
 	currentStreamBuf       *StreamBuffer
 	currentToolCallID      string
+	ToolCacheSize          int
+	toolResultCache        *ToolResultCache
 }
 
 type Strategy interface {
@@ -337,7 +340,9 @@ func NewAgent(llmCore llm.Core) *Agent {
 			KeepRecentTurns: 5,
 		},
 		repeatedToolErrorLimit: 3,
+		ToolCacheSize:          20,
 	}
+	a.toolResultCache = NewToolResultCache(a.ToolCacheSize)
 	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
 	return a
 }
@@ -363,6 +368,15 @@ func (a *Agent) WithRepeatedToolErrorLimit(n int) *Agent {
 		n = 3
 	}
 	a.repeatedToolErrorLimit = n
+	return a
+}
+
+func (a *Agent) WithToolCacheSize(n int) *Agent {
+	if n <= 0 {
+		n = 20
+	}
+	a.ToolCacheSize = n
+	a.toolResultCache = NewToolResultCache(n)
 	return a
 }
 
@@ -694,6 +708,15 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed preflight validation", tc.Function.Name, tc.Function.Name))
 			return msgs, true
 		}
+		sig := toolCallDedupKey(tc.Function.Name, tc.Function.Arguments)
+		if cached, ok := a.toolResultCache.Get(sig); ok {
+			if !a.emit(ctx, ch, Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: cached, ToolIntent: extractToolIntent(tc.Function.Arguments), FromCache: true}) {
+				return msgs, false
+			}
+			slog.Debug("agent: tool dedup hit", "tool", tc.Function.Name, "sig", sig[:8])
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(cached, tc.Function.Arguments, tc.Function.Name)})
+			continue
+		}
 		if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, ToolIntent: extractToolIntent(tc.Function.Arguments)}) {
 			return msgs, false
 		}
@@ -718,6 +741,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			}
 			continue
 		}
+		a.toolResultCache.Put(sig, result)
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(result, tc.Function.Arguments, tc.Function.Name)})
 	}
 	return msgs, true
@@ -776,6 +800,17 @@ func acceptsLargeOutput(argsJSON string) bool {
 
 func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {
 	return a.executeTools(context.Background(), calls, msgs, nil)
+}
+
+func AgentExecuteToolsWithChanForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]Event, []llm.Message, bool) {
+	ch := make(chan Event, len(calls)*4+4)
+	updated, ok := a.executeTools(context.Background(), calls, msgs, ch)
+	close(ch)
+	var events []Event
+	for ev := range ch {
+		events = append(events, ev)
+	}
+	return events, updated, ok
 }
 
 func (a *Agent) findTool(name string) (Tool, bool) {
