@@ -114,6 +114,9 @@ func (a *Agent) writeEvent(seq int, ev Event) {
 		entry.Content = ev.Content
 	case EventError:
 		entry.ToolError = ev.ToolError
+		if ev.ToolName != "" {
+			entry.ToolName = ev.ToolName
+		}
 	case EventTool:
 		entry.ToolName = ev.ToolName
 		entry.ToolArgs = ev.ToolArgs
