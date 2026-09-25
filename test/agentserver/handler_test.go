@@ -15,9 +15,9 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
-type fakeCore struct{}
+type handlerFakeCore struct{}
 
-func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (f *handlerFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	ch := make(chan llm.StreamEvent, 1)
 	close(ch)
 	return ch, nil
@@ -27,7 +27,7 @@ func TestHandleCompactNoSession(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "c.sock")
 
-	ag := agentcore.NewAgent(&fakeCore{}).
+	ag := agentcore.NewAgent(&handlerFakeCore{}).
 		WithModel(llm.Model{ID: "test", SupportsTool: false})
 
 	s, err := agentserver.New(ag, socketPath)
@@ -77,7 +77,7 @@ func TestHandleCompactEmptySessionID(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "d.sock")
 
-	ag := agentcore.NewAgent(&fakeCore{}).
+	ag := agentcore.NewAgent(&handlerFakeCore{}).
 		WithModel(llm.Model{ID: "test", SupportsTool: false})
 
 	s, err := agentserver.New(ag, socketPath)

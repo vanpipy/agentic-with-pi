@@ -9,10 +9,22 @@ import (
 
 const emergencyMarkerPrefix = "emergency truncated"
 
-type emergencyTruncatedToolResult struct {
+type EmergencyTruncatedToolResult struct {
 	OriginalLen int
 	KeptLen     int
 	Marker      string
+}
+
+func EmergencyTruncateToolResultsForTest(msgs []llm.Message, maxChars int) []llm.Message {
+	return emergencyTruncateToolResults(msgs, maxChars)
+}
+
+func IsRequestPayloadTooLargeErrorForTest(err error) bool {
+	return isRequestPayloadTooLargeError(err)
+}
+
+func StripOversizedToolResultsInMessagesForTest(msgs []llm.Message, threshold int) []llm.Message {
+	return stripOversizedToolResultsInMessages(msgs, threshold)
 }
 
 func emergencyTruncateToolResults(msgs []llm.Message, maxChars int) []llm.Message {

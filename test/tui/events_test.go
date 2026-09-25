@@ -1,4 +1,4 @@
-package tui
+package tui_test
 
 import (
 	"encoding/json"
@@ -7,14 +7,11 @@ import (
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
+	"github.com/vanpiyp/awp/internal/tui"
 )
 
-func newTestChatModel() *chatModel {
-	return newChatModel()
-}
-
 func TestHandleServerEventMessageWithThinkingAndTextAndToolCall(t *testing.T) {
-	c := newTestChatModel()
+	c := tui.NewChatModelForTest()
 	data := []byte(`{
 		"id":"0190a3b7-0001-7c8a-9000-000000000001",
 		"timestamp":"2026-09-23T13:00:00.000Z",
@@ -28,18 +25,19 @@ func TestHandleServerEventMessageWithThinkingAndTextAndToolCall(t *testing.T) {
 		},
 		"stopReason":"toolUse"
 	}`)
-	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	if len(c.messages) != 1 {
-		t.Fatalf("expected 1 message (tool call), got %d", len(c.messages))
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 message (tool call), got %d", len(msgs))
 	}
-	if c.messages[0].role != roleTool {
-		t.Errorf("expected roleTool, got %v", c.messages[0].role)
+	if msgs[0].Role != tui.RoleTool {
+		t.Errorf("expected RoleTool, got %v", msgs[0].Role)
 	}
 }
 
 func TestHandleServerEventToolResultAppearsAsObserve(t *testing.T) {
-	c := newTestChatModel()
-	c.appendTool(json_rpc.MessageContentPart{
+	c := tui.NewChatModelForTest()
+	tui.AppendToolForTest(c, json_rpc.MessageContentPart{
 		Type:      "toolCall",
 		Name:      "bash",
 		Arguments: json.RawMessage(`{"command":"date"}`),
@@ -55,24 +53,25 @@ func TestHandleServerEventToolResultAppearsAsObserve(t *testing.T) {
 		"details":{"toolName":"bash","intent":"Get time"},
 		"stopReason":"toolUse"
 	}`)
-	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	if len(c.messages) != 1 {
-		t.Fatalf("expected tool call entry merged with result (1 message), got %d", len(c.messages))
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected tool call entry merged with result (1 message), got %d", len(msgs))
 	}
-	if c.messages[0].role != roleTool {
-		t.Errorf("expected roleTool, got %v", c.messages[0].role)
+	if msgs[0].Role != tui.RoleTool {
+		t.Errorf("expected RoleTool, got %v", msgs[0].Role)
 	}
-	if c.messages[0].result != "Wed Sep 23 14:00" {
-		t.Errorf("expected tool result to be merged into call, got %q", c.messages[0].result)
+	if msgs[0].Result != "Wed Sep 23 14:00" {
+		t.Errorf("expected tool result to be merged into call, got %q", msgs[0].Result)
 	}
-	if c.messages[0].resultFailed {
-		t.Errorf("expected resultFailed to be false, got true")
+	if msgs[0].ResultFailed {
+		t.Errorf("expected ResultFailed to be false, got true")
 	}
 }
 
 func TestHandleServerEventToolResultErrorAppearsAsError(t *testing.T) {
-	c := newTestChatModel()
-	c.appendTool(json_rpc.MessageContentPart{
+	c := tui.NewChatModelForTest()
+	tui.AppendToolForTest(c, json_rpc.MessageContentPart{
 		Type:      "toolCall",
 		Name:      "bash",
 		Arguments: json.RawMessage(`{"command":"false"}`),
@@ -86,35 +85,37 @@ func TestHandleServerEventToolResultErrorAppearsAsError(t *testing.T) {
 		},
 		"details":{"toolName":"bash","error":"boom"}
 	}`)
-	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	if len(c.messages) != 1 {
-		t.Fatalf("expected tool call entry merged with error (1 message), got %d", len(c.messages))
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected tool call entry merged with error (1 message), got %d", len(msgs))
 	}
-	if c.messages[0].role != roleTool {
-		t.Errorf("expected roleTool, got %v", c.messages[0].role)
+	if msgs[0].Role != tui.RoleTool {
+		t.Errorf("expected RoleTool, got %v", msgs[0].Role)
 	}
-	if !c.messages[0].resultFailed {
-		t.Errorf("expected resultFailed to be true after tool error")
+	if !msgs[0].ResultFailed {
+		t.Errorf("expected ResultFailed to be true after tool error")
 	}
 }
 
 func TestHandleServerEventCustomToolErrorAppendsError(t *testing.T) {
-	c := newTestChatModel()
+	c := tui.NewChatModelForTest()
 	data := []byte(`{
 		"id":"0190a3b7-0001-7c8a-9000-000000000004",
 		"timestamp":"2026-09-23T13:00:00.000Z",
 		"customType":"tool_error",
 		"data":{"error":"boom"}
 	}`)
-	handleServerEvent(c, new(string), agentclient.Event{Kind: "custom", Data: data})
-	last := c.messages[len(c.messages)-1]
-	if last.role != roleError {
-		t.Errorf("expected roleError when no running tool, got %v", last.role)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "custom", Data: data})
+	msgs := c.MessagesForTest()
+	last := msgs[len(msgs)-1]
+	if last.Role != tui.RoleError {
+		t.Errorf("expected RoleError when no running tool, got %v", last.Role)
 	}
 }
 
 func TestHandleServerEventAssistantEndTurnCommitsStream(t *testing.T) {
-	c := newTestChatModel()
+	c := tui.NewChatModelForTest()
 	data := []byte(`{
 		"id":"0190a3b7-0001-7c8a-9000-000000000005",
 		"timestamp":"2026-09-23T13:00:00.000Z",
@@ -125,48 +126,49 @@ func TestHandleServerEventAssistantEndTurnCommitsStream(t *testing.T) {
 		"stopReason":"end_turn",
 		"usage":{"promptTokens":5,"completionTokens":1,"totalTokens":6}
 	}`)
-	handleServerEvent(c, new(string), agentclient.Event{Kind: "message", Data: data})
-	if len(c.messages) == 0 {
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	msgs := c.MessagesForTest()
+	if len(msgs) == 0 {
 		t.Fatal("expected at least one message")
 	}
-	last := c.messages[len(c.messages)-1]
-	if last.role != roleAssistant {
-		t.Errorf("expected roleAssistant, got %v", last.role)
+	last := msgs[len(msgs)-1]
+	if last.Role != tui.RoleAssistant {
+		t.Errorf("expected RoleAssistant, got %v", last.Role)
 	}
-	if last.usage == nil {
+	if last.Usage == nil {
 		t.Errorf("expected usage to be populated")
 	}
 }
 
 func TestStreamEventSchedulesExactlyOneFollowUpRead(t *testing.T) {
-	m := NewModelForTest()
+	m := tui.NewModelForTest()
 	events := make(chan agentclient.Event, 3)
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"a"}`)}
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"b"}`)}
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"c"}`)}
-	m.events = events
+	m.SetEventsForTest(events)
 
-	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"a"}`)}})
-	m = out.(*Model)
+	out, _ := m.Update(tui.StreamEventMsgForTest(agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"a"}`)}, nil, false))
+	m, _ = out.(*tui.Model)
 	if got := m.ReadsScheduledThisUpdateForTest(); got != 1 {
 		t.Errorf("non-done streamEventMsg: expected 1 follow-up read, got %d", got)
 	}
 
-	out, _ = m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"b"}`)}})
-	m = out.(*Model)
+	out, _ = m.Update(tui.StreamEventMsgForTest(agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"b"}`)}, nil, false))
+	m, _ = out.(*tui.Model)
 	if got := m.ReadsScheduledThisUpdateForTest(); got != 1 {
 		t.Errorf("2nd non-done streamEventMsg: expected 1 follow-up read, got %d", got)
 	}
 }
 
 func TestStreamEventDoneSchedulesNoFollowUpRead(t *testing.T) {
-	m := NewModelForTest()
+	m := tui.NewModelForTest()
 	events := make(chan agentclient.Event, 1)
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}
-	m.events = events
+	m.SetEventsForTest(events)
 
-	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}, done: true})
-	m = out.(*Model)
+	out, _ := m.Update(tui.StreamEventMsgForTest(agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}, nil, true))
+	m, _ = out.(*tui.Model)
 	if got := m.ReadsScheduledThisUpdateForTest(); got != 0 {
 		t.Errorf("done streamEventMsg: expected 0 follow-up reads, got %d", got)
 	}
@@ -176,37 +178,36 @@ func TestStreamEventDoneSchedulesNoFollowUpRead(t *testing.T) {
 }
 
 func TestStreamEventErrorClearsEvents(t *testing.T) {
-	m := NewModelForTest()
-	m.state = StateStreamingForTestValue()
+	m := tui.NewModelForTest()
+	m.SetStateForTest(tui.StateStreamingForTestValue())
 	events := make(chan agentclient.Event, 1)
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"orphan"}`)}
-	m.events = events
+	m.SetEventsForTest(events)
 
-	out, _ := m.Update(streamEventMsg{err: errors.New("boom")})
-	m = out.(*Model)
+	out, _ := m.Update(tui.StreamEventMsgForTest(agentclient.Event{}, errors.New("boom"), false))
+	m, _ = out.(*tui.Model)
 	if got := m.ReadsScheduledThisUpdateForTest(); got != 0 {
 		t.Errorf("error streamEventMsg: expected 0 follow-up reads, got %d", got)
 	}
 	if m.EventsForTest() != nil {
 		t.Errorf("error streamEventMsg: m.events should be nil")
 	}
-	if m.StateForTest() != StateError {
+	if m.StateForTest() != tui.StateError {
 		t.Errorf("error streamEventMsg: state should be StateError, got %v", m.StateForTest())
 	}
 }
 
 func TestCancelDrainsInFlightEvents(t *testing.T) {
-	m := NewModelForTest()
-	m.state = StateStreamingForTestValue()
+	m := tui.NewModelForTest()
+	m.SetStateForTest(tui.StateStreamingForTestValue())
 	events := make(chan agentclient.Event, 4)
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"1"}`)}
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"2"}`)}
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"3"}`)}
-	m.events = events
-	// stub out the cancel RPC by leaving m.conn nil
-	m.conn = nil
+	m.SetEventsForTest(events)
+	m.SetConnForTest(nil)
 
-	m.cancel()
+	m.CancelForTest()
 
 	if got := len(events); got != 0 {
 		t.Errorf("cancel: expected events channel drained, %d buffered remain", got)
@@ -214,68 +215,64 @@ func TestCancelDrainsInFlightEvents(t *testing.T) {
 }
 
 func TestCancelTransitionsThroughCancellingToReady(t *testing.T) {
-	m := NewModelForTest()
-	m.state = StateStreamingForTestValue()
+	m := tui.NewModelForTest()
+	m.SetStateForTest(tui.StateStreamingForTestValue())
 	events := make(chan agentclient.Event, 1)
 	events <- agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}
-	m.events = events
-	m.conn = nil
+	m.SetEventsForTest(events)
+	m.SetConnForTest(nil)
 
-	cmd := m.cancel()
+	cmd := m.CancelForTest()
 	if cmd == nil {
 		t.Fatalf("cancel: expected a follow-up readNextEvent cmd to be scheduled, got nil")
 	}
-	if m.StateForTest() != StateCancelling {
+	if m.StateForTest() != tui.StateCancelling {
 		t.Errorf("after cancel: expected StateCancelling, got %v", m.StateForTest())
 	}
 	if m.EventsForTest() == nil {
 		t.Errorf("after cancel: m.events must stay referenced so the natural stream-close can deliver done=true")
 	}
 
-	out, _ := m.Update(streamEventMsg{ev: agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}})
-	m = out.(*Model)
-	if m.StateForTest() != StateReady {
+	out, _ := m.Update(tui.StreamEventMsgForTest(agentclient.Event{Kind: json_rpc.EventMessage, Data: []byte(`{"id":"final"}`)}, nil, false))
+	m, _ = out.(*tui.Model)
+	if m.StateForTest() != tui.StateReady {
 		t.Errorf("after trailing streamEventMsg: expected StateReady, got %v", m.StateForTest())
 	}
 }
 
 func TestGetMdRendererEvictsBeyondCap(t *testing.T) {
-	resetMdRenderersForTest()
-	defer resetMdRenderersForTest()
+	tui.ResetMdRenderersForTest()
+	defer tui.ResetMdRenderersForTest()
 
 	const cap = 8
 
-	r0 := getMdRenderer(10)
+	r0 := tui.GetMdRendererForTest(10)
 	for i := 1; i < cap; i++ {
-		getMdRenderer(20 + i)
+		tui.GetMdRendererForTest(20 + i)
 	}
-	// cache now holds widths {10, 21..27} (=cap entries)
 
-	getMdRenderer(30)
-	// 10 should have been evicted (oldest insert)
+	tui.GetMdRendererForTest(30)
 
-	r0Again := getMdRenderer(10)
+	r0Again := tui.GetMdRendererForTest(10)
 	if r0Again == r0 {
 		t.Errorf("width=10 should have been evicted on the 9th distinct insertion; got same renderer pointer %p", r0)
 	}
 }
 
 func TestChatLineCountCachesPerMessage(t *testing.T) {
-	c := newChatModel()
-	c.SetSize(80, 40)
-	c.submit("first prompt")
-	c.submit("second prompt")
-	c.submit("third prompt")
-	if got := len(c.messages); got != 3 {
+	c := tui.NewChatModelForTest()
+	c.SetSizeForTest(80, 40)
+	c.SubmitForTest("first prompt")
+	c.SubmitForTest("second prompt")
+	c.SubmitForTest("third prompt")
+	msgs := c.MessagesForTest()
+	if got := len(msgs); got != 3 {
 		t.Fatalf("setup: expected 3 messages, got %d", got)
 	}
-	// submit() calls refresh() which pre-warms the cache via content().
-	// Each submit's refresh re-renders all current messages through renderedLines,
-	// producing 1+2+3 = 6 cumulative cache misses (no longer lineCount-specific).
 	missesBefore := c.LineCountMissesForTest()
 	for i := 0; i < 100; i++ {
-		for j := range c.messages {
-			c.lineCount(c.messages[j])
+		for j := range msgs {
+			c.LineCountForTest(msgs[j])
 		}
 	}
 	got := c.LineCountMissesForTest() - missesBefore

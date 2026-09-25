@@ -1,14 +1,15 @@
-package tui
+package tui_test
 
 import (
 	"strings"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/agent-core/skills"
+	"github.com/vanpiyp/awp/internal/tui"
 )
 
 func TestRegistryIncludesCompactUsageSkills(t *testing.T) {
-	specs := AllCommandSpecsForTest()
+	specs := tui.AllCommandSpecsForTest()
 	want := map[string]bool{"compact": false, "usage": false, "skills": false}
 	for _, s := range specs {
 		if _, ok := want[s.Name]; ok {
@@ -23,7 +24,7 @@ func TestRegistryIncludesCompactUsageSkills(t *testing.T) {
 }
 
 func TestParseCommandCompactWithForceFlag(t *testing.T) {
-	parsed, ok := ParseCommandForTest("/compact --force")
+	parsed, ok := tui.ParseCommandForTest("/compact --force")
 	if !ok {
 		t.Fatal("parseCommand(/compact --force) returned ok=false")
 	}
@@ -36,7 +37,7 @@ func TestParseCommandCompactWithForceFlag(t *testing.T) {
 }
 
 func TestParseCommandUsage(t *testing.T) {
-	parsed, ok := ParseCommandForTest("/usage")
+	parsed, ok := tui.ParseCommandForTest("/usage")
 	if !ok {
 		t.Fatal("parseCommand(/usage) returned ok=false")
 	}
@@ -46,7 +47,7 @@ func TestParseCommandUsage(t *testing.T) {
 }
 
 func TestParseCommandSkills(t *testing.T) {
-	parsed, ok := ParseCommandForTest("/skills")
+	parsed, ok := tui.ParseCommandForTest("/skills")
 	if !ok {
 		t.Fatal("parseCommand(/skills) returned ok=false")
 	}
@@ -56,17 +57,15 @@ func TestParseCommandSkills(t *testing.T) {
 }
 
 func TestSlashUnknownCommandHintIsDynamic(t *testing.T) {
-	original := registry
-	defer func() { registry = original }()
-
-	registry = []commandSpec{
+	tui.SetCommandRegistryForTest([]tui.CommandSpec{
 		{Name: "alpha", Description: "a", Category: "x"},
 		{Name: "beta", Description: "b", Category: "x"},
-	}
+	})
+	defer tui.RestoreDefaultCommandRegistryForTest()
 
-	m := NewModelForTest()
+	m := tui.NewModelForTest()
 	before := len(m.ChatMessagesForTest())
-	quit, _ := ExecuteCommandForTest(m, "/nosuchcmd")
+	quit, _ := tui.ExecuteCommandForTest(m, "/nosuchcmd")
 	if quit {
 		t.Errorf("unknown cmd must not quit")
 	}
@@ -84,9 +83,9 @@ func TestSlashUnknownCommandHintIsDynamic(t *testing.T) {
 }
 
 func TestSlashUsageAppendsUsageHint(t *testing.T) {
-	m := NewModelForTest()
+	m := tui.NewModelForTest()
 	before := len(m.ChatMessagesForTest())
-	quit, cmd := ExecuteCommandForTest(m, "/usage")
+	quit, cmd := tui.ExecuteCommandForTest(m, "/usage")
 	if quit {
 		t.Errorf("/usage must not quit")
 	}
@@ -107,17 +106,17 @@ func TestSlashUsageAppendsUsageHint(t *testing.T) {
 }
 
 func TestSlashSkillsAppendsSkillList(t *testing.T) {
-	m := NewModelForTest()
-	SetSkillRegistry(&skills.Registry{
+	m := tui.NewModelForTest()
+	tui.SetSkillRegistry(&skills.Registry{
 		Skills: map[string]*skills.Skill{
 			"alpha": {Name: "alpha", Description: "first"},
 			"beta":  {Name: "beta", Description: "second"},
 		},
 	})
-	defer SetSkillRegistry(nil)
+	defer tui.SetSkillRegistry(nil)
 
 	before := len(m.ChatMessagesForTest())
-	quit, cmd := ExecuteCommandForTest(m, "/skills")
+	quit, cmd := tui.ExecuteCommandForTest(m, "/skills")
 	if quit {
 		t.Errorf("/skills must not quit")
 	}

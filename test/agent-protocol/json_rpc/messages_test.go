@@ -1,14 +1,16 @@
-package json_rpc
+package json_rpc_test
 
 import (
 	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
+
+	jsonrpc "github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 func TestMessageContentPartTextRoundtrip(t *testing.T) {
-	part := MessageContentPart{Type: "text", Text: "hello world"}
+	part := jsonrpc.MessageContentPart{Type: "text", Text: "hello world"}
 	data, err := json.Marshal(part)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -25,7 +27,7 @@ func TestMessageContentPartTextRoundtrip(t *testing.T) {
 			t.Fatalf("unexpected %q field in %q", hidden, got)
 		}
 	}
-	var back MessageContentPart
+	var back jsonrpc.MessageContentPart
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -35,7 +37,7 @@ func TestMessageContentPartTextRoundtrip(t *testing.T) {
 }
 
 func TestMessageContentPartThinkingRoundtrip(t *testing.T) {
-	part := MessageContentPart{
+	part := jsonrpc.MessageContentPart{
 		Type:              "thinking",
 		Thinking:          "the user asked for x",
 		ThinkingSignature: "deadbeef",
@@ -50,7 +52,7 @@ func TestMessageContentPartThinkingRoundtrip(t *testing.T) {
 	if !strings.Contains(string(data), `"thinkingSignature":"deadbeef"`) {
 		t.Fatalf("missing thinkingSignature in %q", data)
 	}
-	var back MessageContentPart
+	var back jsonrpc.MessageContentPart
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -61,7 +63,7 @@ func TestMessageContentPartThinkingRoundtrip(t *testing.T) {
 
 func TestMessageContentPartToolCallRoundtrip(t *testing.T) {
 	args := json.RawMessage(`{"pattern":"jcode"}`)
-	part := MessageContentPart{
+	part := jsonrpc.MessageContentPart{
 		Type:      "toolCall",
 		ID:        "call_abc",
 		Name:      "agentgrep",
@@ -75,7 +77,7 @@ func TestMessageContentPartToolCallRoundtrip(t *testing.T) {
 	if !strings.Contains(string(data), `"arguments":{"pattern":"jcode"}`) {
 		t.Fatalf("arguments not preserved as nested JSON: %q", data)
 	}
-	var back MessageContentPart
+	var back jsonrpc.MessageContentPart
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -88,9 +90,9 @@ func TestMessageContentPartToolCallRoundtrip(t *testing.T) {
 }
 
 func TestMessageRoundtrip(t *testing.T) {
-	msg := Message{
+	msg := jsonrpc.Message{
 		Role: "assistant",
-		Content: []MessageContentPart{
+		Content: []jsonrpc.MessageContentPart{
 			{Type: "thinking", Thinking: "I should call bash", ThinkingSignature: "sig1"},
 			{Type: "text", Text: "Let me check the date."},
 			{Type: "toolCall", ID: "call_001", Name: "bash", Arguments: json.RawMessage(`{"command":"date"}`)},
@@ -100,7 +102,7 @@ func TestMessageRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back Message
+	var back jsonrpc.Message
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -118,7 +120,7 @@ func TestMessageRoundtrip(t *testing.T) {
 }
 
 func TestUsageStatsRoundtrip(t *testing.T) {
-	stats := UsageStats{
+	stats := jsonrpc.UsageStats{
 		PromptTokens:     1024,
 		CompletionTokens: 171,
 		TotalTokens:      1195,
@@ -132,7 +134,7 @@ func TestUsageStatsRoundtrip(t *testing.T) {
 	if strings.Contains(string(data), `"cacheWriteTokens":0`) {
 		t.Fatalf("expected cacheWriteTokens=0 omitted, got %q", data)
 	}
-	var back UsageStats
+	var back jsonrpc.UsageStats
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -142,7 +144,7 @@ func TestUsageStatsRoundtrip(t *testing.T) {
 }
 
 func TestUsageStatsMinimalOmitted(t *testing.T) {
-	stats := UsageStats{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
+	stats := jsonrpc.UsageStats{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
 	data, err := json.Marshal(stats)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -155,7 +157,7 @@ func TestUsageStatsMinimalOmitted(t *testing.T) {
 }
 
 func TestMessageDetailsRoundtrip(t *testing.T) {
-	det := MessageDetails{
+	det := jsonrpc.MessageDetails{
 		ToolName: "agentgrep",
 		Intent:   "find jcode",
 		Error:    "timeout",
@@ -165,7 +167,7 @@ func TestMessageDetailsRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back MessageDetails
+	var back jsonrpc.MessageDetails
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -175,18 +177,18 @@ func TestMessageDetailsRoundtrip(t *testing.T) {
 }
 
 func TestMessageEventRoundtrip(t *testing.T) {
-	ev := MessageEvent{
+	ev := jsonrpc.MessageEvent{
 		ID:        "0190a3b7-0002-7c8a-9000-000000000002",
 		ParentID:  "0190a3b7-0001-7c8a-9000-000000000001",
 		Timestamp: "2026-09-23T13:00:01.234Z",
-		Message: Message{
+		Message: jsonrpc.Message{
 			Role: "assistant",
-			Content: []MessageContentPart{
+			Content: []jsonrpc.MessageContentPart{
 				{Type: "text", Text: "I'll search for that."},
 			},
 		},
 		StopReason: "toolUse",
-		Usage:      &UsageStats{PromptTokens: 1024, CompletionTokens: 171, TotalTokens: 1195},
+		Usage:      &jsonrpc.UsageStats{PromptTokens: 1024, CompletionTokens: 171, TotalTokens: 1195},
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
@@ -196,7 +198,7 @@ func TestMessageEventRoundtrip(t *testing.T) {
 	if string(data) != want {
 		t.Fatalf("unexpected JSON:\nwant %q\ngot  %q", want, data)
 	}
-	var back MessageEvent
+	var back jsonrpc.MessageEvent
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -212,12 +214,12 @@ func TestMessageEventRoundtrip(t *testing.T) {
 }
 
 func TestMessageEventOmittedFields(t *testing.T) {
-	ev := MessageEvent{
+	ev := jsonrpc.MessageEvent{
 		ID:        "msg-1",
 		Timestamp: "2026-09-23T13:00:01.234Z",
-		Message: Message{
+		Message: jsonrpc.Message{
 			Role:    "user",
-			Content: []MessageContentPart{{Type: "text", Text: "hi"}},
+			Content: []jsonrpc.MessageContentPart{{Type: "text", Text: "hi"}},
 		},
 	}
 	data, err := json.Marshal(ev)
@@ -232,7 +234,7 @@ func TestMessageEventOmittedFields(t *testing.T) {
 }
 
 func TestCustomEventRoundtrip(t *testing.T) {
-	ev := CustomEvent{
+	ev := jsonrpc.CustomEvent{
 		ID:         "custom-1",
 		ParentID:   "msg-2",
 		Timestamp:  "2026-09-23T13:00:30.000Z",
@@ -247,7 +249,7 @@ func TestCustomEventRoundtrip(t *testing.T) {
 	if string(data) != want {
 		t.Fatalf("unexpected JSON:\nwant %q\ngot  %q", want, data)
 	}
-	var back CustomEvent
+	var back jsonrpc.CustomEvent
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -260,7 +262,7 @@ func TestCustomEventRoundtrip(t *testing.T) {
 }
 
 func TestCustomMessageEventRoundtrip(t *testing.T) {
-	ev := CustomMessageEvent{
+	ev := jsonrpc.CustomMessageEvent{
 		ID:         "cm-1",
 		ParentID:   "msg-3",
 		Timestamp:  "2026-09-23T13:00:35.000Z",
@@ -273,7 +275,7 @@ func TestCustomMessageEventRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back CustomMessageEvent
+	var back jsonrpc.CustomMessageEvent
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -283,16 +285,16 @@ func TestCustomMessageEventRoundtrip(t *testing.T) {
 }
 
 func TestCompactParamsRoundtrip(t *testing.T) {
-	params := CompactParams{SessionID: "abc-123", Force: true}
+	params := jsonrpc.CompactParams{SessionID: "abc-123", Force: true}
 	data, err := json.Marshal(params)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	want := `{"session_id":"abc-123","force":true}`
 	if string(data) != want {
-		t.Fatalf("CompactParams marshal mismatch:\nwant %q\ngot  %q", want, data)
+		t.Fatalf("jsonrpc.CompactParams marshal mismatch:\nwant %q\ngot  %q", want, data)
 	}
-	var back CompactParams
+	var back jsonrpc.CompactParams
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -302,7 +304,7 @@ func TestCompactParamsRoundtrip(t *testing.T) {
 }
 
 func TestCompactParamsForceOmittedWhenFalse(t *testing.T) {
-	params := CompactParams{SessionID: "sess"}
+	params := jsonrpc.CompactParams{SessionID: "sess"}
 	data, err := json.Marshal(params)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -317,7 +319,7 @@ func TestCompactParamsForceOmittedWhenFalse(t *testing.T) {
 }
 
 func TestCompactResultRoundtrip(t *testing.T) {
-	res := CompactResult{
+	res := jsonrpc.CompactResult{
 		Triggered:    true,
 		Strategy:     "forced",
 		TokensBefore: 12000,
@@ -330,9 +332,9 @@ func TestCompactResultRoundtrip(t *testing.T) {
 	}
 	want := `{"triggered":true,"strategy":"forced","tokens_before":12000,"tokens_after":4200,"duration_ms":1500}`
 	if string(data) != want {
-		t.Fatalf("CompactResult marshal mismatch:\nwant %q\ngot  %q", want, data)
+		t.Fatalf("jsonrpc.CompactResult marshal mismatch:\nwant %q\ngot  %q", want, data)
 	}
-	var back CompactResult
+	var back jsonrpc.CompactResult
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -342,7 +344,7 @@ func TestCompactResultRoundtrip(t *testing.T) {
 }
 
 func TestCompactResultStrategyOmittedWhenEmpty(t *testing.T) {
-	res := CompactResult{Triggered: false, TokensBefore: 1, TokensAfter: 1, DurationMS: 0}
+	res := jsonrpc.CompactResult{Triggered: false, TokensBefore: 1, TokensAfter: 1, DurationMS: 0}
 	data, err := json.Marshal(res)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -353,7 +355,7 @@ func TestCompactResultStrategyOmittedWhenEmpty(t *testing.T) {
 }
 
 func TestCustomMessageEventDisplayFalseOmitted(t *testing.T) {
-	ev := CustomMessageEvent{
+	ev := jsonrpc.CustomMessageEvent{
 		ID:         "cm-1",
 		Timestamp:  "2026-09-23T13:00:35.000Z",
 		CustomType: "log_only",

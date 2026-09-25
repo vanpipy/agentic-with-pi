@@ -1,4 +1,4 @@
-package agentserver
+package agentserver_test
 
 import (
 	"encoding/json"
@@ -6,24 +6,25 @@ import (
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
+	agentserver "github.com/vanpiyp/awp/internal/agent-server"
 )
 
 func TestMarshalAgentEventForWireUserMessageEmitsUserRoleMessage(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer
-	emits := marshalAgentEventForWire(agentcore.Event{
+	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category: agentcore.EventUserMessage,
 		Content:  "what time is it",
 	}, &parentID, &buf)
 	if len(emits) != 1 {
 		t.Fatalf("expected 1 emit, got %d", len(emits))
 	}
-	if emits[0].eventName != json_rpc.EventMessage {
-		t.Errorf("expected event %q, got %q", json_rpc.EventMessage, emits[0].eventName)
+	if emits[0].EventName != json_rpc.EventMessage {
+		t.Errorf("expected event %q, got %q", json_rpc.EventMessage, emits[0].EventName)
 	}
-	msg, ok := emits[0].payload.(json_rpc.MessageEvent)
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
 	if !ok {
-		t.Fatalf("expected MessageEvent, got %T", emits[0].payload)
+		t.Fatalf("expected MessageEvent, got %T", emits[0].Payload)
 	}
 	if msg.Message.Role != "user" {
 		t.Errorf("role=%q, want user", msg.Message.Role)
@@ -42,14 +43,14 @@ func TestMarshalAgentEventForWireUserMessageEmitsUserRoleMessage(t *testing.T) {
 func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer("")
-	emits := marshalAgentEventForWire(agentcore.Event{
+	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "hello ",
 	}, &parentID, &buf)
 	if len(emits) != 0 {
 		t.Errorf("expected 0 emits during chunk, got %d", len(emits))
 	}
-	emits = marshalAgentEventForWire(agentcore.Event{
+	emits = agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "world",
 	}, &parentID, &buf)
@@ -61,20 +62,20 @@ func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
 func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
-	marshalAgentEventForWire(agentcore.Event{
+	agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "I should answer",
 	}, &parentID, &buf)
-	emits := marshalAgentEventForWire(agentcore.Event{
+	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category: agentcore.EventFinalAnswer,
 		Content:  "It's 2 PM",
 	}, &parentID, &buf)
 	if len(emits) != 1 {
 		t.Fatalf("expected 1 emit, got %d", len(emits))
 	}
-	msg, ok := emits[0].payload.(json_rpc.MessageEvent)
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
 	if !ok {
-		t.Fatalf("expected MessageEvent, got %T", emits[0].payload)
+		t.Fatalf("expected MessageEvent, got %T", emits[0].Payload)
 	}
 	if msg.Message.Role != "assistant" {
 		t.Errorf("role=%q, want assistant", msg.Message.Role)
@@ -99,7 +100,7 @@ func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) 
 func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
-	emits := marshalAgentEventForWire(agentcore.Event{
+	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:   agentcore.EventTool,
 		ToolName:   "bash",
 		ToolArgs:   `{"command":"date","intent":"Get time"}`,
@@ -108,9 +109,9 @@ func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 	if len(emits) != 2 {
 		t.Fatalf("expected 2 emits (assistant+toolResult), got %d", len(emits))
 	}
-	assistant, ok := emits[0].payload.(json_rpc.MessageEvent)
+	assistant, ok := emits[0].Payload.(json_rpc.MessageEvent)
 	if !ok {
-		t.Fatalf("emit 0 expected MessageEvent, got %T", emits[0].payload)
+		t.Fatalf("emit 0 expected MessageEvent, got %T", emits[0].Payload)
 	}
 	if assistant.Message.Role != "assistant" {
 		t.Errorf("assistant role=%q", assistant.Message.Role)
@@ -118,9 +119,9 @@ func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 	if assistant.StopReason != "toolUse" {
 		t.Errorf("assistant stopReason=%q", assistant.StopReason)
 	}
-	toolResult, ok := emits[1].payload.(json_rpc.MessageEvent)
+	toolResult, ok := emits[1].Payload.(json_rpc.MessageEvent)
 	if !ok {
-		t.Fatalf("emit 1 expected MessageEvent, got %T", emits[1].payload)
+		t.Fatalf("emit 1 expected MessageEvent, got %T", emits[1].Payload)
 	}
 	if toolResult.Message.Role != "toolResult" {
 		t.Errorf("toolResult role=%q", toolResult.Message.Role)
@@ -136,22 +137,22 @@ func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 func TestMarshalAgentEventForWireErrorEmitsMessageAndCustom(t *testing.T) {
 	var parentID string
 	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
-	emits := marshalAgentEventForWire(agentcore.Event{
+	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventError,
 		ToolError: "boom",
 	}, &parentID, &buf)
 	if len(emits) != 2 {
 		t.Fatalf("expected 2 emits (message + custom), got %d", len(emits))
 	}
-	if emits[0].eventName != json_rpc.EventMessage {
-		t.Errorf("emit 0 event=%q", emits[0].eventName)
+	if emits[0].EventName != json_rpc.EventMessage {
+		t.Errorf("emit 0 event=%q", emits[0].EventName)
 	}
-	if emits[1].eventName != json_rpc.EventCustom {
-		t.Errorf("emit 1 event=%q", emits[1].eventName)
+	if emits[1].EventName != json_rpc.EventCustom {
+		t.Errorf("emit 1 event=%q", emits[1].EventName)
 	}
-	custom, ok := emits[1].payload.(json_rpc.CustomEvent)
+	custom, ok := emits[1].Payload.(json_rpc.CustomEvent)
 	if !ok {
-		t.Fatalf("emit 1 expected CustomEvent, got %T", emits[1].payload)
+		t.Fatalf("emit 1 expected CustomEvent, got %T", emits[1].Payload)
 	}
 	if custom.CustomType != "tool_error" {
 		t.Errorf("customType=%q", custom.CustomType)

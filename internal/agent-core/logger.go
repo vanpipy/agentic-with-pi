@@ -477,7 +477,7 @@ func defaultSessionLogPath(sessionID string) (string, error) {
 	return filepath.Join(dir, sessionID+".jsonl"), nil
 }
 
-type turnStartEntry struct {
+type TurnStartEntry struct {
 	Kind                string `json:"kind"`
 	Version             int    `json:"version"`
 	At                  string `json:"at"`
@@ -488,7 +488,7 @@ type turnStartEntry struct {
 	ObservedInputTokens *int   `json:"observed_input_tokens,omitempty"`
 }
 
-type turnResponseEntry struct {
+type TurnResponseEntry struct {
 	Kind             string `json:"kind"`
 	Version          int    `json:"version"`
 	At               string `json:"at"`
@@ -503,7 +503,7 @@ type turnResponseEntry struct {
 	TotalTokens      int    `json:"total_tokens"`
 }
 
-type toolDedupHitEntry struct {
+type ToolDedupHitEntry struct {
 	Kind            string `json:"kind"`
 	Version         int    `json:"version"`
 	At              string `json:"at"`
@@ -512,7 +512,7 @@ type toolDedupHitEntry struct {
 	ReusedFromSeq   int    `json:"reused_from_seq"`
 }
 
-type compactionV3Entry struct {
+type CompactionV3Entry struct {
 	Kind          string `json:"kind"`
 	Version       int    `json:"version"`
 	At            string `json:"at"`
@@ -526,7 +526,7 @@ type compactionV3Entry struct {
 	DurationMS    int64  `json:"duration_ms"`
 }
 
-type errorV3Entry struct {
+type ErrorV3Entry struct {
 	Kind       string `json:"kind"`
 	Version    int    `json:"version"`
 	At         string `json:"at"`
@@ -551,7 +551,7 @@ func (a *Agent) writeTurnStartLocked(userMsgID string) {
 		v := a.observedInputTokens
 		observed = &v
 	}
-	entry := turnStartEntry{
+	entry := TurnStartEntry{
 		Kind:                "turn_start",
 		Version:             3,
 		At:                  time.Now().UTC().Format(time.RFC3339Nano),
@@ -570,7 +570,7 @@ func (a *Agent) writeTurnResponseLocked(model, vendor, finishReason string, durM
 	if a.v3LogBuf == nil {
 		return
 	}
-	entry := turnResponseEntry{
+	entry := TurnResponseEntry{
 		Kind:             "turn_response",
 		Version:          3,
 		At:               time.Now().UTC().Format(time.RFC3339Nano),
@@ -593,7 +593,7 @@ func (a *Agent) writeToolDedupHitLocked(toolName, sig string, reusedFromSeq int)
 	if a.v3LogBuf == nil {
 		return
 	}
-	entry := toolDedupHitEntry{
+	entry := ToolDedupHitEntry{
 		Kind:            "tool_dedup_hit",
 		Version:         3,
 		At:              time.Now().UTC().Format(time.RFC3339Nano),
@@ -610,7 +610,7 @@ func (a *Agent) writeCompactionV3Locked(trigger, detail, strategy string, tokens
 	if a.v3LogBuf == nil {
 		return
 	}
-	entry := compactionV3Entry{
+	entry := CompactionV3Entry{
 		Kind:          "compaction_v3",
 		Version:       3,
 		At:            time.Now().UTC().Format(time.RFC3339Nano),
@@ -632,7 +632,7 @@ func (a *Agent) writeErrorV3Locked(scope, code, msg string, retry int, recovered
 	if a.v3LogBuf == nil {
 		return
 	}
-	entry := errorV3Entry{
+	entry := ErrorV3Entry{
 		Kind:       "error",
 		Version:    3,
 		At:         time.Now().UTC().Format(time.RFC3339Nano),
@@ -645,4 +645,42 @@ func (a *Agent) writeErrorV3Locked(scope, code, msg string, retry int, recovered
 	if err := writeJSONLine(a.v3LogBuf, entry); err != nil {
 		slog.Debug("agent: error_v3 write failed", "err", err)
 	}
+}
+
+func (a *Agent) WriteTurnStartForTest(userMsgID string) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.writeTurnStartLocked(userMsgID)
+}
+
+func (a *Agent) WriteTurnResponseForTest(model, vendor, finishReason string, durMS int64, ttftMS *int64, prompt, completion, total int) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.writeTurnResponseLocked(model, vendor, finishReason, durMS, ttftMS, prompt, completion, total)
+}
+
+func (a *Agent) WriteToolDedupHitForTest(toolName, sig string, reusedFromSeq int) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.writeToolDedupHitLocked(toolName, sig, reusedFromSeq)
+}
+
+func (a *Agent) WriteCompactionV3ForTest(trigger, detail, strategy string, tokensBefore, tokensAfter, firstKeptSeq int, model string, durMS int64) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.writeCompactionV3Locked(trigger, detail, strategy, tokensBefore, tokensAfter, firstKeptSeq, model, durMS)
+}
+
+func (a *Agent) WriteErrorV3ForTest(scope, code, msg string, retry int, recoveredFlag bool) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	a.writeErrorV3Locked(scope, code, msg, retry, recoveredFlag)
+}
+
+func (a *Agent) WriteAlignedEventForTest(ev Event) {
+	a.writeAlignedEvent(ev)
+}
+
+func (a *Agent) WriteEventForTest(seq int, ev Event) {
+	a.writeEvent(seq, ev)
 }

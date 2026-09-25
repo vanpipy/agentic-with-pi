@@ -555,3 +555,17 @@ func marshalAgentEventForWire(ev agentcore.Event, parentID *string, streamBuf **
 func usageToMap(u *llm.Usage) map[string]string {
 	return nil
 }
+
+type WireEmit struct {
+	EventName string
+	Payload   any
+}
+
+func MarshalAgentEventForWireForTest(ev agentcore.Event, parentID *string, streamBuf **agentcore.StreamBuffer) []WireEmit {
+	internal := marshalAgentEventForWire(ev, parentID, streamBuf)
+	out := make([]WireEmit, len(internal))
+	for i, e := range internal {
+		out[i] = WireEmit{EventName: e.eventName, Payload: e.payload}
+	}
+	return out
+}

@@ -596,6 +596,16 @@ func (m *Model) ReadsScheduledThisUpdateForTest() int { return m.readsScheduledT
 
 func (m *Model) EventsForTest() <-chan agentclient.Event { return m.events }
 
+func (m *Model) SetEventsForTest(events chan agentclient.Event) { m.events = events }
+
+func (m *Model) SetConnForTest(conn *agentclient.Client) { m.conn = conn }
+
+func (m *Model) CancelForTest() tea.Cmd { return m.cancel() }
+
+func StreamEventMsgForTest(ev agentclient.Event, err error, done bool) tea.Msg {
+	return streamEventMsg{ev: ev, err: err, done: done}
+}
+
 func isQuitCommand(text string) bool {
 	parsed, ok := parseCommand(text)
 	if !ok {
