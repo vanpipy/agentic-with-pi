@@ -232,12 +232,33 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			text := m.input.Value()
-			if isQuitCommand(text) {
-				if m.state == StateStreaming || m.state == StateCancelling {
+
+			if isSlashCommand(text) {
+				parsed, _ := parseCommand(text)
+				midStream := m.state == StateStreaming || m.state == StateCancelling
+				_, known := findCommand(parsed.name)
+				cancelFirst := isCancelFirstCommand(text)
+				if midStream && (!known || cancelFirst) {
 					if cancelCmd := m.cancel(); cancelCmd != nil {
 						cmds = append(cmds, cancelCmd)
 					}
 				}
+
+				if known && parsed.name == "quit" {
+					m.input.Reset()
+					m.autocomplete.hide()
+					shouldQuit, cmd := m.executeCommand(text)
+					m.layout()
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					m.shutdown()
+					if shouldQuit {
+						cmds = append(cmds, tea.Quit)
+					}
+					return m, tea.Batch(cmds...)
+				}
+
 				m.input.Reset()
 				m.autocomplete.hide()
 				shouldQuit, cmd := m.executeCommand(text)
@@ -245,9 +266,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
-				m.shutdown()
 				if shouldQuit {
-					cmds = append(cmds, tea.Quit)
+					return m, tea.Quit
 				}
 				return m, tea.Batch(cmds...)
 			}
@@ -260,18 +280,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.input.Reset()
 			m.autocomplete.hide()
-
-			if strings.HasPrefix(text, "/") {
-				shouldQuit, cmd := m.executeCommand(text)
-				m.layout()
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-				if shouldQuit {
-					return m, tea.Quit
-				}
-				return m, tea.Batch(cmds...)
-			}
 
 			m.chat.submit(text)
 			m.chat.GotoBottom()
@@ -595,6 +603,29 @@ func isQuitCommand(text string) bool {
 	}
 	return parsed.name == "quit"
 }
+
+func isSlashCommand(text string) bool {
+	parsed, ok := parseCommand(text)
+	if !ok {
+		return false
+	}
+	return parsed.name != ""
+}
+
+func isCancelFirstCommand(text string) bool {
+	parsed, ok := parseCommand(text)
+	if !ok {
+		return false
+	}
+	switch parsed.name {
+	case "quit", "new", "resume", "compact":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsCancelFirstCommandForTest(text string) bool { return isCancelFirstCommand(text) }
 
 func (m *Model) shutdown() {
 	if m.conn != nil {
