@@ -1,14 +1,54 @@
 package tools
 
 import (
+	"context"
 	"log/slog"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 )
 
+func wrapFallback(tool agentcore.Tool, transform func(string) string) GoFallbackFn {
+	return func(ctx context.Context, argsJSON string) (string, error) {
+		if transform != nil {
+			argsJSON = transform(argsJSON)
+		}
+		return tool.Invoke(ctx, argsJSON)
+	}
+}
+
+func wrapFallbackTransformErr(tool agentcore.Tool, transform func(string) (string, error)) GoFallbackFn {
+	return func(ctx context.Context, argsJSON string) (string, error) {
+		if transform != nil {
+			rewritten, err := transform(argsJSON)
+			if err != nil {
+				return "", err
+			}
+			argsJSON = rewritten
+		}
+		return tool.Invoke(ctx, argsJSON)
+	}
+}
+
 func All(cwd string) []agentcore.Tool {
 	if backend, ok := AftBackendForTest(); ok {
 		slog.Info("agent: toolset from AFT backend")
+
+		goRead := ReadFile(cwd, FileOptions{})
+		goWrite := WriteFile(cwd)
+		goEdit := EditFile(cwd)
+		goBash := Bash(cwd, BashOptions{})
+		goGrep := Grep(cwd, FileOptions{})
+		goFind := Find(cwd, FileOptions{})
+		goLs := Ls(cwd, FileOptions{})
+
+		readFallback := wrapFallback(goRead, transformReadOrWriteArgs)
+		writeFallback := wrapFallback(goWrite, transformReadOrWriteArgs)
+		editFallback := wrapFallbackTransformErr(goEdit, transformEditMatchArgs)
+		bashFallback := wrapFallback(goBash, transformBashArgs)
+		grepFallback := wrapFallback(goGrep, transformAgentGrepArgs)
+		findFallback := wrapFallback(goFind, nil)
+		lsFallback := wrapFallback(goLs, transformLsArgs)
+
 		return []agentcore.Tool{
 			aftCallTool(backend, "read",
 				"Read a file. Backed by AFT (Rust). Supports text, images, PDFs, line ranges, hashline output.",
@@ -23,7 +63,7 @@ func All(cwd string) []agentcore.Tool {
 						"hashline":   map[string]any{"type": "boolean", "description": "If true, return hashline-tagged content for use with hashline-aware edits."},
 					},
 					"required": []string{"file"},
-				}),
+				}, readFallback),
 			aftCallTool(backend, "write",
 				"Write a file. Backed by AFT (Rust). Creates parent directories as needed.",
 				map[string]any{
@@ -33,7 +73,7 @@ func All(cwd string) []agentcore.Tool {
 						"content": map[string]any{"type": "string", "description": "REQUIRED. File contents to write."},
 					},
 					"required": []string{"file", "content"},
-				}),
+				}, writeFallback),
 			aftCallTool(backend, "edit_match",
 				"Replace text in a file. Backed by AFT (Rust) with hashline byte verification — safe even when the file moved lines since the agent last read it.",
 				map[string]any{
@@ -45,7 +85,7 @@ func All(cwd string) []agentcore.Tool {
 						"replace_all": map[string]any{"type": "boolean", "description": "Replace every occurrence instead of just the first."},
 					},
 					"required": []string{"file", "old_string", "new_string"},
-				}),
+				}, editFallback),
 			aftCallToolNested(backend, "bash",
 				"Execute a shell command. Backed by AFT (Rust) with sandbox + permissions + 30-min background task support.",
 				map[string]any{
@@ -59,7 +99,7 @@ func All(cwd string) []agentcore.Tool {
 						"compressed": map[string]any{"type": "boolean", "description": "Compress repetitive output."},
 					},
 					"required": []string{"command"},
-				}),
+				}, bashFallback),
 			aftCallTool(backend, "agentgrep",
 				"Search for a regex pattern across files. Backed by AFT (Rust) with structured output.",
 				map[string]any{
@@ -72,7 +112,7 @@ func All(cwd string) []agentcore.Tool {
 						"ignore_case": map[string]any{"type": "boolean", "description": "Case-insensitive match."},
 					},
 					"required": []string{"query"},
-				}),
+				}, grepFallback),
 			aftCallTool(backend, "glob",
 				"List files matching a glob pattern. Backed by AFT (Rust) with sorted, deduplicated output.",
 				map[string]any{
@@ -82,7 +122,7 @@ func All(cwd string) []agentcore.Tool {
 						"path":    map[string]any{"type": "string", "description": "Root directory for the search."},
 					},
 					"required": []string{"pattern"},
-				}),
+				}, findFallback),
 			aftCallTool(backend, "ls",
 				"List directory entries. Backed by AFT (Rust).",
 				map[string]any{
@@ -91,7 +131,7 @@ func All(cwd string) []agentcore.Tool {
 						"path":  map[string]any{"type": "string", "description": "Directory to list."},
 						"depth": map[string]any{"type": "integer", "description": "Maximum recursion depth (0 = non-recursive)."},
 					},
-				}),
+				}, lsFallback),
 			InvalidTool(),
 		}
 	}
