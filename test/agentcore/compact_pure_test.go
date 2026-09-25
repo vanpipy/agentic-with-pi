@@ -1,29 +1,30 @@
-package agentcore
+package agentcore_test
 
 import (
 	"strings"
 	"testing"
 
+	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
 func TestPureHelpersExtracted(t *testing.T) {
 	t.Helper()
-	ops := ExtractFileOps([]llm.Message{})
+	ops := agentcore.ExtractFileOps([]llm.Message{})
 	if ops.Read == nil || ops.Written == nil || ops.Edited == nil {
-		t.Fatalf("ExtractFileOps returned nil maps: %+v", ops)
+		t.Fatalf("agentcore.ExtractFileOps returned nil maps: %+v", ops)
 	}
-	if got := FindCutPoint(nil, 0); got != 0 {
-		t.Errorf("FindCutPoint(nil,0) = %d, want 0", got)
+	if got := agentcore.FindCutPoint(nil, 0); got != 0 {
+		t.Errorf("agentcore.FindCutPoint(nil,0) = %d, want 0", got)
 	}
-	if got := EstimateTokens("hello"); got == 0 {
-		t.Errorf("EstimateTokens(hello) = 0")
+	if got := agentcore.EstimateTokens("hello"); got == 0 {
+		t.Errorf("agentcore.EstimateTokens(hello) = 0")
 	}
-	if got := TruncateForSummary("hi", 100); got != "hi" {
-		t.Errorf("TruncateForSummary short passthrough = %q, want hi", got)
+	if got := agentcore.TruncateForSummary("hi", 100); got != "hi" {
+		t.Errorf("agentcore.TruncateForSummary short passthrough = %q, want hi", got)
 	}
-	if got := SerializeForSummary([]llm.Message{}); got != "" {
-		t.Errorf("SerializeForSummary empty = %q, want empty", got)
+	if got := agentcore.SerializeForSummary([]llm.Message{}); got != "" {
+		t.Errorf("agentcore.SerializeForSummary empty = %q, want empty", got)
 	}
 }
 
@@ -85,7 +86,7 @@ func TestPureExtractFileOpsTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ops := ExtractFileOps(tc.msgs)
+			ops := agentcore.ExtractFileOps(tc.msgs)
 			if !mapsEqual(ops.Read, tc.wantRead) {
 				t.Errorf("Read = %v, want %v", ops.Read, tc.wantRead)
 			}
@@ -144,9 +145,9 @@ func TestPureFindCutPointTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FindCutPoint(tc.msgs, tc.keep)
+			got := agentcore.FindCutPoint(tc.msgs, tc.keep)
 			if got != tc.want {
-				t.Errorf("FindCutPoint = %d, want %d", got, tc.want)
+				t.Errorf("agentcore.FindCutPoint = %d, want %d", got, tc.want)
 			}
 		})
 	}
@@ -200,7 +201,7 @@ func TestPureSerializeForSummaryTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := SerializeForSummary(tc.msgs)
+			out := agentcore.SerializeForSummary(tc.msgs)
 			for _, want := range tc.mustContain {
 				if !strings.Contains(out, want) {
 					t.Errorf("output missing %q in %q", want, out)
@@ -230,9 +231,9 @@ func TestPureEstimateTokensTableDriven(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		got := EstimateTokens(tc.input)
+		got := agentcore.EstimateTokens(tc.input)
 		if got != tc.want {
-			t.Errorf("EstimateTokens(%q) = %d, want %d", tc.input, got, tc.want)
+			t.Errorf("agentcore.EstimateTokens(%q) = %d, want %d", tc.input, got, tc.want)
 		}
 	}
 }
@@ -277,7 +278,7 @@ func TestPureTruncateForSummaryTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := TruncateForSummary(tc.input, tc.max)
+			got := agentcore.TruncateForSummary(tc.input, tc.max)
 			if tc.wantEqual && got != tc.wantEqualV {
 				t.Errorf("got %q, want %q", got, tc.wantEqualV)
 			}

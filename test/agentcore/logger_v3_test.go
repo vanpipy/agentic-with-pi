@@ -1,21 +1,17 @@
-package agentcore
+package agentcore_test
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"sync"
 	"testing"
+
+	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 )
 
-func newV3TestAgent() (*Agent, *bytes.Buffer) {
+func newV3TestAgent() (*agentcore.Agent, *bytes.Buffer) {
 	var buf bytes.Buffer
-	a := &Agent{
-		LogWriter:     &buf,
-		logMu:         sync.Mutex{},
-		logBuf:        bufio.NewWriterSize(&buf, 4096),
-		logFileOpened: true,
-	}
+	a := agentcore.NewAgentWithLogWriterForTest(&buf)
+	a.SetLogFileOpenedForTest(true)
 	return a, &buf
 }
 
@@ -30,7 +26,7 @@ func parseV3Line(t *testing.T, line []byte) map[string]any {
 
 func TestRoundtripTurnStartEntry(t *testing.T) {
 	obs := 24512
-	entry := turnStartEntry{
+	entry := agentcore.TurnStartEntry{
 		Kind:                "turn_start",
 		Version:             3,
 		At:                  "2026-09-24T03:00:00Z",
@@ -44,7 +40,7 @@ func TestRoundtripTurnStartEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back turnStartEntry
+	var back agentcore.TurnStartEntry
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -67,7 +63,7 @@ func TestRoundtripTurnStartEntry(t *testing.T) {
 }
 
 func TestRoundtripTurnStartEntryOmitsObservedWhenNil(t *testing.T) {
-	entry := turnStartEntry{
+	entry := agentcore.TurnStartEntry{
 		Kind:           "turn_start",
 		Version:        3,
 		At:             "2026-09-24T03:00:00Z",
@@ -87,7 +83,7 @@ func TestRoundtripTurnStartEntryOmitsObservedWhenNil(t *testing.T) {
 
 func TestRoundtripTurnResponseEntry(t *testing.T) {
 	ttft := int64(312)
-	entry := turnResponseEntry{
+	entry := agentcore.TurnResponseEntry{
 		Kind:             "turn_response",
 		Version:          3,
 		At:               "2026-09-24T03:00:01Z",
@@ -105,7 +101,7 @@ func TestRoundtripTurnResponseEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back turnResponseEntry
+	var back agentcore.TurnResponseEntry
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -128,7 +124,7 @@ func TestRoundtripTurnResponseEntry(t *testing.T) {
 }
 
 func TestRoundtripTurnResponseEntryOmitsTTFTWhenNil(t *testing.T) {
-	entry := turnResponseEntry{
+	entry := agentcore.TurnResponseEntry{
 		Kind:         "turn_response",
 		Version:      3,
 		At:           "2026-09-24T03:00:01Z",
@@ -148,7 +144,7 @@ func TestRoundtripTurnResponseEntryOmitsTTFTWhenNil(t *testing.T) {
 }
 
 func TestRoundtripToolDedupHitEntry(t *testing.T) {
-	entry := toolDedupHitEntry{
+	entry := agentcore.ToolDedupHitEntry{
 		Kind:            "tool_dedup_hit",
 		Version:         3,
 		At:              "2026-09-24T03:00:02Z",
@@ -160,7 +156,7 @@ func TestRoundtripToolDedupHitEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back toolDedupHitEntry
+	var back agentcore.ToolDedupHitEntry
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -170,7 +166,7 @@ func TestRoundtripToolDedupHitEntry(t *testing.T) {
 }
 
 func TestRoundtripCompactionV3Entry(t *testing.T) {
-	entry := compactionV3Entry{
+	entry := agentcore.CompactionV3Entry{
 		Kind:          "compaction_v3",
 		Version:       3,
 		At:            "2026-09-24T03:00:03Z",
@@ -187,7 +183,7 @@ func TestRoundtripCompactionV3Entry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back compactionV3Entry
+	var back agentcore.CompactionV3Entry
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -200,7 +196,7 @@ func TestRoundtripCompactionV3Entry(t *testing.T) {
 }
 
 func TestRoundtripCompactionV3EntryOmitsTriggerDetail(t *testing.T) {
-	entry := compactionV3Entry{
+	entry := agentcore.CompactionV3Entry{
 		Kind:         "compaction_v3",
 		Version:      3,
 		At:           "2026-09-24T03:00:03Z",
@@ -222,7 +218,7 @@ func TestRoundtripCompactionV3EntryOmitsTriggerDetail(t *testing.T) {
 }
 
 func TestRoundtripErrorV3Entry(t *testing.T) {
-	entry := errorV3Entry{
+	entry := agentcore.ErrorV3Entry{
 		Kind:       "error",
 		Version:    3,
 		At:         "2026-09-24T03:00:04Z",
@@ -237,7 +233,7 @@ func TestRoundtripErrorV3Entry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	var back errorV3Entry
+	var back agentcore.ErrorV3Entry
 	if err := json.Unmarshal(raw, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -250,7 +246,7 @@ func TestRoundtripErrorV3Entry(t *testing.T) {
 }
 
 func TestRoundtripErrorV3EntryOmitsEmptyOptionalFields(t *testing.T) {
-	entry := errorV3Entry{
+	entry := agentcore.ErrorV3Entry{
 		Kind:       "error",
 		Version:    3,
 		At:         "2026-09-24T03:00:04Z",
@@ -273,20 +269,18 @@ func TestRoundtripErrorV3EntryOmitsEmptyOptionalFields(t *testing.T) {
 
 func TestAgentExposesV3WriteMethods(t *testing.T) {
 	a, _ := newV3TestAgent()
-	a.logMu.Lock()
-	a.writeTurnStartLocked("msg-1")
-	a.writeTurnResponseLocked("model", "vendor", "end_turn", 100, nil, 0, 0, 0)
-	a.writeToolDedupHitLocked("bash", "deadbeef", 7)
-	a.writeCompactionV3Locked("reactive_threshold", "", "reactive", 1000, 200, 5, "m", 50)
-	a.writeErrorV3Locked("tool_invoke", "", "boom", 0, false)
-	a.logMu.Unlock()
+	a.WriteTurnStartForTest("msg-1")
+	a.WriteTurnResponseForTest("model", "vendor", "end_turn", 100, nil, 0, 0, 0)
+	a.WriteToolDedupHitForTest("bash", "deadbeef", 7)
+	a.WriteCompactionV3ForTest("reactive_threshold", "", "reactive", 1000, 200, 5, "m", 50)
+	a.WriteErrorV3ForTest("tool_invoke", "", "boom", 0, false)
 }
 
 func TestAgentWriteMethodsAreNoopWithoutLogWriter(t *testing.T) {
-	a := &Agent{}
-	a.writeTurnStartLocked("msg-1")
-	a.writeTurnResponseLocked("m", "v", "stop", 1, nil, 0, 0, 0)
-	a.writeToolDedupHitLocked("bash", "x", 1)
-	a.writeCompactionV3Locked("manual_command", "", "reactive", 1, 1, 1, "m", 1)
-	a.writeErrorV3Locked("aft_worker", "crash", "boom", 1, false)
+	a := &agentcore.Agent{}
+	a.WriteTurnStartForTest("msg-1")
+	a.WriteTurnResponseForTest("m", "v", "stop", 1, nil, 0, 0, 0)
+	a.WriteToolDedupHitForTest("bash", "x", 1)
+	a.WriteCompactionV3ForTest("manual_command", "", "reactive", 1, 1, 1, "m", 1)
+	a.WriteErrorV3ForTest("aft_worker", "crash", "boom", 1, false)
 }

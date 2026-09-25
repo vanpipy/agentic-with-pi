@@ -1020,12 +1020,42 @@ func NewAgentWithLogBufForTest(w io.Writer) *Agent {
 	}
 }
 
+func NewAgentWithLogWriterForTest(w io.Writer) *Agent {
+	return &Agent{
+		LogWriter: w,
+		logBuf:    bufio.NewWriterSize(w, 4096),
+		logMu:     sync.Mutex{},
+	}
+}
+
+func (a *Agent) SetCoreForTest(c llm.Core) {
+	a.core = c
+}
+
 func (a *Agent) FlushLogForTest() {
 	a.logMu.Lock()
 	defer a.logMu.Unlock()
 	if a.logBuf != nil {
 		_ = a.logBuf.Flush()
 	}
+}
+
+func (a *Agent) LockLogForTest() {
+	a.logMu.Lock()
+}
+
+func (a *Agent) UnlockLogForTest() {
+	a.logMu.Unlock()
+}
+
+func (a *Agent) SetLogFileOpenedForTest(v bool) {
+	a.logFileOpened = v
+}
+
+func (a *Agent) CurrentParentIDForTest() string {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	return a.currentParentID
 }
 
 func (a *Agent) WriteLegacyEventForTest(ev Event) {

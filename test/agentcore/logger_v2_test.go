@@ -1,14 +1,13 @@
-package agentcore
+package agentcore_test
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 
+	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -19,22 +18,14 @@ type alignedEnvelope struct {
 	Entry   json.RawMessage `json:"entry"`
 }
 
-func newTestAgentWithBuf() (*Agent, *bytes.Buffer) {
+func newTestAgentWithBuf() (*agentcore.Agent, *bytes.Buffer) {
 	var buf bytes.Buffer
-	a := &Agent{
-		LogWriter: &buf,
-		logBuf:    bufio.NewWriterSize(&buf, 4096),
-		logMu:     sync.Mutex{},
-	}
+	a := agentcore.NewAgentWithLogWriterForTest(&buf)
 	return a, &buf
 }
 
-func flushAgentLog(a *Agent) {
-	a.logMu.Lock()
-	defer a.logMu.Unlock()
-	if a.logBuf != nil {
-		_ = a.logBuf.Flush()
-	}
+func flushAgentLog(a *agentcore.Agent) {
+	a.FlushLogForTest()
 }
 
 func parseEnvelope(t *testing.T, line string) alignedEnvelope {
@@ -97,9 +88,7 @@ func TestWriteMessageUpdatesCurrentParentID(t *testing.T) {
 	if err := a.WriteMessage(msg); err != nil {
 		t.Fatalf("WriteMessage: %v", err)
 	}
-	a.logMu.Lock()
-	got := a.currentParentID
-	a.logMu.Unlock()
+	got := a.CurrentParentIDForTest()
 	if got != "msg-fixed-id-1" {
 		t.Errorf("currentParentID=%q, want msg-fixed-id-1", got)
 	}
@@ -184,7 +173,7 @@ func TestWriteCustomMessageEmitsVersion2CustomMessageEnvelope(t *testing.T) {
 func TestWriteAlignedEventUserMessageEmitsUserRoleMessage(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	a.writeAlignedEvent(Event{Category: EventUserMessage, Content: "what time is it"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventUserMessage, Content: "what time is it"})
 	flushAgentLog(a)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -219,18 +208,18 @@ func TestWriteAlignedEventUserMessageEmitsUserRoleMessage(t *testing.T) {
 func TestWriteAlignedEventFullChainProducesFourMessages(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	events := []Event{
-		{Category: EventUserMessage, Content: "what time is it"},
-		{Category: EventThoughtStart},
-		{Category: EventThoughtChunk, Reasoning: "The user "},
-		{Category: EventThoughtChunk, Reasoning: "wants time"},
-		{Category: EventThoughtEnd},
-		{Category: EventTool, ToolName: "bash", ToolArgs: `{"command":"date","intent":"Get current time"}`, ToolIntent: "Get current time"},
-		{Category: EventObserve, ToolName: "bash", ToolResult: "Wed Sep 23 14:00:00 UTC", ToolIntent: "Get current time"},
-		{Category: EventFinalAnswer, Content: "It's 2 PM"},
+	events := []agentcore.Event{
+		{Category: agentcore.EventUserMessage, Content: "what time is it"},
+		{Category: agentcore.EventThoughtStart},
+		{Category: agentcore.EventThoughtChunk, Reasoning: "The user "},
+		{Category: agentcore.EventThoughtChunk, Reasoning: "wants time"},
+		{Category: agentcore.EventThoughtEnd},
+		{Category: agentcore.EventTool, ToolName: "bash", ToolArgs: `{"command":"date","intent":"Get current time"}`, ToolIntent: "Get current time"},
+		{Category: agentcore.EventObserve, ToolName: "bash", ToolResult: "Wed Sep 23 14:00:00 UTC", ToolIntent: "Get current time"},
+		{Category: agentcore.EventFinalAnswer, Content: "It's 2 PM"},
 	}
 	for _, ev := range events {
-		a.writeAlignedEvent(ev)
+		a.WriteAlignedEventForTest(ev)
 	}
 	flushAgentLog(a)
 
@@ -334,11 +323,11 @@ func TestWriteAlignedEventFullChainProducesFourMessages(t *testing.T) {
 func TestWriteAlignedEventErrorEmitsMessageThenCustomToolError(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	a.writeAlignedEvent(Event{Category: EventUserMessage, Content: "hi"})
-	a.writeAlignedEvent(Event{Category: EventThoughtStart})
-	a.writeAlignedEvent(Event{Category: EventThoughtChunk, Reasoning: "thinking..."})
-	a.writeAlignedEvent(Event{Category: EventFinalAnswer, Content: "answer"})
-	a.writeAlignedEvent(Event{Category: EventError, ToolError: "boom"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventUserMessage, Content: "hi"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtStart})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "thinking..."})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventFinalAnswer, Content: "answer"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventError, ToolError: "boom"})
 	flushAgentLog(a)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -390,15 +379,15 @@ func TestWriteAlignedEventErrorEmitsMessageThenCustomToolError(t *testing.T) {
 func TestWriteAlignedEventObserveErrorPopulatesToolErrorDetails(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	events := []Event{
-		{Category: EventUserMessage, Content: "try"},
-		{Category: EventThoughtStart},
-		{Category: EventThoughtEnd},
-		{Category: EventTool, ToolName: "bash", ToolArgs: `{"command":"false","intent":"fail"}`, ToolIntent: "fail"},
-		{Category: EventObserve, ToolName: "bash", ToolError: "exit 1", ToolIntent: "fail"},
+	events := []agentcore.Event{
+		{Category: agentcore.EventUserMessage, Content: "try"},
+		{Category: agentcore.EventThoughtStart},
+		{Category: agentcore.EventThoughtEnd},
+		{Category: agentcore.EventTool, ToolName: "bash", ToolArgs: `{"command":"false","intent":"fail"}`, ToolIntent: "fail"},
+		{Category: agentcore.EventObserve, ToolName: "bash", ToolError: "exit 1", ToolIntent: "fail"},
 	}
 	for _, ev := range events {
-		a.writeAlignedEvent(ev)
+		a.WriteAlignedEventForTest(ev)
 	}
 	flushAgentLog(a)
 
@@ -432,7 +421,7 @@ func TestWriteAlignedEventObserveErrorPopulatesToolErrorDetails(t *testing.T) {
 func TestLegacyWriteEventStillEmitsKindEvent(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	a.writeEvent(42, Event{Category: EventFinalAnswer, Content: "legacy answer"})
+	a.WriteEventForTest(42, agentcore.Event{Category: agentcore.EventFinalAnswer, Content: "legacy answer"})
 	flushAgentLog(a)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -466,7 +455,7 @@ func TestLegacyWriteEventStillEmitsKindEvent(t *testing.T) {
 func TestWriteAlignedEventThoughtChunkWithoutStartIsNoop(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
-	a.writeAlignedEvent(Event{Category: EventThoughtChunk, Reasoning: "orphan chunk"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "orphan chunk"})
 	flushAgentLog(a)
 
 	if got := buf.String(); got != "" {
@@ -503,11 +492,11 @@ func TestWriteAlignedEventPropagatesUsageStatsToAssistantMessage(t *testing.T) {
 	a, buf := newTestAgentWithBuf()
 
 	usage := &llm.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150}
-	a.writeAlignedEvent(Event{Category: EventUserMessage, Content: "q"})
-	a.writeAlignedEvent(Event{Category: EventThoughtStart})
-	a.writeAlignedEvent(Event{Category: EventThoughtChunk, Reasoning: "think"})
-	a.writeAlignedEvent(Event{Category: EventThoughtEnd, Usage: usage})
-	a.writeAlignedEvent(Event{Category: EventFinalAnswer, Content: "a", Usage: usage})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventUserMessage, Content: "q"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtStart})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "think"})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventThoughtEnd, Usage: usage})
+	a.WriteAlignedEventForTest(agentcore.Event{Category: agentcore.EventFinalAnswer, Content: "a", Usage: usage})
 	flushAgentLog(a)
 
 	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")

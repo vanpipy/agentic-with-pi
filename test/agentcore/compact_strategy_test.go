@@ -1,10 +1,11 @@
-package agentcore
+package agentcore_test
 
 import (
 	"context"
 	"strings"
 	"testing"
 
+	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -16,107 +17,107 @@ func TestSelectStrategyTableDriven(t *testing.T) {
 	cases := []struct {
 		name     string
 		msgs     []llm.Message
-		settings CompactionSettings
+		settings agentcore.CompactionSettings
 		observed *int
-		want     CompactionStrategy
+		want     agentcore.CompactionStrategy
 	}{
 		{
 			name:     "disabled_falls_to_emergency",
 			msgs:     []llm.Message{{Role: "user", Content: "x"}},
-			settings: CompactionSettings{Enabled: false, ReserveTokens: 100, MaxContextTokens: 1000},
+			settings: agentcore.CompactionSettings{Enabled: false, ReserveTokens: 100, MaxContextTokens: 1000},
 			observed: none(),
-			want:     StrategyEmergency,
+			want:     agentcore.StrategyEmergency,
 		},
 		{
 			name:     "should_compact_returns_reactive",
 			msgs:     []llm.Message{{Role: "user", Content: strings.Repeat("a", 4000)}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000},
 			observed: big(strings.Repeat("a", 4000)),
-			want:     StrategyReactive,
+			want:     agentcore.StrategyReactive,
 		},
 		{
 			name:     "below_threshold_with_proactive_returns_proactive",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true},
 			observed: small("short"),
-			want:     StrategyProactive,
+			want:     agentcore.StrategyProactive,
 		},
 		{
 			name:     "below_threshold_with_semantic_returns_semantic",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Semantic: true},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Semantic: true},
 			observed: small("short"),
-			want:     StrategySemantic,
+			want:     agentcore.StrategySemantic,
 		},
 		{
 			name:     "proactive_beats_semantic_in_precedence",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true, Semantic: true},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true, Semantic: true},
 			observed: small("short"),
-			want:     StrategyProactive,
+			want:     agentcore.StrategyProactive,
 		},
 		{
 			name:     "reactive_beats_proactive_in_precedence",
 			msgs:     []llm.Message{{Role: "user", Content: strings.Repeat("a", 4000)}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000, Proactive: true},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000, Proactive: true},
 			observed: big(strings.Repeat("a", 4000)),
-			want:     StrategyReactive,
+			want:     agentcore.StrategyReactive,
 		},
 		{
 			name:     "no_flags_falls_to_emergency",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000},
+			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000},
 			observed: small("short"),
-			want:     StrategyEmergency,
+			want:     agentcore.StrategyEmergency,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := SelectStrategy(tc.msgs, tc.settings, tc.observed)
+			got := agentcore.SelectStrategy(tc.msgs, tc.settings, tc.observed)
 			if got != tc.want {
-				t.Errorf("SelectStrategy = %q, want %q", got, tc.want)
+				t.Errorf("agentcore.SelectStrategy = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
 func TestCompactionStrategyConstants(t *testing.T) {
-	if string(StrategyReactive) != "reactive" {
-		t.Errorf("StrategyReactive = %q, want reactive", StrategyReactive)
+	if string(agentcore.StrategyReactive) != "reactive" {
+		t.Errorf("agentcore.StrategyReactive = %q, want reactive", agentcore.StrategyReactive)
 	}
-	if string(StrategyProactive) != "proactive" {
-		t.Errorf("StrategyProactive = %q, want proactive", StrategyProactive)
+	if string(agentcore.StrategyProactive) != "proactive" {
+		t.Errorf("agentcore.StrategyProactive = %q, want proactive", agentcore.StrategyProactive)
 	}
-	if string(StrategySemantic) != "semantic" {
-		t.Errorf("StrategySemantic = %q, want semantic", StrategySemantic)
+	if string(agentcore.StrategySemantic) != "semantic" {
+		t.Errorf("agentcore.StrategySemantic = %q, want semantic", agentcore.StrategySemantic)
 	}
-	if string(StrategyEmergency) != "emergency" {
-		t.Errorf("StrategyEmergency = %q, want emergency", StrategyEmergency)
+	if string(agentcore.StrategyEmergency) != "emergency" {
+		t.Errorf("agentcore.StrategyEmergency = %q, want emergency", agentcore.StrategyEmergency)
 	}
 }
 
 func TestCompactionActionConstants(t *testing.T) {
-	if string(ActionNone) != "none" {
-		t.Errorf("ActionNone = %q, want none", ActionNone)
+	if string(agentcore.ActionNone) != "none" {
+		t.Errorf("agentcore.ActionNone = %q, want none", agentcore.ActionNone)
 	}
-	if string(ActionBackgroundStarted) != "background_started" {
-		t.Errorf("ActionBackgroundStarted = %q, want background_started", ActionBackgroundStarted)
+	if string(agentcore.ActionBackgroundStarted) != "background_started" {
+		t.Errorf("agentcore.ActionBackgroundStarted = %q, want background_started", agentcore.ActionBackgroundStarted)
 	}
-	if string(ActionFullCompacted) != "full_compacted" {
-		t.Errorf("ActionFullCompacted = %q, want full_compacted", ActionFullCompacted)
+	if string(agentcore.ActionFullCompacted) != "full_compacted" {
+		t.Errorf("agentcore.ActionFullCompacted = %q, want full_compacted", agentcore.ActionFullCompacted)
 	}
-	if string(ActionEmergencyHard) != "emergency_hard" {
-		t.Errorf("ActionEmergencyHard = %q, want emergency_hard", ActionEmergencyHard)
+	if string(agentcore.ActionEmergencyHard) != "emergency_hard" {
+		t.Errorf("agentcore.ActionEmergencyHard = %q, want emergency_hard", agentcore.ActionEmergencyHard)
 	}
-	if string(ActionIncrementalRecovered) != "incremental_recovered" {
-		t.Errorf("ActionIncrementalRecovered = %q, want incremental_recovered", ActionIncrementalRecovered)
+	if string(agentcore.ActionIncrementalRecovered) != "incremental_recovered" {
+		t.Errorf("agentcore.ActionIncrementalRecovered = %q, want incremental_recovered", agentcore.ActionIncrementalRecovered)
 	}
 }
 
 func TestCompactionStatsFields(t *testing.T) {
 	obs := 1234
-	s := CompactionStats{
+	s := agentcore.CompactionStats{
 		TotalTurns:          10,
 		ActiveMessages:      20,
 		HasSummary:          true,
@@ -138,14 +139,14 @@ func TestCompactionStatsFields(t *testing.T) {
 }
 
 func TestProactiveActOnReturnsActionNone(t *testing.T) {
-	a := &Agent{}
+	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := StrategyProactive.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := agentcore.StrategyProactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != ActionNone {
-		t.Errorf("action = %q, want %q", action, ActionNone)
+	if action != agentcore.ActionNone {
+		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -153,14 +154,14 @@ func TestProactiveActOnReturnsActionNone(t *testing.T) {
 }
 
 func TestSemanticActOnReturnsActionNone(t *testing.T) {
-	a := &Agent{}
+	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := StrategySemantic.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := agentcore.StrategySemantic.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != ActionNone {
-		t.Errorf("action = %q, want %q", action, ActionNone)
+	if action != agentcore.ActionNone {
+		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -168,14 +169,14 @@ func TestSemanticActOnReturnsActionNone(t *testing.T) {
 }
 
 func TestEmergencyActOnReturnsActionNone(t *testing.T) {
-	a := &Agent{}
+	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := StrategyEmergency.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := agentcore.StrategyEmergency.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != ActionNone {
-		t.Errorf("action = %q, want %q", action, ActionNone)
+	if action != agentcore.ActionNone {
+		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -183,13 +184,13 @@ func TestEmergencyActOnReturnsActionNone(t *testing.T) {
 }
 
 func TestReactiveActOnEmptyMsgsReturnsInput(t *testing.T) {
-	a := &Agent{}
-	out, action, err := StrategyReactive.ActOn(context.Background(), a, nil, nil)
+	a := &agentcore.Agent{}
+	out, action, err := agentcore.StrategyReactive.ActOn(context.Background(), a, nil, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != ActionFullCompacted {
-		t.Errorf("action = %q, want %q (Reactive returns full_compacted)", action, ActionFullCompacted)
+	if action != agentcore.ActionFullCompacted {
+		t.Errorf("action = %q, want %q (Reactive returns full_compacted)", action, agentcore.ActionFullCompacted)
 	}
 	if out != nil {
 		t.Errorf("out = %+v, want nil", out)
@@ -197,19 +198,20 @@ func TestReactiveActOnEmptyMsgsReturnsInput(t *testing.T) {
 }
 
 func TestReactiveActOnDelegatesToRunReactive(t *testing.T) {
-	a := &Agent{core: &strategyTestFakeCore{}}
+	a := &agentcore.Agent{}
+	a.SetCoreForTest(&strategyTestFakeCore{})
 	msgs := []llm.Message{
 		{Role: "system", Content: "sys"},
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
 		{Role: "user", Content: "u2"},
 	}
-	out, action, err := StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != ActionFullCompacted {
-		t.Errorf("action = %q, want %q", action, ActionFullCompacted)
+	if action != agentcore.ActionFullCompacted {
+		t.Errorf("action = %q, want %q", action, agentcore.ActionFullCompacted)
 	}
 	if len(out) < 2 {
 		t.Fatalf("expected system + summary + recent, got len=%d", len(out))
@@ -237,8 +239,8 @@ func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest
 }
 
 func TestStrategyEnumsAreDistinct(t *testing.T) {
-	all := []CompactionStrategy{StrategyReactive, StrategyProactive, StrategySemantic, StrategyEmergency}
-	seen := map[CompactionStrategy]bool{}
+	all := []agentcore.CompactionStrategy{agentcore.StrategyReactive, agentcore.StrategyProactive, agentcore.StrategySemantic, agentcore.StrategyEmergency}
+	seen := map[agentcore.CompactionStrategy]bool{}
 	for _, s := range all {
 		if seen[s] {
 			t.Errorf("duplicate strategy value: %q", s)
@@ -248,8 +250,8 @@ func TestStrategyEnumsAreDistinct(t *testing.T) {
 }
 
 func TestActionEnumsAreDistinct(t *testing.T) {
-	all := []CompactionAction{ActionNone, ActionBackgroundStarted, ActionFullCompacted, ActionEmergencyHard, ActionIncrementalRecovered}
-	seen := map[CompactionAction]bool{}
+	all := []agentcore.CompactionAction{agentcore.ActionNone, agentcore.ActionBackgroundStarted, agentcore.ActionFullCompacted, agentcore.ActionEmergencyHard, agentcore.ActionIncrementalRecovered}
+	seen := map[agentcore.CompactionAction]bool{}
 	for _, s := range all {
 		if seen[s] {
 			t.Errorf("duplicate action value: %q", s)
@@ -259,10 +261,10 @@ func TestActionEnumsAreDistinct(t *testing.T) {
 }
 
 func TestStrategyActOnCtxCancelled(t *testing.T) {
-	a := &Agent{}
+	a := &agentcore.Agent{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := StrategyProactive.ActOn(ctx, a, nil, nil)
+	_, _, err := agentcore.StrategyProactive.ActOn(ctx, a, nil, nil)
 	if err != nil {
 		t.Fatalf("proactive should not error on cancelled ctx for stub: %v", err)
 	}

@@ -1,4 +1,4 @@
-package json_rpc
+package json_rpc_test
 
 import (
 	"encoding/hex"
@@ -6,10 +6,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	jsonrpc "github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 func TestUUIDv7Format(t *testing.T) {
-	id := NewV7()
+	id := jsonrpc.NewV7()
 	if len(id) != 36 {
 		t.Fatalf("expected length 36, got %d (id=%q)", len(id), id)
 	}
@@ -32,7 +34,7 @@ func TestUUIDv7Format(t *testing.T) {
 
 func TestUUIDv7VersionAndVariant(t *testing.T) {
 	for i := 0; i < 1000; i++ {
-		id := NewV7()
+		id := jsonrpc.NewV7()
 		b, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
 		if err != nil {
 			t.Fatalf("decode %q: %v", id, err)
@@ -50,7 +52,7 @@ func TestUUIDv7VersionAndVariant(t *testing.T) {
 
 func TestUUIDv7TimestampRoundtrips(t *testing.T) {
 	before := time.Now().UnixMilli()
-	id := NewV7()
+	id := jsonrpc.NewV7()
 	after := time.Now().UnixMilli()
 
 	b, err := hex.DecodeString(strings.ReplaceAll(id, "-", ""))
@@ -73,7 +75,7 @@ func TestUUIDv7UniqueUnderRapidCalls(t *testing.T) {
 	const n = 1000
 	seen := make(map[string]struct{}, n)
 	for i := 0; i < n; i++ {
-		id := NewV7()
+		id := jsonrpc.NewV7()
 		if _, dup := seen[id]; dup {
 			t.Fatalf("collision after %d calls: id=%q", i, id)
 		}
@@ -82,9 +84,9 @@ func TestUUIDv7UniqueUnderRapidCalls(t *testing.T) {
 }
 
 func TestUUIDv7ChronologicalSortAcrossCalls(t *testing.T) {
-	first := NewV7()
+	first := jsonrpc.NewV7()
 	time.Sleep(2 * time.Millisecond)
-	second := NewV7()
+	second := jsonrpc.NewV7()
 	if first >= second {
 		t.Fatalf("expected second > first across ms boundary: first=%q second=%q", first, second)
 	}
@@ -95,7 +97,7 @@ func TestUUIDv7MonotonicWithinSingleMs(t *testing.T) {
 	const n = 100
 	ids := make([]string, n)
 	for i := 0; i < n; i++ {
-		ids[i] = NewV7()
+		ids[i] = jsonrpc.NewV7()
 	}
 	seen := make(map[string]struct{}, n)
 	for i, id := range ids {
@@ -116,7 +118,7 @@ func TestUUIDv7ConcurrentSafety(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < perGoroutine; i++ {
-				ids <- NewV7()
+				ids <- jsonrpc.NewV7()
 			}
 		}()
 	}

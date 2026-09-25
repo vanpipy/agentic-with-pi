@@ -86,6 +86,8 @@ var registry = []commandSpec{
 	},
 }
 
+var defaultCommandRegistry = registry
+
 func (m *Model) startResume(sessionID string) tea.Cmd {
 	if m.conn == nil {
 		return nil
@@ -266,6 +268,23 @@ func AllCommandSpecsForTest() []CommandSpec {
 		}
 	}
 	return out
+}
+
+func SetCommandRegistryForTest(specs []CommandSpec) {
+	out := make([]commandSpec, len(specs))
+	for i, s := range specs {
+		out[i] = commandSpec{
+			Name:        s.Name,
+			Description: s.Description,
+			Category:    s.Category,
+			HasArg:      s.HasArg,
+		}
+	}
+	registry = out
+}
+
+func RestoreDefaultCommandRegistryForTest() {
+	registry = defaultCommandRegistry
 }
 
 var skillRegistry *skills.Registry

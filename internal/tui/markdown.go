@@ -52,6 +52,12 @@ func resetMdRenderersForTest() {
 	mdRenderersOrder = nil
 }
 
+func ResetMdRenderersForTest() { resetMdRenderersForTest() }
+
+func GetMdRendererForTest(width int) *glamour.TermRenderer {
+	return getMdRenderer(width)
+}
+
 func renderMarkdownBody(text string, width int) string {
 	if strings.TrimSpace(text) == "" {
 		return ""

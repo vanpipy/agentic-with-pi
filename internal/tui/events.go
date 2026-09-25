@@ -101,3 +101,7 @@ func handleCustomEvent(c *chatModel, data []byte) {
 		c.appendSystem(systemPrefix.Render(" aborted") + durationHint.Render(" ("+d.Reason+")"))
 	}
 }
+
+func HandleServerEventForTest(t ChatModelT, sessionID *string, ev agentclient.Event) {
+	handleServerEvent(t.model, sessionID, ev)
+}
