@@ -230,10 +230,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				break
 			}
+
+			text := m.input.Value()
+			if isQuitCommand(text) {
+				if m.state == StateStreaming || m.state == StateCancelling {
+					if cancelCmd := m.cancel(); cancelCmd != nil {
+						cmds = append(cmds, cancelCmd)
+					}
+				}
+				m.input.Reset()
+				m.autocomplete.hide()
+				shouldQuit, cmd := m.executeCommand(text)
+				m.layout()
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				m.shutdown()
+				if shouldQuit {
+					cmds = append(cmds, tea.Quit)
+				}
+				return m, tea.Batch(cmds...)
+			}
+
 			if m.state == StateStreaming || m.state == StateCancelling {
 				break
 			}
-			text := m.input.Value()
 			if strings.TrimSpace(text) == "" {
 				break
 			}
@@ -566,6 +587,14 @@ func (m *Model) AutocompleteViewForTest() string { return m.autocomplete.View() 
 func (m *Model) ReadsScheduledThisUpdateForTest() int { return m.readsScheduledThisUpdate }
 
 func (m *Model) EventsForTest() <-chan agentclient.Event { return m.events }
+
+func isQuitCommand(text string) bool {
+	parsed, ok := parseCommand(text)
+	if !ok {
+		return false
+	}
+	return parsed.name == "quit"
+}
 
 func (m *Model) shutdown() {
 	if m.conn != nil {
