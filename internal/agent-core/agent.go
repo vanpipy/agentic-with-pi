@@ -19,6 +19,8 @@ import (
 
 const InvalidToolName = "invalid"
 
+const PreflightAbortThreshold = 2
+
 type EventCategory int
 
 const (
@@ -139,6 +141,7 @@ type Agent struct {
 	logFileOpened          bool
 	v3LogWriter            io.Writer
 	v3LogBuf               *bufio.Writer
+	preflightFailureStreak map[string]int
 }
 
 type Strategy interface {
@@ -318,11 +321,12 @@ func (r *ReActStrategy) ShouldAbort(msgs []llm.Message, lastFailedToolError stri
 	if lastFailedToolError == "" {
 		return nil
 	}
+	normalised := NormalizeToolError(lastFailedToolError)
 	consecutiveTurns := 0
 	i := len(msgs) - 1
 	for i >= 0 {
 		m := msgs[i]
-		if !(m.Role == "tool" && m.Content == lastFailedToolError) {
+		if !(m.Role == "tool" && NormalizeToolError(m.Content) == normalised) {
 			break
 		}
 		consecutiveTurns++
@@ -353,6 +357,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 		},
 		repeatedToolErrorLimit: 3,
 		ToolCacheSize:          20,
+		preflightFailureStreak: make(map[string]int),
 	}
 	a.toolResultCache = NewToolResultCache(a.ToolCacheSize)
 	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
@@ -415,6 +420,45 @@ func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }
 func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 	a.compaction = s
 	return a
+}
+
+func (a *Agent) ResetForRun() {
+	if a.preflightFailureStreak == nil {
+		a.preflightFailureStreak = make(map[string]int)
+		return
+	}
+	for k := range a.preflightFailureStreak {
+		delete(a.preflightFailureStreak, k)
+	}
+}
+
+func (a *Agent) PreflightFailureStreakForTest() map[string]int {
+	return a.preflightFailureStreak
+}
+
+func (a *Agent) ShouldAbort(msgs []llm.Message, lastFailedToolError string) error {
+	if err := a.checkPreflightStreak(); err != nil {
+		return err
+	}
+	return a.strategy.ShouldAbort(msgs, lastFailedToolError)
+}
+
+func (a *Agent) checkPreflightStreak() error {
+	if len(a.preflightFailureStreak) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(a.preflightFailureStreak))
+	for name := range a.preflightFailureStreak {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		streak := a.preflightFailureStreak[name]
+		if streak >= PreflightAbortThreshold {
+			return fmt.Errorf("Tool %s has produced invalid arguments %d turns in a row. The model cannot generate valid args for this tool. Stop calling it and either pick a different tool or ask the user for guidance.", name, streak)
+		}
+	}
+	return nil
 }
 
 func (a *Agent) CompactionSettingsForTest() CompactionSettings {
@@ -527,7 +571,7 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 		}
 		a.currentMsgs = msgs
 		lastFailed := lastFailedToolError(msgs)
-		if abortErr := a.strategy.ShouldAbort(msgs, lastFailed); abortErr != nil {
+		if abortErr := a.ShouldAbort(msgs, lastFailed); abortErr != nil {
 			a.logMu.Lock()
 			a.writeErrorV3Locked("tool_invoke", "", abortErr.Error(), 0, false)
 			a.logMu.Unlock()
@@ -594,7 +638,12 @@ func (a *Agent) LogEventForTest(ev Event) {
 
 func lastFailedToolError(msgs []llm.Message) string {
 	for _, m := range msgs {
-		if m.Role == "tool" && strings.HasPrefix(m.Content, "Tool ") && strings.Contains(m.Content, " failed: ") {
+		if m.Role != "tool" || !strings.HasPrefix(m.Content, "Tool ") {
+			continue
+		}
+		if strings.Contains(m.Content, " failed: ") ||
+			strings.Contains(m.Content, ": missing required field") ||
+			strings.Contains(m.Content, " is not registered") {
 			return m.Content
 		}
 	}
@@ -792,6 +841,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			return msgs, false
 		}
 		if preflight := a.preflightValidate(tc); preflight != "" {
+			a.preflightFailureStreak[tc.Function.Name]++
 			a.emit(ctx, ch, Event{Category: EventError, ToolName: tc.Function.Name, ToolError: preflight})
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: preflight})
 			msgs = appendSkippedToolResults(msgs, calls, i+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed preflight validation", tc.Function.Name, tc.Function.Name))
@@ -799,6 +849,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 		}
 		sig := toolCallDedupKey(tc.Function.Name, tc.Function.Arguments)
 		if cached, ok := a.toolResultCache.Get(sig); ok {
+			delete(a.preflightFailureStreak, tc.Function.Name)
 			if !a.emit(ctx, ch, Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: cached, ToolIntent: extractToolIntent(tc.Function.Arguments), FromCache: true}) {
 				return msgs, false
 			}
@@ -834,6 +885,7 @@ func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []l
 			continue
 		}
 		a.toolResultCache.Put(sig, result)
+		delete(a.preflightFailureStreak, tc.Function.Name)
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(result, tc.Function.Arguments, tc.Function.Name)})
 	}
 	return msgs, true
