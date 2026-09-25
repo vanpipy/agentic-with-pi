@@ -294,13 +294,50 @@ func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.StreamEve
 			result.finishReason = c.FinishReason
 		}
 		if len(c.Delta.ToolCalls) > 0 {
-			result.toolCalls = append(result.toolCalls, c.Delta.ToolCalls...)
+			for _, tc := range c.Delta.ToolCalls {
+				if tc.ID != "" {
+					idx := -1
+					for i := range result.toolCalls {
+						if result.toolCalls[i].ID == tc.ID {
+							idx = i
+							break
+						}
+					}
+					if idx >= 0 {
+						mergeToolCallDelta(&result.toolCalls[idx], tc)
+					} else {
+						result.toolCalls = append(result.toolCalls, tc)
+					}
+				} else if n := len(result.toolCalls); n > 0 {
+					mergeToolCallDelta(&result.toolCalls[n-1], tc)
+				} else {
+					result.toolCalls = append(result.toolCalls, tc)
+				}
+			}
 		}
 	}
 	if ev.Chunk.Usage != nil {
 		result.usage = ev.Chunk.Usage
 	}
 	return true
+}
+
+func mergeToolCallDelta(existing *llm.ToolCall, delta llm.ToolCall) {
+	if delta.Function.Arguments != "" {
+		if isPlaceholderToolArgs(existing.Function.Arguments) {
+			existing.Function.Arguments = delta.Function.Arguments
+		} else {
+			existing.Function.Arguments += delta.Function.Arguments
+		}
+	}
+	if delta.Function.Name != "" && existing.Function.Name == "" {
+		existing.Function.Name = delta.Function.Name
+	}
+}
+
+func isPlaceholderToolArgs(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	return trimmed == "" || trimmed == "{}"
 }
 
 func (r *ReActStrategy) ShouldAbort(msgs []llm.Message, lastFailedToolError string) error {
@@ -830,6 +867,12 @@ func (a *Agent) preflightValidate(tc llm.ToolCall) string {
 
 func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
 	for i, tc := range calls {
+		if strings.TrimSpace(tc.Function.Arguments) == "" {
+			errMsg := fmt.Sprintf("Tool %s skipped: empty arguments; tool_call was emitted with no arguments, skipping execution", tc.Function.Name)
+			a.emit(ctx, ch, Event{Category: EventError, ToolName: tc.Function.Name, ToolError: errMsg})
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: errMsg})
+			continue
+		}
 		tool, ok := a.findTool(tc.Function.Name)
 		if !ok {
 			available := a.toolNamesForError()
@@ -955,6 +998,46 @@ func AgentExecuteToolsWithChanForTest(a *Agent, calls []llm.ToolCall, msgs []llm
 		events = append(events, ev)
 	}
 	return events, updated, ok
+}
+
+func AccumulateStreamToolCallsForTest(events []llm.StreamEvent) []llm.ToolCall {
+	rs := &ReActStrategy{}
+	var result turnResult
+	var contentBuf, reasoningBuf strings.Builder
+	emitNoop := func(_ context.Context, _ Event) bool { return true }
+	for _, ev := range events {
+		if !rs.processStreamEvent(context.Background(), ev, &result, &contentBuf, &reasoningBuf, emitNoop) {
+			break
+		}
+	}
+	return result.toolCalls
+}
+
+func NewAgentWithLogBufForTest(w io.Writer) *Agent {
+	return &Agent{
+		LogWriter: w,
+		logBuf:    bufio.NewWriterSize(w, 4096),
+	}
+}
+
+func (a *Agent) FlushLogForTest() {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	if a.logBuf != nil {
+		_ = a.logBuf.Flush()
+	}
+}
+
+func (a *Agent) WriteLegacyEventForTest(ev Event) {
+	a.logMu.Lock()
+	a.logSeq++
+	seq := a.logSeq
+	a.logMu.Unlock()
+	if a.LogWriter == nil {
+		return
+	}
+	a.writeEvent(seq, ev)
+	a.FlushLogForTest()
 }
 
 func (a *Agent) findTool(name string) (Tool, bool) {
