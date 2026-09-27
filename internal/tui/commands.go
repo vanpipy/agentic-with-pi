@@ -374,6 +374,12 @@ func ExecuteCommandForTest(m *Model, text string) (bool, tea.Cmd) {
 	return m.executeCommand(text)
 }
 
+func StartResumeForTest(m *Model, sessionID string) tea.Cmd { return m.startResume(sessionID) }
+
+func ShowSessionPickerForTest(m *Model) tea.Cmd { return m.showSessionPicker() }
+
+func RunCompactForTest(m *Model, force bool) tea.Cmd { return m.runCompact(force) }
+
 func ChatMessagesForTest(m *Model) []string {
 	if m == nil || m.chat == nil {
 		return nil
@@ -409,6 +415,13 @@ func SetLastPromptForTest(m *Model, val string) {
 		return
 	}
 	m.lastPrompt = val
+}
+
+func SetSessionForTest(m *Model, id string) {
+	if m == nil {
+		return
+	}
+	m.session = id
 }
 
 var _ tea.Cmd

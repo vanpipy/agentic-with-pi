@@ -91,3 +91,40 @@ func (p *sessionPickerModel) View() string {
 	}
 	return p.list.View()
 }
+
+func SessionItemTitleForTest(id string) string {
+	return sessionItem{id: id}.Title()
+}
+
+func SessionItemDescriptionForTest(model string, events int) string {
+	return sessionItem{model: model, events: events}.Description()
+}
+
+func SessionItemFilterValueForTest(id, model string) string {
+	return sessionItem{id: id, model: model}.FilterValue()
+}
+
+func SessionItemCategoryForTest() string {
+	return sessionItem{}.Category()
+}
+
+type PickerItemForTest struct {
+	ID        string
+	Model     string
+	StartedAt string
+	Events    int
+}
+
+func (m *Model) PickerShowForTest(items []PickerItemForTest) {
+	si := make([]sessionItem, len(items))
+	for i, it := range items {
+		si[i] = sessionItem{id: it.ID, model: it.Model, startedAt: it.StartedAt, events: it.Events}
+	}
+	m.picker.Show(si)
+}
+
+func (m *Model) PickerHideForTest() { m.picker.hide() }
+func (m *Model) PickerNextForTest() { m.picker.next() }
+func (m *Model) PickerPrevForTest() { m.picker.prev() }
+
+func (m *Model) PickerCurrentForTest() string { return m.picker.current() }
