@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
-	tea "charm.land/bubbletea/v2"
 	"github.com/vanpiyp/awp/internal/tui"
 )
 
