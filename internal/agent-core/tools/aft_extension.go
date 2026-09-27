@@ -135,7 +135,9 @@ func NewAftNestedToolWithFallbackForTest(backend *AftBackend, name, description 
 	return aftCallToolNested(backend, name, description, schema, fallback)
 }
 
-func transformReadOrWriteArgs(argsJSON string) string {
+type argOp func(map[string]any)
+
+func applyArgTransform(argsJSON string, ops ...argOp) string {
 	if argsJSON == "" {
 		return argsJSON
 	}
@@ -143,21 +145,40 @@ func transformReadOrWriteArgs(argsJSON string) string {
 	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 		return argsJSON
 	}
-	if v, ok := m["file"]; ok {
-		if _, has := m["path"]; !has {
-			m["path"] = v
-		}
-		delete(m, "file")
+	for _, op := range ops {
+		op(m)
 	}
-	delete(m, "start_line")
-	delete(m, "end_line")
-	delete(m, "max_bytes")
-	delete(m, "hashline")
 	b, err := json.Marshal(m)
 	if err != nil {
 		return argsJSON
 	}
 	return string(b)
+}
+
+func renameField(oldKey, newKey string) argOp {
+	return func(m map[string]any) {
+		if v, ok := m[oldKey]; ok {
+			if _, has := m[newKey]; !has {
+				m[newKey] = v
+			}
+			delete(m, oldKey)
+		}
+	}
+}
+
+func dropFields(keys ...string) argOp {
+	return func(m map[string]any) {
+		for _, k := range keys {
+			delete(m, k)
+		}
+	}
+}
+
+func transformReadOrWriteArgs(argsJSON string) string {
+	return applyArgTransform(argsJSON,
+		renameField("file", "path"),
+		dropFields("start_line", "end_line", "max_bytes", "hashline"),
+	)
 }
 
 func transformEditMatchArgs(argsJSON string) (string, error) {
@@ -173,24 +194,22 @@ func transformEditMatchArgs(argsJSON string) (string, error) {
 	if err := json.Unmarshal([]byte(argsJSON), &src); err != nil {
 		return "", fmt.Errorf("edit_match fallback: %w", err)
 	}
-	type goEdit struct {
+	type op struct {
 		OldText    string `json:"old_text"`
 		NewText    string `json:"new_text"`
 		ReplaceAll bool   `json:"replace_all"`
 	}
-	type goEditArgs struct {
-		Path  string   `json:"path"`
-		Edits []goEdit `json:"edits"`
-	}
-	out := goEditArgs{
+	b, err := json.Marshal(struct {
+		Path  string `json:"path"`
+		Edits []op   `json:"edits"`
+	}{
 		Path: src.Path,
-		Edits: []goEdit{{
+		Edits: []op{{
 			OldText:    src.OldString,
 			NewText:    src.NewString,
 			ReplaceAll: src.ReplaceAll,
 		}},
-	}
-	b, err := json.Marshal(out)
+	})
 	if err != nil {
 		return "", fmt.Errorf("edit_match fallback marshal: %w", err)
 	}
@@ -198,77 +217,39 @@ func transformEditMatchArgs(argsJSON string) (string, error) {
 }
 
 func transformAgentGrepArgs(argsJSON string) string {
-	if argsJSON == "" {
-		return argsJSON
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
-		return argsJSON
-	}
-	if v, ok := m["query"]; ok {
-		if _, has := m["pattern"]; !has {
-			m["pattern"] = v
-		}
-		delete(m, "query")
-	}
-	if v, ok := m["ignore_case"]; ok {
-		if _, has := m["ignoreCase"]; !has {
-			m["ignoreCase"] = v
-		}
-		delete(m, "ignore_case")
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return argsJSON
-	}
-	return string(b)
+	return applyArgTransform(argsJSON,
+		renameField("query", "pattern"),
+		renameField("ignore_case", "ignoreCase"),
+	)
 }
 
 func transformBashArgs(argsJSON string) string {
-	if argsJSON == "" {
-		return argsJSON
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
-		return argsJSON
-	}
-	delete(m, "background")
-	delete(m, "wait")
-	delete(m, "compressed")
-	if v, ok := m["timeout"]; ok {
-		if n, ok := v.(float64); ok && n > 0 {
-			m["timeout"] = int(n) / 1000
-			if int(n)%1000 != 0 {
-				m["timeout"] = int(n)/1000 + 1
+	return applyArgTransform(argsJSON,
+		dropFields("background", "wait", "compressed"),
+		func(m map[string]any) {
+			if v, ok := m["timeout"]; ok {
+				if n, ok := v.(float64); ok && n > 0 {
+					m["timeout"] = int(n) / 1000
+					if int(n)%1000 != 0 {
+						m["timeout"] = int(n)/1000 + 1
+					}
+				}
 			}
-		}
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return argsJSON
-	}
-	return string(b)
+		},
+	)
 }
 
 func transformLsArgs(argsJSON string) string {
-	if argsJSON == "" {
-		return argsJSON
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
-		return argsJSON
-	}
-	if v, ok := m["depth"]; ok {
-		delete(m, "depth")
-		if n, ok := v.(float64); ok && n <= 0 {
-			if _, has := m["limit"]; !has {
-				m["limit"] = 500
+	return applyArgTransform(argsJSON,
+		func(m map[string]any) {
+			if v, ok := m["depth"]; ok {
+				delete(m, "depth")
+				if n, ok := v.(float64); ok && n <= 0 {
+					if _, has := m["limit"]; !has {
+						m["limit"] = 500
+					}
+				}
 			}
-		}
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		return argsJSON
-	}
-	return string(b)
+		},
+	)
 }
