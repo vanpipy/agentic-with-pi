@@ -592,6 +592,8 @@ func (m *Model) InputValueForTest() string { return m.input.Value() }
 
 func (m *Model) AutocompleteViewForTest() string { return m.autocomplete.View() }
 
+func (m *Model) AcceptAutocompleteForTest() { m.acceptAutocomplete() }
+
 func (m *Model) ReadsScheduledThisUpdateForTest() int { return m.readsScheduledThisUpdate }
 
 func (m *Model) EventsForTest() <-chan agentclient.Event { return m.events }
@@ -604,6 +606,51 @@ func (m *Model) CancelForTest() tea.Cmd { return m.cancel() }
 
 func StreamEventMsgForTest(ev agentclient.Event, err error, done bool) tea.Msg {
 	return streamEventMsg{ev: ev, err: err, done: done}
+}
+
+func IsQuitCommandForTest(text string) bool { return isQuitCommand(text) }
+
+func IsSlashCommandForTest(text string) bool { return isSlashCommand(text) }
+
+func (m *Model) ShutdownForTest() { m.shutdown() }
+
+func (m *Model) SetAutocompleteForTest(v *autocompleteModel) { m.autocomplete = v }
+
+func (m *Model) SetOwnServerForTest(own bool, pid int) {
+	m.ownServer = own
+	m.serverPID = pid
+}
+
+func (m *Model) StartStreamForTest(text string) tea.Cmd { return m.startStream(text) }
+
+func (m *Model) ReadNextEventForTest() tea.Cmd { return m.readNextEvent() }
+
+func PromptDoneMsgForTest() tea.Msg { return promptDoneMsg{} }
+
+func CompactDoneMsgForTest(result json_rpc.CompactResult, sessionID string) tea.Msg {
+	return compactDoneMsg{result: result, sessionID: sessionID}
+}
+
+func SessionPickerMsgForTest(items []PickerItemForTest) tea.Msg {
+	si := make([]sessionItem, len(items))
+	for i, it := range items {
+		si[i] = sessionItem{id: it.ID, model: it.Model, startedAt: it.StartedAt, events: it.Events}
+	}
+	return sessionPickerMsg{items: si}
+}
+
+func TruncateWithEllipsisForTest(s string, n int) string { return truncateWithEllipsis(s, n) }
+
+func IsAbortMessageForTest(data []byte) bool { return isAbortMessage(data) }
+
+func ShortHelpBindingsForTest() []key.Binding { return shortHelpBindings() }
+
+func OwnServerPIDForTest(socket, pidFile string) int { return ownServerPID(socket, pidFile) }
+
+func SpawnServerForTest(socket string) (int, error) { return spawnServer(socket) }
+
+func WaitForServerForTest(socketPath string, timeout time.Duration) error {
+	return waitForServer(socketPath, timeout)
 }
 
 func isQuitCommand(text string) bool {

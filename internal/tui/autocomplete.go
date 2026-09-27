@@ -167,3 +167,29 @@ func (m *Model) acceptAutocomplete() {
 	m.input.SetValue("/" + cmd + " ")
 	m.autocomplete.visible = false
 }
+
+func AllCommandsForTest() []string { return allCommands() }
+
+func (m *Model) AutocompleteUpdateForTest(msg tea.Msg) tea.Cmd { return m.autocomplete.Update(msg) }
+
+func (m *Model) AutocompleteSetSizeForTest(w, h int) { m.autocomplete.SetSize(w, h) }
+
+func (m *Model) AutocompleteNextForTest() { m.autocomplete.next() }
+
+func (m *Model) AutocompletePrevForTest() { m.autocomplete.prev() }
+
+func CommandItemDescriptionForTest(category, description string) string {
+	return commandItem{category: category, description: description}.Description()
+}
+
+func CommandItemCategoryForTest(category string) string {
+	return commandItem{category: category}.Category()
+}
+
+func CommandItemFilterValueForTest(title, description, category string) string {
+	return commandItem{title: title, description: description, category: category}.FilterValue()
+}
+
+func CommandItemTitleForTest(title string) string {
+	return commandItem{title: title}.Title()
+}

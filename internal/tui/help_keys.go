@@ -55,4 +55,6 @@ func (k keyBindings) FullHelp() [][]key.Binding {
 	}
 }
 
+func FullHelpForTest() [][]key.Binding { return defaultKeys().FullHelp() }
+
 var _ help.KeyMap = keyBindings{}
