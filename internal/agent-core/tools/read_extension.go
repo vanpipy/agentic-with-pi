@@ -15,6 +15,8 @@ type readArgs struct {
 	Limit  int    `json:"limit,omitempty"`
 }
 
+var ReadCtxProbe context.Context
+
 func ReadFile(cwd string, opts FileOptions) agentcore.Tool {
 	maxBytes := opts.MaxBytes
 	if maxBytes <= 0 {
@@ -36,8 +38,9 @@ func ReadFile(cwd string, opts FileOptions) agentcore.Tool {
 			},
 			"required": []string{"path"},
 		}),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args readArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(innerCtx context.Context, args readArgs) (string, error) {
+				ReadCtxProbe = innerCtx
 				if trimSpace(args.Path) == "" {
 					return "", fmt.Errorf("path is required (use the ls tool to discover files in a directory)")
 				}

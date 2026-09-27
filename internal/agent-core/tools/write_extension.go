@@ -26,8 +26,8 @@ func WriteFile(cwd string) agentcore.Tool {
 			},
 			"required": []string{"path", "content"},
 		}),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args writeArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(_ context.Context, args writeArgs) (string, error) {
 				fullPath := absPath(cwd, args.Path)
 				if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 					return "", err

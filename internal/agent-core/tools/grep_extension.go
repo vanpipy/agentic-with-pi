@@ -42,8 +42,8 @@ func Grep(cwd string, opts FileOptions) agentcore.Tool {
 			},
 			"required": []string{"pattern"},
 		}),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args grepArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(_ context.Context, args grepArgs) (string, error) {
 				if args.Path == "" {
 					args.Path = cwd
 				} else {

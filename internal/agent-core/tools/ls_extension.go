@@ -28,8 +28,8 @@ func Ls(cwd string, opts FileOptions) agentcore.Tool {
 				"limit": map[string]any{"type": "integer", "description": "Max entries (default 500)"},
 			},
 		}),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args lsArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(_ context.Context, args lsArgs) (string, error) {
 				if args.Path == "" {
 					args.Path = cwd
 				} else {
