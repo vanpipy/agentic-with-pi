@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -104,5 +105,108 @@ func TestErrorKindHelpers(t *testing.T) {
 	}
 	if llm.IsRateLimit(&llm.Error{Kind: llm.ErrorKindAuth}) {
 		t.Error("IsRateLimit(Auth) = true")
+	}
+}
+
+func TestErrorKindStringAllKinds(t *testing.T) {
+	cases := []struct {
+		kind llm.ErrorKind
+		want string
+	}{
+		{llm.ErrorKindUnknown, "unknown"},
+		{llm.ErrorKindAuth, "auth"},
+		{llm.ErrorKindRateLimit, "rate_limit"},
+		{llm.ErrorKindClient, "client"},
+		{llm.ErrorKindServer, "server"},
+		{llm.ErrorKindNetwork, "network"},
+		{llm.ErrorKindVendor, "vendor"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			if got := tc.kind.String(); got != tc.want {
+				t.Errorf("ErrorKind(%d).String() = %q, want %q", int(tc.kind), got, tc.want)
+			}
+		})
+	}
+}
+
+func TestErrorKindStringOutOfRange(t *testing.T) {
+	got := llm.ErrorKind(999).String()
+	if got != "unknown" {
+		t.Errorf("out-of-range ErrorKind.String() = %q, want %q", got, "unknown")
+	}
+}
+
+func TestIsAuthNilAndNonError(t *testing.T) {
+	if llm.IsAuth(nil) {
+		t.Error("IsAuth(nil) = true, want false")
+	}
+	if llm.IsAuth(errors.New("plain")) {
+		t.Error("IsAuth(plain error) = true, want false (Classify yields Unknown)")
+	}
+	wrapped := fmt.Errorf("outer: %w", errors.New("inner"))
+	if llm.IsAuth(wrapped) {
+		t.Error("IsAuth(wrapped plain) = true, want false")
+	}
+}
+
+func TestIsRateLimitNilAndNonError(t *testing.T) {
+	if llm.IsRateLimit(nil) {
+		t.Error("IsRateLimit(nil) = true, want false")
+	}
+	if llm.IsRateLimit(errors.New("plain")) {
+		t.Error("IsRateLimit(plain error) = true, want false")
+	}
+	wrapped := fmt.Errorf("outer: %w", errors.New("inner"))
+	if llm.IsRateLimit(wrapped) {
+		t.Error("IsRateLimit(wrapped plain) = true, want false")
+	}
+}
+
+func TestErrorErrorMessageShape(t *testing.T) {
+	e := &llm.Error{Kind: llm.ErrorKindAuth, Message: "bad key"}
+	got := e.Error()
+	if !strings.Contains(got, "auth") {
+		t.Errorf("Error() = %q, want contains kind", got)
+	}
+	if !strings.Contains(got, "bad key") {
+		t.Errorf("Error() = %q, want contains message", got)
+	}
+}
+
+func TestErrorUnwrap(t *testing.T) {
+	inner := errors.New("inner cause")
+	e := &llm.Error{Kind: llm.ErrorKindServer, Cause: inner}
+	if got := errors.Unwrap(e); got != inner {
+		t.Errorf("Unwrap = %v, want inner cause", got)
+	}
+}
+
+func TestErrorErrorWithCauseDistinctFromMessage(t *testing.T) {
+	inner := errors.New("inner cause distinct from message")
+	e := &llm.Error{Kind: llm.ErrorKindServer, Message: "boom", Cause: inner}
+	got := e.Error()
+	if !strings.Contains(got, "boom") {
+		t.Errorf("Error() = %q, want contains Message", got)
+	}
+	if !strings.Contains(got, "inner cause distinct from message") {
+		t.Errorf("Error() = %q, want contains Cause", got)
+	}
+}
+
+func TestErrorErrorWithCauseEqualMessage(t *testing.T) {
+	inner := errors.New("same")
+	e := &llm.Error{Kind: llm.ErrorKindServer, Message: "same", Cause: inner}
+	got := e.Error()
+	if strings.Count(got, "same") != 1 {
+		t.Errorf("Error() = %q, want Cause suppressed when equal to Message", got)
+	}
+}
+
+func TestErrorErrorWithCode(t *testing.T) {
+	e := &llm.Error{Kind: llm.ErrorKindServer, Code: 503, Message: "down"}
+	got := e.Error()
+	if !strings.Contains(got, "(503)") {
+		t.Errorf("Error() = %q, want contains (503)", got)
 	}
 }

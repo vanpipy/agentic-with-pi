@@ -252,3 +252,61 @@ func TestRateLimitedCoreRespectsContextCancel(t *testing.T) {
 		t.Fatal("expected error from cancelled context")
 	}
 }
+
+type probeCore struct {
+	calls int
+}
+
+func (p *probeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	p.calls++
+	return okStreamChannel("ok"), nil
+}
+
+func TestRateLimitedCoreZeroConfigUsesDefaults(t *testing.T) {
+	inner := &probeCore{}
+	rc := llm.NewRateLimitedCore(inner, llm.RateLimitConfig{})
+
+	for i := 0; i < 3; i++ {
+		_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i, err)
+		}
+	}
+	if inner.calls != 3 {
+		t.Errorf("inner.calls = %d, want 3", inner.calls)
+	}
+}
+
+func TestRateLimitedCoreNegativeConfigUsesDefaults(t *testing.T) {
+	inner := &probeCore{}
+	cfg := llm.RateLimitConfig{RatePerSec: -5, Burst: -10}
+	rc := llm.NewRateLimitedCore(inner, cfg)
+
+	for i := 0; i < 2; i++ {
+		_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i, err)
+		}
+	}
+	if inner.calls != 2 {
+		t.Errorf("inner.calls = %d, want 2", inner.calls)
+	}
+}
+
+func TestRateLimitedCoreOnlyNegativeRateUsesDefaultBurst(t *testing.T) {
+	inner := &probeCore{}
+	cfg := llm.RateLimitConfig{RatePerSec: 0, Burst: 4}
+	rc := llm.NewRateLimitedCore(inner, cfg)
+
+	start := time.Now()
+	for i := 0; i < 4; i++ {
+		_, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+		if err != nil {
+			t.Fatalf("call %d failed: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+	if elapsed > 100*time.Millisecond {
+		t.Errorf("burst of 4 with default rate should be fast (took %v)", elapsed)
+	}
+}
