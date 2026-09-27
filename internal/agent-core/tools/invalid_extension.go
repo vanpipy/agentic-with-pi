@@ -17,8 +17,8 @@ func InvalidTool() agentcore.Tool {
 		N: agentcore.InvalidToolName,
 		D: "Report an invalid tool invocation. Use only when a tool call is malformed (missing argument, wrong type, semantic error). The agent records the report and continues instead of aborting.",
 		P: invalidSchema(),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args invalidArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(_ context.Context, args invalidArgs) (string, error) {
 				if args.Tool == "" {
 					return "", fmt.Errorf("tool name is required")
 				}

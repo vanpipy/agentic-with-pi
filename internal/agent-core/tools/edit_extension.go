@@ -45,8 +45,8 @@ func EditFile(cwd string) agentcore.Tool {
 			},
 			"required": []string{"path", "edits"},
 		}),
-		Fn: func(_ context.Context, argsJSON string) (string, error) {
-			return agentcore.RunTool(context.TODO(), argsJSON, func(_ context.Context, args editArgs) (string, error) {
+		Fn: func(ctx context.Context, argsJSON string) (string, error) {
+			return agentcore.RunTool(ctx, argsJSON, func(_ context.Context, args editArgs) (string, error) {
 				if len(args.Edits) == 0 {
 					return "", errors.New("edits array must not be empty")
 				}
