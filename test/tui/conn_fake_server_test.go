@@ -198,13 +198,13 @@ func TestRunCompactConnDrivenHappyPath(t *testing.T) {
 		if req.Method != json_rpc.MethodCompact {
 			t.Errorf("expected method %q, got %q", json_rpc.MethodCompact, req.Method)
 		}
-		body, _ := json.Marshal(json_rpc.CompactResult{
+		body := json_rpc.CompactResult{
 			Triggered:    true,
 			Strategy:     "truncate",
 			TokensBefore: 12345,
 			TokensAfter:  4321,
 			DurationMS:   7,
-		})
+		}
 		writeJSONRPC(t, conn, req, "compact_result", body)
 		close(handled)
 	})

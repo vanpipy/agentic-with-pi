@@ -614,6 +614,13 @@ func IsSlashCommandForTest(text string) bool { return isSlashCommand(text) }
 
 func (m *Model) ShutdownForTest() { m.shutdown() }
 
+func (m *Model) SetAutocompleteForTest(v *autocompleteModel) { m.autocomplete = v }
+
+func (m *Model) SetOwnServerForTest(own bool, pid int) {
+	m.ownServer = own
+	m.serverPID = pid
+}
+
 func (m *Model) StartStreamForTest(text string) tea.Cmd { return m.startStream(text) }
 
 func (m *Model) ReadNextEventForTest() tea.Cmd { return m.readNextEvent() }

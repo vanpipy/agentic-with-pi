@@ -1149,3 +1149,15 @@ func LastChatMsgForTest(t ChatModelT) ChatMsg {
 	}
 	return fromChatMsg(m.messages[len(m.messages)-1])
 }
+
+func (t ChatModelT) UpdateForTest(msg tea.Msg) (tea.Cmd, bool) {
+	return t.model.Update(msg)
+}
+
+func (t ChatModelT) IsFollowingForTest() bool { return t.model.IsFollowing() }
+
+func (t ChatModelT) GotoTopForTest() { t.model.GotoTop() }
+
+func (t ChatModelT) LineOffsetForForTest(idx int) int { return t.model.lineOffsetFor(idx) }
+
+func (t ChatModelT) ScrollYOffsetForForTest(idx int) int { return t.model.scrollYOffsetFor(idx) }
