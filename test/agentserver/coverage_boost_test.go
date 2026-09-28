@@ -569,11 +569,11 @@ type concurrentBlockingCore struct {
 	started int
 }
 
-func (c *concurrentBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (c *concurrentBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	c.mu.Lock()
 	c.started++
 	c.mu.Unlock()
-	ch := make(chan llm.StreamEvent)
+	ch := make(chan llm.LegacyStreamEvent)
 	go func() {
 		<-ctx.Done()
 		close(ch)

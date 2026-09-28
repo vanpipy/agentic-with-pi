@@ -534,7 +534,7 @@ func TestProactiveActOnAcceptsObservedPointer(t *testing.T) {
 }
 
 func TestWriteHeaderTruncatesLongSystemPrompt(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -575,7 +575,7 @@ func TestWriteHeaderTruncatesLongSystemPrompt(t *testing.T) {
 }
 
 func TestWriteHeaderIncludesToolsWhenRegistered(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -834,19 +834,19 @@ func TestRunReactiveCompactionLengthFinishReasonFails(t *testing.T) {
 
 type errStreamCore struct{ err error }
 
-func (e errStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (e errStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	return nil, e.err
 }
 
 type lengthStopCore struct{}
 
-func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
-	ch := make(chan llm.StreamEvent, 2)
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+	ch := make(chan llm.LegacyStreamEvent, 2)
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Index: 0,
 		Delta: llm.Message{Content: "truncated"},
 	}}}}
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		FinishReason: llm.FinishReasonLength,
 	}}}}
 	close(ch)

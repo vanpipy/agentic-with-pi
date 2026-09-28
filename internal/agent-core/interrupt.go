@@ -81,7 +81,7 @@ type interruptAwareCore struct {
 	intr  *SoftInterrupt
 }
 
-func (c *interruptAwareCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (c *interruptAwareCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	innerCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		defer cancel()

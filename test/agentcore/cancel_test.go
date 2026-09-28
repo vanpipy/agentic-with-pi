@@ -14,8 +14,8 @@ import (
 
 type fakeBlockingCore struct{}
 
-func (f *fakeBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
-	out := make(chan llm.StreamEvent)
+func (f *fakeBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+	out := make(chan llm.LegacyStreamEvent)
 	go func() {
 		defer close(out)
 		select {

@@ -67,7 +67,7 @@ func TestChatRequestJSONRoundTrip(t *testing.T) {
 }
 
 func TestStreamEventZeroValue(t *testing.T) {
-	var ev llm.StreamEvent
+	var ev llm.LegacyStreamEvent
 	if ev.Chunk != nil || ev.Err != nil {
 		t.Errorf("zero StreamEvent = %+v, want both nil", ev)
 	}
@@ -77,7 +77,7 @@ func TestStreamEventZeroValue(t *testing.T) {
 }
 
 func TestStreamEventRollbackField(t *testing.T) {
-	ev := llm.StreamEvent{Rollback: true}
+	ev := llm.LegacyStreamEvent{Rollback: true}
 	if !ev.Rollback {
 		t.Errorf("Rollback = false, want true")
 	}

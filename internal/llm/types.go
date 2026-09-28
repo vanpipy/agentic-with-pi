@@ -88,7 +88,7 @@ type StreamChunk struct {
 	Usage   *Usage         `json:"usage,omitzero"`
 }
 
-type StreamEvent struct {
+type LegacyStreamEvent struct {
 	Chunk    *StreamChunk
 	Err      error
 	Rollback bool

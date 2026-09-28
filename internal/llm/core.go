@@ -31,7 +31,7 @@ type core struct {
 }
 
 type Core interface {
-	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
+	StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error)
 }
 
 func NewCore(provider Provider, proto protocol.Protocol) Core {
@@ -41,7 +41,7 @@ func NewCore(provider Provider, proto protocol.Protocol) Core {
 	}
 }
 
-func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 		return nil, err
 	}
 
-	events := make(chan StreamEvent, 32)
+	events := make(chan LegacyStreamEvent, 32)
 	go func() {
 		accumulators := make(map[int]*toolCallAccum)
 		var totalContent, totalReasoning int
@@ -99,7 +99,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 				if item.Err != nil {
 					ifaceLogger().Info("llm: transport err", "err", item.Err)
 					select {
-					case events <- StreamEvent{Err: item.Err}:
+					case events <- LegacyStreamEvent{Err: item.Err}:
 					case <-ctx.Done():
 					}
 					return
@@ -108,7 +108,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 				if err != nil {
 					ifaceLogger().Info("llm: parse err", "err", err)
 					select {
-					case events <- StreamEvent{Err: err}:
+					case events <- LegacyStreamEvent{Err: err}:
 					case <-ctx.Done():
 					}
 					return
@@ -140,7 +140,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 					if chunk.Usage != nil {
 						lastUsage = chunk.Usage
 						select {
-						case events <- StreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
+						case events <- LegacyStreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
 						case <-ctx.Done():
 							return
 						}
@@ -150,7 +150,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 							continue
 						}
 						select {
-						case events <- StreamEvent{Chunk: &StreamChunk{
+						case events <- LegacyStreamEvent{Chunk: &StreamChunk{
 							Choices: []StreamChoice{{
 								Index:        choice.Index,
 								Delta:        Message{Content: choice.Delta.Content, Reasoning: choice.Delta.Reasoning},
@@ -173,7 +173,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 							}},
 						}
 						select {
-						case events <- StreamEvent{Chunk: final}:
+						case events <- LegacyStreamEvent{Chunk: final}:
 						case <-ctx.Done():
 							return
 						}

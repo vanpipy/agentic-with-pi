@@ -331,7 +331,7 @@ func TestReActStrategyShouldAbortNoLastErrShortCircuit(t *testing.T) {
 
 type errCore struct{}
 
-func (errCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (errCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	return nil, errors.New("simulated provider failure")
 }
 
@@ -364,7 +364,7 @@ func TestReActStrategyStepNonCtxStreamErrEmitsErrorEvents(t *testing.T) {
 
 type ctxErrCore struct{}
 
-func (ctxErrCore) StreamChat(_ context.Context, _ *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (ctxErrCore) StreamChat(_ context.Context, _ *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	return nil, context.Canceled
 }
 
@@ -401,7 +401,7 @@ func TestReActStrategyStepEmitReturnsFalseAtThoughtStart(t *testing.T) {
 }
 
 func TestReActStrategyStepLengthFinishReasonNoContent(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		messageDeltaStopChunk("max_tokens"),
 		messageStopChunk(),
 	}}
@@ -426,7 +426,7 @@ func TestReActStrategyStepLengthFinishReasonNoContent(t *testing.T) {
 }
 
 func TestReActStrategyStepToolUseNoToolCalls(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("thinking out loud"),
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
@@ -452,7 +452,7 @@ func TestReActStrategyStepToolUseNoToolCalls(t *testing.T) {
 }
 
 func TestReActStrategyStepToolUseAllEmptyToolCalls(t *testing.T) {
-	emptyArgsChunk := llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+	emptyArgsChunk := llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Index: 0,
 		Delta: llm.Message{ToolCalls: []llm.ToolCall{{
 			ID:       "c1",
@@ -460,7 +460,7 @@ func TestReActStrategyStepToolUseAllEmptyToolCalls(t *testing.T) {
 			Function: llm.FunctionCall{Name: "noop", Arguments: ""},
 		}}},
 	}}}}
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		emptyArgsChunk,
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
@@ -486,7 +486,7 @@ func TestReActStrategyStepToolUseAllEmptyToolCalls(t *testing.T) {
 }
 
 func TestReActStrategyStepLengthWithContentEmitsFinalAnswer(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("partial answer"),
 		messageDeltaStopChunk("max_tokens"),
 		messageStopChunk(),
@@ -515,7 +515,7 @@ func TestReActStrategyStepLengthWithContentEmitsFinalAnswer(t *testing.T) {
 }
 
 func TestReActStrategyStepUnknownFinishReasonFallsToUnreachable(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		messageDeltaStopChunk("weird_reason"),
 		messageStopChunk(),
 	}}
@@ -531,7 +531,7 @@ func TestReActStrategyStepUnknownFinishReasonFallsToUnreachable(t *testing.T) {
 }
 
 func TestReActStrategyStepEmitReturnsFalseAtThoughtEnd(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("partial"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -550,7 +550,7 @@ func TestReActStrategyStepEmitReturnsFalseAtThoughtEnd(t *testing.T) {
 }
 
 func TestReActStrategyProcessStreamEventChunkNilIsNoOp(t *testing.T) {
-	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.StreamEvent{
+	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.LegacyStreamEvent{
 		{Chunk: nil, Err: nil},
 	})
 	if len(calls) != 0 {
@@ -559,7 +559,7 @@ func TestReActStrategyProcessStreamEventChunkNilIsNoOp(t *testing.T) {
 }
 
 func TestReActStrategyProcessStreamEventErrCtxStopsImmediately(t *testing.T) {
-	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.StreamEvent{
+	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.LegacyStreamEvent{
 		{Err: context.Canceled},
 		toolUseStartChunk("c1", "ls"),
 	})
@@ -569,7 +569,7 @@ func TestReActStrategyProcessStreamEventErrCtxStopsImmediately(t *testing.T) {
 }
 
 func TestReActStrategyProcessStreamEventErrNotCtxShortCircuits(t *testing.T) {
-	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.StreamEvent{
+	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.LegacyStreamEvent{
 		{Err: errors.New("upstream error")},
 		toolUseStartChunk("c1", "ls"),
 	})
@@ -579,7 +579,7 @@ func TestReActStrategyProcessStreamEventErrNotCtxShortCircuits(t *testing.T) {
 }
 
 func TestReActStrategyProcessStreamEventAccumulatesToolCallsByID(t *testing.T) {
-	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.StreamEvent{
+	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "ls"),
 		toolUseIDDeltaChunk("c1", "ls", `{"path":"."}`),
 		toolUseStartChunk("c2", "grep"),
@@ -599,7 +599,7 @@ func TestReActStrategyProcessStreamEventAccumulatesToolCallsByID(t *testing.T) {
 }
 
 func TestReActStrategyProcessStreamEventMergesDeltasWithoutID(t *testing.T) {
-	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.StreamEvent{
+	calls := agentcore.AccumulateStreamToolCallsForTest([]llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "ls"),
 		{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 			Index: 0,
@@ -827,7 +827,7 @@ func TestAgentRunStreamResumedEmitsModelNotSet(t *testing.T) {
 }
 
 func TestAgentRunStreamResumedPrependsSystemWhenHistoryMissingIt(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -851,7 +851,7 @@ func TestAgentRunStreamResumedPrependsSystemWhenHistoryMissingIt(t *testing.T) {
 }
 
 func TestAgentRunStreamResumedKeepsExistingSystemMessage(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -872,9 +872,9 @@ func TestAgentRunStreamResumedKeepsExistingSystemMessage(t *testing.T) {
 }
 
 func TestAgentLoopWithMsgsSafetyNetAborts(t *testing.T) {
-	chunksList := [][]llm.StreamEvent{}
+	chunksList := [][]llm.LegacyStreamEvent{}
 	for i := 0; i < 4; i++ {
-		chunksList = append(chunksList, []llm.StreamEvent{
+		chunksList = append(chunksList, []llm.LegacyStreamEvent{
 			toolUseStartChunk(fmt.Sprintf("c%d", i+1), "noop"),
 			toolUseIDDeltaChunk(fmt.Sprintf("c%d", i+1), "noop", fmt.Sprintf(`{"intent":"x%d"}`, i+1)),
 			messageDeltaStopChunk("tool_use"),
@@ -896,7 +896,7 @@ func TestAgentLoopWithMsgsSafetyNetAborts(t *testing.T) {
 }
 
 func TestAgentLoopWithMsgsTooManyToolCallsTruncates(t *testing.T) {
-	repeat := []llm.StreamEvent{
+	repeat := []llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "noop"),
 		toolUseIDDeltaChunk("c1", "noop", `{"intent":"x"}`),
 		toolUseStartChunk("c2", "noop"),
@@ -916,7 +916,7 @@ func TestAgentLoopWithMsgsTooManyToolCallsTruncates(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}
-	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+	core := &fakeCore{streamChunksList: [][]llm.LegacyStreamEvent{
 		repeat,
 		{textDeltaChunk("done"),
 			messageDeltaStopChunk("end_turn"), messageStopChunk()},
@@ -982,7 +982,7 @@ type errReturningCore struct {
 	err error
 }
 
-func (e *errReturningCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (e *errReturningCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	return nil, e.err
 }
 
@@ -1001,7 +1001,7 @@ func TestAgentRunStreamStreamChatCoreErrorNotCtxEmitsAndReturnsNilError(t *testi
 }
 
 func TestAgentRunStreamProcessesUserMessageFirst(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("answer"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -1025,7 +1025,7 @@ func TestAgentRunStreamProcessesUserMessageFirst(t *testing.T) {
 }
 
 func TestRunStreamOpenLogUsesProvidedWriter(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("hi"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -1039,7 +1039,7 @@ func TestRunStreamOpenLogUsesProvidedWriter(t *testing.T) {
 }
 
 func TestAgentEmitNilChannelWithLogWriterWritesToLog(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "noop"),
 		toolUseIDDeltaChunk("c1", "noop", `{"intent":"x"}`),
 		messageDeltaStopChunk("tool_use"),
@@ -1058,7 +1058,7 @@ func TestAgentEmitNilChannelWithLogWriterWritesToLog(t *testing.T) {
 }
 
 func TestAgentExecuteToolsEmitReturnsFalseAbortsViaRunStream(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.StreamEvent{
+	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "echo"), toolUseIDDeltaChunk("c1", "echo", `{"intent":"x"}`),
 		messageDeltaStopChunk("tool_use"), messageStopChunk(),
 	}}
@@ -1080,7 +1080,7 @@ func TestAgentNoModelEmitsError(t *testing.T) {
 }
 
 func TestAgentWithLogWriterOpenLog(t *testing.T) {
-	ag := newTestAgent(&fakeCore{streamChunks: []llm.StreamEvent{
+	ag := newTestAgent(&fakeCore{streamChunks: []llm.LegacyStreamEvent{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),

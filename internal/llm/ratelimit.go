@@ -31,7 +31,7 @@ func NewRateLimitedCore(inner Core, cfg RateLimitConfig) Core {
 	}
 }
 
-func (c *rateLimitedCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+func (c *rateLimitedCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
 	if err := c.lim.Wait(ctx); err != nil {
 		return nil, err
 	}

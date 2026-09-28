@@ -534,7 +534,7 @@ func AgentCurrentTurnForTest(a *Agent) int           { return a.currentTurn }
 func AgentTurnStartAtForTest(a *Agent) time.Time     { return a.turnStartAt }
 func AgentCurrentMsgsForTest(a *Agent) []llm.Message { return a.currentMsgs }
 
-func AccumulateStreamToolCallsForTest(events []llm.StreamEvent) []llm.ToolCall {
+func AccumulateStreamToolCallsForTest(events []llm.LegacyStreamEvent) []llm.ToolCall {
 	rs := &ReActStrategy{}
 	var result turnResult
 	var contentBuf, reasoningBuf strings.Builder
@@ -556,7 +556,7 @@ type ProcessStreamEventsForTestResult struct {
 	Continue     bool
 }
 
-func ProcessStreamEventsForTest(events []llm.StreamEvent) ProcessStreamEventsForTestResult {
+func ProcessStreamEventsForTest(events []llm.LegacyStreamEvent) ProcessStreamEventsForTestResult {
 	rs := &ReActStrategy{}
 	var result turnResult
 	var contentBuf, reasoningBuf strings.Builder

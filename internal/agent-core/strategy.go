@@ -150,7 +150,7 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.finishReason, len(result.toolCalls))
 }
 
-func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.StreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
+func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.LegacyStreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
 	if ev.Rollback {
 		contentBuf.Reset()
 		reasoningBuf.Reset()
