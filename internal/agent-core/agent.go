@@ -552,74 +552,113 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 }
 
 func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
-	const maxToolsPerTurn = 6
 	emit := a.bindEmit(ch)
 	for turn := 0; turn < a.SafetyNet; turn++ {
-		a.currentTurn = turn + 1
-		a.turnStartAt = time.Now()
-		a.turnFirstChunkAt = time.Time{}
-		a.currentMsgs = msgs
-		userMsgID := fmt.Sprintf("turn-%d", turn+1)
-		if last := lastUserMessageID(msgs); last != "" {
-			userMsgID = last
-		}
-		a.logMu.Lock()
-		a.writeTurnStartLocked(userMsgID)
-		a.logMu.Unlock()
-
-		settings := a.compaction
-		settings.MaxContextTokens = a.Model.MaxContextTokens
-		compacted, action, err := SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
-		if err != nil {
-			a.logMu.Lock()
-			a.writeErrorV3Locked("compaction", "", "compact: "+err.Error(), 0, false)
-			a.logMu.Unlock()
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
-			return
-		}
-		if action != ActionNone {
-			msgs = compacted
-			a.currentMsgs = msgs
-		}
-		step, err := a.strategy.Step(ctx, msgs, emit)
-		a.logMu.Lock()
-		a.writeTurnResponseEnded(step, a.turnStartAt, a.turnFirstChunkAt)
-		a.logMu.Unlock()
-		if err != nil {
-			return
-		}
-		if step.Kind == StepFinal {
-			return
-		}
-		toolCalls := step.ToolCalls
-		if len(toolCalls) > maxToolsPerTurn {
-			a.logMu.Lock()
-			a.writeErrorV3Locked("tool_invoke", "", fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn), 0, false)
-			a.logMu.Unlock()
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
-			toolCalls = toolCalls[:maxToolsPerTurn]
-		}
-		msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
-		a.currentMsgs = msgs
 		var ok bool
-		msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
+		msgs, ok = a.runOneTurn(ctx, msgs, ch, emit, turn)
 		if !ok {
 			return
 		}
-		a.currentMsgs = msgs
-		lastFailed := lastFailedToolError(msgs)
-		if abortErr := a.ShouldAbort(msgs, lastFailed); abortErr != nil {
-			a.logMu.Lock()
-			a.writeErrorV3Locked("tool_invoke", "", abortErr.Error(), 0, false)
-			a.logMu.Unlock()
-			a.emit(ctx, ch, Event{Category: EventError, ToolError: abortErr.Error()})
-			return
-		}
+	}
+	a.emitSafetyNetHalt(ctx, ch)
+}
+
+func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int) ([]llm.Message, bool) {
+	msgs = a.initTurnState(msgs, turn)
+	a.logTurnStartLocked(msgs)
+	var ok bool
+	if msgs, ok = a.applyCompaction(ctx, msgs, ch); !ok {
+		return msgs, false
+	}
+	var step Step
+	if step, ok = a.runStrategyStep(ctx, msgs, emit); !ok || step.Kind == StepFinal {
+		return msgs, false
+	}
+	return a.appendAssistantToolsAndAbort(ctx, msgs, ch, step)
+}
+
+func (a *Agent) initTurnState(msgs []llm.Message, turn int) []llm.Message {
+	a.currentTurn = turn + 1
+	a.turnStartAt = time.Now()
+	a.turnFirstChunkAt = time.Time{}
+	a.currentMsgs = msgs
+	return msgs
+}
+
+func (a *Agent) logTurnStartLocked(msgs []llm.Message) {
+	userMsgID := fmt.Sprintf("turn-%d", a.currentTurn)
+	if last := lastUserMessageID(msgs); last != "" {
+		userMsgID = last
 	}
 	a.logMu.Lock()
-	a.writeErrorV3Locked("safety_net", "", fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet), 0, false)
+	a.writeTurnStartLocked(userMsgID)
 	a.logMu.Unlock()
-	a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet)})
+}
+
+func (a *Agent) applyCompaction(ctx context.Context, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
+	settings := a.compaction
+	settings.MaxContextTokens = a.Model.MaxContextTokens
+	compacted, action, err := SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
+	if err != nil {
+		a.logMu.Lock()
+		a.writeErrorV3Locked("compaction", "", "compact: "+err.Error(), 0, false)
+		a.logMu.Unlock()
+		a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
+		return msgs, false
+	}
+	if action != ActionNone {
+		msgs = compacted
+		a.currentMsgs = msgs
+	}
+	return msgs, true
+}
+
+func (a *Agent) runStrategyStep(ctx context.Context, msgs []llm.Message, emit func(context.Context, Event) bool) (Step, bool) {
+	step, err := a.strategy.Step(ctx, msgs, emit)
+	a.logMu.Lock()
+	a.writeTurnResponseEnded(step, a.turnStartAt, a.turnFirstChunkAt)
+	a.logMu.Unlock()
+	if err != nil {
+		return step, false
+	}
+	return step, true
+}
+
+func (a *Agent) appendAssistantToolsAndAbort(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step) ([]llm.Message, bool) {
+	const maxToolsPerTurn = 6
+	toolCalls := step.ToolCalls
+	if len(toolCalls) > maxToolsPerTurn {
+		a.logMu.Lock()
+		a.writeErrorV3Locked("tool_invoke", "", fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn), 0, false)
+		a.logMu.Unlock()
+		a.emit(ctx, ch, Event{Category: EventError, ToolError: fmt.Sprintf("too many tool calls in one turn (%d > %d), truncating", len(toolCalls), maxToolsPerTurn)})
+		toolCalls = toolCalls[:maxToolsPerTurn]
+	}
+	msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
+	a.currentMsgs = msgs
+	var ok bool
+	msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
+	if !ok {
+		return msgs, false
+	}
+	a.currentMsgs = msgs
+	lastFailed := lastFailedToolError(msgs)
+	if abortErr := a.ShouldAbort(msgs, lastFailed); abortErr != nil {
+		a.logMu.Lock()
+		a.writeErrorV3Locked("tool_invoke", "", abortErr.Error(), 0, false)
+		a.logMu.Unlock()
+		a.emit(ctx, ch, Event{Category: EventError, ToolError: abortErr.Error()})
+		return msgs, false
+	}
+	return msgs, true
+}
+
+func (a *Agent) emitSafetyNetHalt(ctx context.Context, ch chan<- Event) {
+	msg := fmt.Sprintf("safety net reached (%d turns); agent aborted to prevent infinite loop. Compact or raise the safety net via WithSafetyNet.", a.SafetyNet)
+	a.logMu.Lock()
+	a.writeErrorV3Locked("safety_net", "", msg, 0, false)
+	a.logMu.Unlock()
+	a.emit(ctx, ch, Event{Category: EventError, ToolError: msg})
 }
 
 func lastUserMessageID(msgs []llm.Message) string {
@@ -1044,6 +1083,19 @@ func acceptsLargeOutput(argsJSON string) bool {
 
 func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {
 	return a.executeTools(context.Background(), calls, msgs, nil)
+}
+
+func AgentCurrentTurnForTest(a *Agent) int           { return a.currentTurn }
+func AgentTurnStartAtForTest(a *Agent) time.Time     { return a.turnStartAt }
+func AgentCurrentMsgsForTest(a *Agent) []llm.Message { return a.currentMsgs }
+
+func AgentRunOneTurnForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int) ([]llm.Message, bool) {
+	emit := a.bindEmit(ch)
+	return a.runOneTurn(ctx, msgs, ch, emit, turn)
+}
+
+func AgentLoopWithMsgsForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event) {
+	a.loopWithMsgs(ctx, msgs, ch)
 }
 
 func AgentExecuteToolsWithChanForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]Event, []llm.Message, bool) {

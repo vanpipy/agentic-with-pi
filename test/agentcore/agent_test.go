@@ -1259,3 +1259,158 @@ func mustDumpLines(lines []map[string]any) string {
 	}
 	return b.String()
 }
+
+func TestRunOneTurnInitializesState(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "user", Content: "hi"}}
+
+	before := time.Now()
+	msgsOut, ok := agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+	after := time.Now()
+
+	if ok {
+		t.Errorf("runOneTurn ok = true, want false (StepFinal exits the loop)")
+	}
+	if len(msgsOut) != 1 {
+		t.Fatalf("msgs len = %d, want 1 (StepFinal returns before the assistant message is appended)", len(msgsOut))
+	}
+	if got := agentcore.AgentCurrentTurnForTest(ag); got != 1 {
+		t.Errorf("a.currentTurn = %d, want 1 (turn 0 → +1)", got)
+	}
+	ts := agentcore.AgentTurnStartAtForTest(ag)
+	if ts.IsZero() {
+		t.Fatalf("a.turnStartAt is zero; initTurnState did not set it")
+	}
+	if ts.Before(before) || ts.After(after) {
+		t.Errorf("a.turnStartAt = %v, want in [%v, %v]", ts, before, after)
+	}
+}
+
+func TestRunOneTurnAppliesCompaction(t *testing.T) {
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		{textDeltaChunk("summary"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
+		{textDeltaChunk("done"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
+	}}
+	ag := newTestAgent(core, "m").WithModel(llm.Model{ID: "m", MaxContextTokens: 100})
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "system", Content: "sys"}}
+	for i := 0; i < 7; i++ {
+		msgs = append(msgs, llm.Message{Role: "user", Content: fmt.Sprintf("u%d", i)})
+	}
+
+	_, _ = agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+
+	if core.streamCalls < 2 {
+		t.Errorf("StreamChat calls = %d, want >=2 (compaction summary + strategy step)", core.streamCalls)
+	}
+	finalMsgs := agentcore.AgentCurrentMsgsForTest(ag)
+	if len(finalMsgs) == 0 {
+		t.Fatal("a.currentMsgs is empty after runOneTurn")
+	}
+}
+
+func TestRunOneTurnExecutesStrategyStep(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "user", Content: "hi"}}
+
+	msgsOut, ok := agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+	if ok {
+		t.Errorf("runOneTurn ok = true, want false (StepFinal exits the loop)")
+	}
+	if core.streamCalls != 1 {
+		t.Errorf("StreamChat calls = %d, want 1 (default settings skip compaction; only strategy step runs)", core.streamCalls)
+	}
+	if len(msgsOut) != 1 {
+		t.Errorf("msgs len = %d, want 1 (StepFinal returns before the assistant message is appended)", len(msgsOut))
+	}
+	if got := agentcore.AgentCurrentMsgsForTest(ag); len(got) != 1 {
+		t.Errorf("a.currentMsgs len = %d, want 1 (StepFinal path)", len(got))
+	}
+}
+
+func TestRunOneTurnExecutesTools(t *testing.T) {
+	var toolCalls atomic.Int32
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		{
+			toolUseStartChunk("c1", "noop"),
+			toolUseIDDeltaChunk("c1", "noop", `{"intent":"x"}`),
+			messageDeltaStopChunk("tool_use"),
+			messageStopChunk(),
+		},
+		{
+			textDeltaChunk("done"),
+			messageDeltaStopChunk("end_turn"),
+			messageStopChunk(),
+		},
+	}}
+	ag := newTestAgent(core, "m")
+	ag.WithTool(agentcore.ToolFunc{
+		N: "noop",
+		Fn: func(_ context.Context, _ string) (string, error) {
+			toolCalls.Add(1)
+			return "ok", nil
+		},
+	})
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+
+	_, ok := agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+	if !ok {
+		t.Fatal("runOneTurn ok = false (StepContinue with tool should keep the loop alive)")
+	}
+	if got := toolCalls.Load(); got != 1 {
+		t.Errorf("tool invoked %d times, want 1", got)
+	}
+	finalMsgs := agentcore.AgentCurrentMsgsForTest(ag)
+	var sawToolResult bool
+	for _, m := range finalMsgs {
+		if m.Role == "tool" && m.ToolCallID == "c1" && strings.Contains(m.Content, "ok") {
+			sawToolResult = true
+		}
+	}
+	if !sawToolResult {
+		t.Errorf("expected tool result message in currentMsgs; got %+v", finalMsgs)
+	}
+}
+
+func TestLoopWithMsgsSafetyNetHalts(t *testing.T) {
+	toolChunks := []llm.StreamEvent{
+		toolUseStartChunk("c1", "noop"),
+		toolUseIDDeltaChunk("c1", "noop", `{"intent":"x"}`),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{toolChunks, toolChunks, toolChunks}}
+	ag := newTestAgent(core, "m").WithSafetyNet(2)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+
+	var sawSafetyNet bool
+	for ev := range ch {
+		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "safety net") {
+			sawSafetyNet = true
+		}
+	}
+	if !sawSafetyNet {
+		t.Errorf("expected safety_net error event on the channel, did not see one")
+	}
+	if core.streamCalls != 2 {
+		t.Errorf("StreamChat calls = %d, want 2 (SafetyNet=2 must halt the loop after the second turn)", core.streamCalls)
+	}
+}
