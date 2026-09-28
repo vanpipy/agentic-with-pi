@@ -7,6 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
+	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -26,7 +29,9 @@ func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
+		defer func() { a.activeEmitCh = nil }()
 		a.openLogLocked()
+		a.activeEmitCh = ch
 		if a.Model.ID == "" {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
 			return
@@ -48,7 +53,9 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 	go func() {
 		defer close(ch)
 		defer a.flushLog()
+		defer func() { a.activeEmitCh = nil }()
 		a.openLogLocked()
+		a.activeEmitCh = ch
 		if sink != nil {
 			defer close(sink)
 		}
@@ -104,13 +111,13 @@ func (a *Agent) runEndOfLoopAsyncCompact(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	c := NewCompactor(func(cctx context.Context) error { return Compact(cctx, a) })
+	c := compact.NewCompactor(func(cctx context.Context) error { return compact.Compact(cctx, a) })
 	_ = c.CompactAsync(ctx)
 	_ = c.WaitIdle(ctx)
 }
 
 func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, ts *turnState) ([]llm.Message, bool, Step) {
-	if repaired, count := RepairMissingToolOutputs(msgs); count > 0 {
+	if repaired, count := util.RepairMissingToolOutputs(msgs); count > 0 {
 		slog.Warn("agent: repaired missing tool outputs before next turn", "count", count)
 		msgs = repaired
 		a.emit(ctx, ch, Event{Category: EventSafetyRepair, Content: fmt.Sprintf("REPAIR: recovered %d interrupted tool outputs", count), SafetyCount: count})
@@ -184,7 +191,7 @@ func (a *Agent) logTurnStartLocked(msgs []llm.Message) {
 func (a *Agent) applyCompaction(ctx context.Context, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
 	settings := a.compaction
 	settings.MaxContextTokens = a.Model.MaxContextTokens
-	compacted, action, err := SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
+	compacted, action, err := compact.SelectStrategy(msgs, settings, nil).ActOn(ctx, a, msgs, nil)
 	if err != nil {
 		a.logMu.Lock()
 		a.writeErrorV3Locked("compaction", "", "compact: "+err.Error(), 0, false)
@@ -192,7 +199,7 @@ func (a *Agent) applyCompaction(ctx context.Context, msgs []llm.Message, ch chan
 		a.emit(ctx, ch, Event{Category: EventError, ToolError: "compact: " + err.Error()})
 		return msgs, false
 	}
-	if action != ActionNone {
+	if action != compact.ActionNone {
 		msgs = compacted
 		a.currentMsgs = msgs
 	}
@@ -223,7 +230,7 @@ func (a *Agent) appendAssistantToolsAndAbort(ctx context.Context, msgs []llm.Mes
 	msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
 	a.currentMsgs = msgs
 	var ok bool
-	msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch, ts)
+	msgs, ok = stream.ExecuteTools(ctx, a, toolCalls, msgs, &turnStateAdapter{ts: ts})
 	if !ok {
 		return msgs, false
 	}

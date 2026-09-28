@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -152,7 +153,7 @@ func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T
 
 	ag := newBashToolAgent(t)
 	msgs := []llm.Message{{Role: "user", Content: "explore"}, {Role: "assistant", ToolCalls: calls}}
-	evs, msgs, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	evs, msgs, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatalf("executeTools returned ok=false, want true (defensive skip should not abort)")
 	}
@@ -183,7 +184,7 @@ func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T
 
 	sawSkipErrorEvent := false
 	for _, ev := range evs {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "empty arguments") && ev.ToolName == "bash" {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "empty arguments") && ev.ToolName == "bash" {
 			sawSkipErrorEvent = true
 		}
 	}
@@ -255,7 +256,7 @@ func TestStreamMerge_EmptyArgsEntryIsPassedToExecutorAsSkip(t *testing.T) {
 	}}
 	ag := newBashToolAgent(t)
 	msgs := []llm.Message{{Role: "user", Content: "x"}, {Role: "assistant", ToolCalls: raw}}
-	_, msgs, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, raw, msgs)
+	_, msgs, ok := stream.AgentExecuteToolsWithChanForTest(ag, raw, msgs)
 	if !ok {
 		t.Fatal("executeTools returned ok=false, want true (skip must not abort the chain)")
 	}

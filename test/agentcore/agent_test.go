@@ -16,6 +16,8 @@ import (
 	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -148,24 +150,24 @@ func TestAgentContextWindowLivesOnModelNotAgent(t *testing.T) {
 }
 
 func TestShouldCompactUsesModelContextWindow(t *testing.T) {
-	settings := agentcore.CompactionSettings{Enabled: true, ReserveTokens: 1024}
+	settings := compact.CompactionSettings{Enabled: true, ReserveTokens: 1024}
 	msgs := []llm.Message{
 		{Role: "user", Content: string(make([]byte, 40000))},
 		{Role: "assistant", Content: string(make([]byte, 40000))},
 	}
 	model := llm.Model{ID: "m", MaxContextTokens: 10000}
-	if !agentcore.ShouldCompactWithModel(msgs, model, settings) {
+	if !compact.ShouldCompactWithModel(msgs, model, settings) {
 		t.Errorf("expected compact: 20000 tokens > 10000 - 1024")
 	}
-	if agentcore.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 100000}, settings) {
+	if compact.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 100000}, settings) {
 		t.Errorf("did not expect compact: 20000 < 100000 - 1024")
 	}
 }
 
 func TestShouldCompactFallsBackWhenModelZero(t *testing.T) {
-	settings := agentcore.CompactionSettings{Enabled: true, ReserveTokens: 1024}
+	settings := compact.CompactionSettings{Enabled: true, ReserveTokens: 1024}
 	msgs := []llm.Message{{Role: "user", Content: string(make([]byte, 600000))}}
-	if !agentcore.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 0}, settings) {
+	if !compact.ShouldCompactWithModel(msgs, llm.Model{ID: "m", MaxContextTokens: 0}, settings) {
 		t.Errorf("expected compact: fallback 128000, 150000 tokens > 128000-1024")
 	}
 }
@@ -323,7 +325,7 @@ func TestAgentMidBatchToolFailureKeepsAssistantAndResultsAligned(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "assistant", ToolCalls: calls},
 	}
-	updated, ok := agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	updated, ok := stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatal("executeTools returned not-ok")
 	}
@@ -1180,7 +1182,7 @@ func TestAgentCompactionPersistsToSessionLog(t *testing.T) {
 	}}
 	ag := newTestAgent(core, "test-model").
 		WithModel(llm.Model{ID: "test-model", MaxContextTokens: 10}).
-		WithCompaction(agentcore.CompactionSettings{
+		WithCompaction(compact.CompactionSettings{
 			Enabled:         true,
 			ReserveTokens:   1,
 			KeepRecentTurns: 0,
@@ -2138,7 +2140,7 @@ func TestCompactorAsyncCancelsWithinBudget(t *testing.T) {
 			return ctx.Err()
 		}
 	}
-	c := agentcore.NewCompactor(fn)
+	c := compact.NewCompactor(fn)
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := c.CompactAsync(ctx); err != nil {
 		t.Fatalf("CompactAsync returned err: %v", err)
@@ -2169,7 +2171,7 @@ func TestCompactorAsyncCancelsWithinBudget(t *testing.T) {
 }
 
 func TestCompactorWaitIdleReturnsSuccessAfterFnCompletes(t *testing.T) {
-	c := agentcore.NewCompactor(func(ctx context.Context) error { return nil })
+	c := compact.NewCompactor(func(ctx context.Context) error { return nil })
 	if err := c.CompactAsync(context.Background()); err != nil {
 		t.Fatalf("CompactAsync err: %v", err)
 	}
@@ -2180,7 +2182,7 @@ func TestCompactorWaitIdleReturnsSuccessAfterFnCompletes(t *testing.T) {
 
 func TestCompactorCompactAsyncIsIdempotent(t *testing.T) {
 	var calls int32
-	c := agentcore.NewCompactor(func(ctx context.Context) error {
+	c := compact.NewCompactor(func(ctx context.Context) error {
 		atomic.AddInt32(&calls, 1)
 		return nil
 	})

@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	agentserver "github.com/vanpiyp/awp/internal/agent-server"
 )
 
 func TestMarshalAgentEventForWireUserMessageEmitsUserRoleMessage(t *testing.T) {
 	var parentID string
-	var buf *agentcore.StreamBuffer
+	var buf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category: agentcore.EventUserMessage,
 		Content:  "what time is it",
@@ -42,7 +43,7 @@ func TestMarshalAgentEventForWireUserMessageEmitsUserRoleMessage(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
 	var parentID string
-	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer("")
+	var buf *stream.StreamBuffer = stream.NewStreamBuffer("")
 	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "hello ",
@@ -61,7 +62,7 @@ func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
 
 func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) {
 	var parentID string
-	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
+	var buf *stream.StreamBuffer = stream.NewStreamBuffer(parentID)
 	agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "I should answer",
@@ -99,7 +100,7 @@ func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) 
 
 func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 	var parentID string
-	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
+	var buf *stream.StreamBuffer = stream.NewStreamBuffer(parentID)
 	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:   agentcore.EventTool,
 		ToolName:   "bash",
@@ -136,7 +137,7 @@ func TestMarshalAgentEventForWireToolEmitsMessagePair(t *testing.T) {
 
 func TestMarshalAgentEventForWireErrorEmitsMessageAndCustom(t *testing.T) {
 	var parentID string
-	var buf *agentcore.StreamBuffer = agentcore.NewStreamBuffer(parentID)
+	var buf *stream.StreamBuffer = stream.NewStreamBuffer(parentID)
 	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventError,
 		ToolError: "boom",

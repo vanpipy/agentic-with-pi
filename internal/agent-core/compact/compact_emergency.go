@@ -1,4 +1,4 @@
-package agentcore
+package compact
 
 import (
 	"strconv"

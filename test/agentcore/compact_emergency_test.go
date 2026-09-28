@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -55,7 +55,7 @@ func TestEmergencyTruncateToolResultsTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := agentcore.EmergencyTruncateToolResultsForTest(tc.msgs, maxChars)
+			out := compact.EmergencyTruncateToolResultsForTest(tc.msgs, maxChars)
 			if len(out) != len(tc.msgs) {
 				t.Fatalf("returned %d msgs, want %d", len(out), len(tc.msgs))
 			}
@@ -82,14 +82,14 @@ func TestEmergencyTruncateDoesNotMutateInput(t *testing.T) {
 		{Role: "tool", ToolCallID: "c1", Content: strings.Repeat("a", 5000)},
 	}
 	originalContent := msgs[0].Content
-	_ = agentcore.EmergencyTruncateToolResultsForTest(msgs, 100)
+	_ = compact.EmergencyTruncateToolResultsForTest(msgs, 100)
 	if msgs[0].Content != originalContent {
 		t.Errorf("input slice mutated: original len %d, now %d", len(originalContent), len(msgs[0].Content))
 	}
 }
 
 func TestEmergencyTruncatedToolResultFields(t *testing.T) {
-	r := agentcore.EmergencyTruncatedToolResult{
+	r := compact.EmergencyTruncatedToolResult{
 		OriginalLen: 5000,
 		KeptLen:     100,
 		Marker:      "emergency truncated",
@@ -122,7 +122,7 @@ func TestIsRequestPayloadTooLargeErrorTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := agentcore.IsRequestPayloadTooLargeErrorForTest(tc.err)
+			got := compact.IsRequestPayloadTooLargeErrorForTest(tc.err)
 			if got != tc.want {
 				t.Errorf("got %v, want %v for %q", got, tc.want, tc.err)
 			}
@@ -139,7 +139,7 @@ func TestStripOversizedToolResultsInMessages(t *testing.T) {
 		{Role: "user", Content: "follow up"},
 	}
 
-	out := agentcore.StripOversizedToolResultsInMessagesForTest(msgs, 1000)
+	out := compact.StripOversizedToolResultsInMessagesForTest(msgs, 1000)
 	if len(out) != 3 {
 		t.Fatalf("got %d messages, want 3: %+v", len(out), out)
 	}
@@ -159,22 +159,22 @@ func TestStripOversizedToolResultsKeepsSmall(t *testing.T) {
 		{Role: "tool", ToolCallID: "c1", Content: "small"},
 		{Role: "user", Content: "u"},
 	}
-	got := agentcore.StripOversizedToolResultsInMessagesForTest(msgs, 1000)
+	got := compact.StripOversizedToolResultsInMessagesForTest(msgs, 1000)
 	if len(got) != 2 {
 		t.Errorf("got %d, want 2 (none should be stripped)", len(got))
 	}
 }
 
 func TestEmergencyHelpersDoesNotPanicOnEmpty(t *testing.T) {
-	out := agentcore.EmergencyTruncateToolResultsForTest(nil, 100)
+	out := compact.EmergencyTruncateToolResultsForTest(nil, 100)
 	if len(out) != 0 {
 		t.Errorf("expected empty result for nil input, got %d msgs", len(out))
 	}
-	out = agentcore.StripOversizedToolResultsInMessagesForTest(nil, 100)
+	out = compact.StripOversizedToolResultsInMessagesForTest(nil, 100)
 	if len(out) != 0 {
 		t.Errorf("strip nil: got %d, want 0", len(out))
 	}
-	if agentcore.IsRequestPayloadTooLargeErrorForTest(nil) {
+	if compact.IsRequestPayloadTooLargeErrorForTest(nil) {
 		t.Error("nil error should not be payload too large")
 	}
 }
@@ -183,7 +183,7 @@ func TestEmergencyTruncateProducesResultType(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "tool", ToolCallID: "c1", Content: strings.Repeat("x", 5000)},
 	}
-	out := agentcore.EmergencyTruncateToolResultsForTest(msgs, 100)
+	out := compact.EmergencyTruncateToolResultsForTest(msgs, 100)
 	if out[0].Role != "tool" {
 		t.Errorf("role changed: %q", out[0].Role)
 	}

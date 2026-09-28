@@ -1,4 +1,4 @@
-package agentcore
+package util
 
 import "github.com/vanpiyp/awp/internal/llm"
 

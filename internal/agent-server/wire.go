@@ -2,6 +2,7 @@ package agentserver
 
 import (
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 )
 
 type WireEmit struct {
@@ -9,7 +10,7 @@ type WireEmit struct {
 	Payload   any
 }
 
-func MarshalAgentEventForWireForTest(ev agentcore.Event, parentID *string, streamBuf **agentcore.StreamBuffer) []WireEmit {
+func MarshalAgentEventForWireForTest(ev agentcore.Event, parentID *string, streamBuf **stream.StreamBuffer) []WireEmit {
 	t := &streamTranslator{
 		parentID:  *parentID,
 		streamBuf: *streamBuf,

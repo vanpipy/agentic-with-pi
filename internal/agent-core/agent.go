@@ -13,6 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
+	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -129,14 +132,14 @@ type Agent struct {
 	logMu                  sync.Mutex
 	logBuf                 *bufio.Writer
 	logSeq                 int
-	compaction             CompactionSettings
+	compaction             compact.CompactionSettings
 	repeatedToolErrorLimit int
 	strategy               Strategy
 	currentParentID        string
-	currentStreamBuf       *StreamBuffer
+	currentStreamBuf       *stream.StreamBuffer
 	currentToolCallID      string
 	ToolCacheSize          int
-	toolResultCache        *ToolResultCache
+	toolResultCache        *util.ToolResultCache
 	currentTurn            int
 	turnStartAt            time.Time
 	turnFirstChunkAt       time.Time
@@ -146,6 +149,7 @@ type Agent struct {
 	v3LogWriter            io.Writer
 	v3LogBuf               *bufio.Writer
 	activeTurnState        *turnState
+	activeEmitCh           chan<- Event
 	interrupt              *SoftInterrupt
 	interruptInit          sync.Once
 }
@@ -162,7 +166,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 		core:          llmCore,
 		SafetyNet:     200,
 		SystemPrompts: "You are a helpful coding assistant",
-		compaction: CompactionSettings{
+		compaction: compact.CompactionSettings{
 			Enabled:         true,
 			ReserveTokens:   16384,
 			KeepRecentTurns: 5,
@@ -170,7 +174,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 		repeatedToolErrorLimit: 3,
 		ToolCacheSize:          20,
 	}
-	a.toolResultCache = NewToolResultCache(a.ToolCacheSize)
+	a.toolResultCache = util.NewToolResultCache(a.ToolCacheSize)
 	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
 	return a
 }
@@ -204,7 +208,7 @@ func (a *Agent) WithToolCacheSize(n int) *Agent {
 		n = 20
 	}
 	a.ToolCacheSize = n
-	a.toolResultCache = NewToolResultCache(n)
+	a.toolResultCache = util.NewToolResultCache(n)
 	return a
 }
 
@@ -228,9 +232,184 @@ func (a *Agent) WithSessionID(id string) *Agent   { a.sessionID = id; return a }
 func (a *Agent) SessionIDForTest() string         { return a.sessionID }
 func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }
 
-func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
+func (a *Agent) WithCompaction(s compact.CompactionSettings) *Agent {
 	a.compaction = s
 	return a
+}
+
+func (a *Agent) Apply(ctx context.Context, msgs []llm.Message) ([]llm.Message, bool) {
+	if msgs == nil {
+		msgs = a.currentMsgs
+	}
+	return a.applyCompaction(ctx, msgs, nil)
+}
+
+func (a *Agent) SetMessages(msgs []llm.Message) { a.currentMsgs = msgs }
+
+func (a *Agent) LLM() llm.Core { return a.core }
+
+func (a *Agent) KeepRecentTurns() int { return a.compaction.KeepRecentTurns }
+
+func (a *Agent) ModelID() string { return a.Model.ID }
+
+func (a *Agent) LogSeq() int { return a.logSeq }
+
+func (a *Agent) WithLogLocked(do func()) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	do()
+}
+
+func (a *Agent) WriteCompactionEntry(summary string, before, after, firstKeptSeq int, model string) {
+	a.writeCompactionLocked(Event{
+		Category:        EventCompaction,
+		Summary:         summary,
+		TokensBefore:    before,
+		TokensAfter:     after,
+		FirstKeptSeq:    firstKeptSeq,
+		CompactionModel: model,
+	})
+}
+
+func (a *Agent) WriteCompactionV3Entry(trigger, detail, strategy string, before, after, firstKeptSeq int, model string, durMS int64) {
+	a.writeCompactionV3Locked(trigger, detail, strategy, before, after, firstKeptSeq, model, durMS)
+}
+
+func (a *Agent) FlushLogBuf() {
+	if a.logBuf != nil {
+		_ = a.logBuf.Flush()
+	}
+}
+
+func (a *Agent) FindTool(name string) (stream.Tool, bool) {
+	tool, ok := a.findTool(name)
+	if !ok {
+		return nil, false
+	}
+	return tool, true
+}
+
+func (a *Agent) ToolListNames() []string {
+	names := make([]string, 0, len(a.toolList))
+	for _, t := range a.toolList {
+		names = append(names, t.Name())
+	}
+	return names
+}
+
+func (a *Agent) PreflightValidate(tc llm.ToolCall) string {
+	return a.preflightValidate(tc)
+}
+
+func (a *Agent) ToolResultCacheGet(sig string) (string, bool) {
+	if a.toolResultCache == nil {
+		return "", false
+	}
+	return a.toolResultCache.Get(sig)
+}
+
+func (a *Agent) ToolResultCachePut(sig, result string) {
+	if a.toolResultCache == nil {
+		return
+	}
+	a.toolResultCache.Put(sig, result)
+}
+
+func (a *Agent) LogLock()   { a.logMu.Lock() }
+func (a *Agent) LogUnlock() { a.logMu.Unlock() }
+
+func (a *Agent) WriteToolDedupHitLocked(name, sig string, seq int) {
+	a.writeToolDedupHitLocked(name, sig, seq)
+}
+
+func (a *Agent) Emit(ctx context.Context, ev stream.EmitEvent) bool {
+	return a.emit(ctx, a.activeEmitCh, streamEmitToAgentEvent(ev))
+}
+
+func streamEmitToAgentEvent(ev stream.EmitEvent) Event {
+	out := Event{
+		Category:   emitKindToCategory(ev.Kind),
+		Content:    ev.Content,
+		ToolName:   ev.ToolName,
+		ToolArgs:   ev.ToolArgs,
+		ToolResult: ev.ToolResult,
+		ToolError:  ev.ToolError,
+		ToolIntent: ev.ToolIntent,
+		FromCache:  ev.FromCache,
+	}
+	if len(ev.ToolCalls) > 0 {
+		out.ToolCalls = ev.ToolCalls
+	}
+	if ev.Usage != nil {
+		out.Usage = ev.Usage
+	}
+	if ev.Reasoning != "" {
+		out.Reasoning = ev.Reasoning
+	}
+	if ev.Summary != "" || ev.TokensAfter != 0 || ev.TokensBefore != 0 {
+		out.Summary = ev.Summary
+		out.TokensBefore = ev.TokensBefore
+		out.TokensAfter = ev.TokensAfter
+		out.FirstKeptSeq = ev.FirstKeptSeq
+		out.CompactionModel = ev.CompactionModel
+	}
+	if ev.SafetyCount != 0 {
+		out.SafetyCount = ev.SafetyCount
+	}
+	return out
+}
+
+func emitKindToCategory(k stream.EmitKind) EventCategory {
+	switch k {
+	case stream.EmitKindTool:
+		return EventTool
+	case stream.EmitKindError:
+		return EventError
+	case stream.EmitKindObserve:
+		return EventObserve
+	case stream.EmitKindInvalid:
+		return EventInvalid
+	}
+	return EventInvalid
+}
+
+func (a *Agent) BuildToolErrorEvent(tc llm.ToolCall, errMsg string) stream.EmitEvent {
+	if tc.Function.Name == InvalidToolName {
+		return stream.EmitEvent{Kind: stream.EmitKindInvalid, ToolName: tc.Function.Name, ToolError: errMsg, ToolArgs: tc.Function.Arguments}
+	}
+	return stream.EmitEvent{Kind: stream.EmitKindError, ToolError: errMsg}
+}
+
+func (a *Agent) ExtractToolIntent(argsJSON string) string {
+	return extractToolIntent(argsJSON)
+}
+
+func (a *Agent) InvalidToolNameFlag() string { return InvalidToolName }
+
+func (a *Agent) EnsureTurnState() stream.TurnState {
+	ts := a.ensureActiveTurnStateForTest()
+	return &turnStateAdapter{ts: ts}
+}
+
+type turnStateAdapter struct {
+	ts *turnState
+}
+
+func (a *turnStateAdapter) IncPreflightFailure(name string) {
+	if a.ts == nil {
+		return
+	}
+	if a.ts.preflightFailureStreak == nil {
+		a.ts.preflightFailureStreak = make(map[string]int)
+	}
+	a.ts.preflightFailureStreak[name]++
+}
+
+func (a *turnStateAdapter) ResetPreflightFailure(name string) {
+	if a.ts == nil {
+		return
+	}
+	delete(a.ts.preflightFailureStreak, name)
 }
 
 func (a *Agent) Interrupt() *SoftInterrupt {
@@ -273,7 +452,7 @@ func (a *Agent) ShouldAbort(msgs []llm.Message, lastFailedToolError string) erro
 	return a.strategy.ShouldAbort(msgs, lastFailedToolError)
 }
 
-func (a *Agent) CompactionSettingsForTest() CompactionSettings {
+func (a *Agent) CompactionSettingsForTest() compact.CompactionSettings {
 	return a.compaction
 }
 

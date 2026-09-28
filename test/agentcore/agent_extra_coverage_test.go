@@ -10,6 +10,8 @@ import (
 	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -69,7 +71,7 @@ func TestAgentSessionIDDefaultEmpty(t *testing.T) {
 
 func TestAgentCompactionSettingsForTestRoundTrip(t *testing.T) {
 	ag := agentcore.NewAgent(&fakeCore{})
-	want := agentcore.CompactionSettings{Enabled: false, ReserveTokens: 99, KeepRecentTurns: 7}
+	want := compact.CompactionSettings{Enabled: false, ReserveTokens: 99, KeepRecentTurns: 7}
 	ag.WithCompaction(want)
 	got := ag.CompactionSettingsForTest()
 	if got.ReserveTokens != 99 || got.KeepRecentTurns != 7 || got.Enabled {
@@ -621,13 +623,13 @@ func TestAgentExecuteToolsEmptyArgsAddsErrorMessageAndContinues(t *testing.T) {
 	calls := []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: "  "}}}
 	ag := agentcore.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m"})
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	events, updated, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	events, updated, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if !ok {
 		t.Error("ok = false, want true (empty args skips but doesn't abort)")
 	}
 	var foundSkip bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "empty arguments") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "empty arguments") {
 			foundSkip = true
 		}
 	}
@@ -645,7 +647,7 @@ func TestAgentExecuteToolsUnknownToolAbortsAndFillsRemaining(t *testing.T) {
 		{ID: "c3", Function: llm.FunctionCall{Name: "ghost2", Arguments: `{}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	_, updated, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	_, updated, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if ok {
 		t.Error("ok = true, want false (unknown tool should abort)")
 	}
@@ -672,13 +674,13 @@ func TestAgentExecuteToolsPreflightFailureEmitsErrorAndStopsRemaining(t *testing
 		{ID: "c2", Function: llm.FunctionCall{Name: "needs_path", Arguments: `{}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	events, updated, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	events, updated, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if !ok {
 		t.Error("ok = false, want true (preflight failure appends and stops remaining but ok=true)")
 	}
 	var sawPreflight, sawSkip bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "missing required field") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "missing required field") {
 			sawPreflight = true
 		}
 	}
@@ -710,11 +712,11 @@ func TestAgentExecuteToolsCacheHitEmitsObserveFromCache(t *testing.T) {
 		return "result", nil
 	}})
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	updated1, _ := agentcore.AgentExecuteToolsForTest(ag, calls[:1], msgs)
-	events2, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls[1:], updated1)
+	updated1, _ := stream.AgentExecuteToolsForTest(ag, calls[:1], msgs)
+	events2, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls[1:], updated1)
 	var sawCacheHit bool
 	for _, ev := range events2 {
-		if ev.Category == agentcore.EventObserve && ev.FromCache {
+		if ev.Kind == stream.EmitKindObserve && ev.FromCache {
 			sawCacheHit = true
 		}
 	}
@@ -735,10 +737,10 @@ func TestAgentExecuteToolsErrorEmitsInvalidEventForInvalidName(t *testing.T) {
 		{ID: "c1", Function: llm.FunctionCall{Name: agentcore.InvalidToolName, Arguments: `{}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	events, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	events, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	var sawInvalid bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventInvalid {
+		if ev.Kind == stream.EmitKindInvalid {
 			sawInvalid = true
 		}
 	}
@@ -754,13 +756,13 @@ func TestAgentExecuteToolsSuccessPathEmitsToolThenObserve(t *testing.T) {
 	}})
 	calls := []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "echo", Arguments: `{"intent":"hi"}`}}}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	events, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	events, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	var sawTool, sawObserve bool
 	for _, ev := range events {
-		switch ev.Category {
-		case agentcore.EventTool:
+		switch ev.Kind {
+		case stream.EmitKindTool:
 			sawTool = true
-		case agentcore.EventObserve:
+		case stream.EmitKindObserve:
 			sawObserve = true
 			if !strings.Contains(ev.ToolResult, "echoed:") {
 				t.Errorf("ToolResult = %q, want contains echoed:", ev.ToolResult)
@@ -779,13 +781,13 @@ func TestAgentExecuteToolsErrorEmitsToolError(t *testing.T) {
 	}})
 	calls := []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "broken", Arguments: `{"intent":"x"}`}}}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	events, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	events, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	var sawToolError, sawError bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventObserve && ev.ToolError != "" {
+		if ev.Kind == stream.EmitKindObserve && ev.ToolError != "" {
 			sawToolError = true
 		}
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "kapow") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "kapow") {
 			sawError = true
 		}
 	}
