@@ -126,6 +126,11 @@ func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Ev
 	if !ok {
 		return msgs, false, step
 	}
+	if a.interrupt != nil && a.interrupt.Fired() {
+		slog.Info("agent: interrupted", "signal", a.interrupt.Last().String(), "turn", turn)
+		a.emit(ctx, ch, Event{Category: EventError, ToolError: ErrInterrupted.Error()})
+		return msgs, false, step
+	}
 	emptyPostTool := step.Kind == StepFinal && step.Content == "" && (lastMessageRoleIsTool(msgs) || ts.emptyContinuations > 0)
 	if emptyPostTool {
 		msgs, ok = a.handleEmptyPostToolContinuation(ctx, msgs, ch, step, ts)
