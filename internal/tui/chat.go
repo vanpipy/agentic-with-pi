@@ -119,8 +119,8 @@ func linesCacheKey(m chatMsg, width int) string {
 	if m.usage != nil {
 		usageStr = fmt.Sprintf("%d,%d,%d", m.usage.prompt, m.usage.completion, m.usage.total)
 	}
-	return fmt.Sprintf("%d|%d|%v|%v|%d|%d|%s|%s|%s|%s|%v",
-		width, m.role, m.collapsed, hasTool, m.promptNum, m.duration, m.text, m.intent, usageStr, m.result, m.resultFailed)
+	return fmt.Sprintf("%d|%d|%v|%v|%d|%d|%s|%s|%s|%s|%v|%s",
+		width, m.role, m.collapsed, hasTool, m.promptNum, m.duration, m.text, m.intent, usageStr, m.result, m.resultFailed, m.safetyKind)
 }
 
 type roleLayout struct {
@@ -144,6 +144,8 @@ func roleLayoutFor(r role) roleLayout {
 		return roleLayout{body: systemPrefix, glyph: " ⋯ "}
 	case roleThinking:
 		return roleLayout{body: aiThinking, glyph: " ∵ "}
+	case roleSafety:
+		return roleLayout{body: safetyBody, glyph: "   "}
 	}
 	return roleLayout{}
 }
@@ -166,6 +168,9 @@ func renderMsg(g chatMsg, width int) []string {
 	if bodyWidth < 8 {
 		bodyWidth = 8
 	}
+	if g.role == roleSafety {
+		return renderSafety(g, glyph, layout.body, bodyWidth)
+	}
 	body := g.body(layout, bodyWidth)
 	if len(body) == 0 {
 		return nil
@@ -176,6 +181,30 @@ func renderMsg(g chatMsg, width int) []string {
 		indented = append(indented, hints...)
 	}
 	return indented
+}
+
+func renderSafety(g chatMsg, glyph string, bodyStyle lipgloss.Style, width int) []string {
+	prefix := safetyGlyph.Render("[" + g.safetyKind + "]")
+	text := g.text
+	if text == "" {
+		text = safetyKindFallback(g.safetyKind)
+	}
+	_ = glyph
+	_ = width
+	lines := wrapRender(bodyStyle, prefix+" "+text)
+	return lines
+}
+
+func safetyKindFallback(kind string) string {
+	switch kind {
+	case "nudge":
+		return "BATCH_NUDGE: consider batching independent tool calls"
+	case "empty_continue":
+		return "Please continue."
+	case "repair":
+		return "REPAIR: recovered interrupted tool outputs"
+	}
+	return kind
 }
 
 func (g chatMsg) body(layout roleLayout, width int) []string {
@@ -902,6 +931,15 @@ func (c *chatModel) appendError(text string) {
 	c.refresh()
 }
 
+func (c *chatModel) appendSafety(kind, text string) {
+	c.messages = append(c.messages, chatMsg{
+		role:       roleSafety,
+		text:       text,
+		safetyKind: kind,
+	})
+	c.refresh()
+}
+
 func (c *chatModel) appendSystem(text string) {
 	c.messages = append(c.messages, chatMsg{role: roleSystem, text: text})
 	c.refresh()
@@ -955,6 +993,7 @@ type ChatMsg struct {
 	ToolData     *json_rpc.MessageContentPart
 	Result       string
 	ResultFailed bool
+	SafetyKind   string
 }
 
 func toChatMsg(c ChatMsg) chatMsg {
@@ -971,6 +1010,7 @@ func toChatMsg(c ChatMsg) chatMsg {
 		toolData:     c.ToolData,
 		result:       c.Result,
 		resultFailed: c.ResultFailed,
+		safetyKind:   c.SafetyKind,
 	}
 }
 
@@ -988,6 +1028,7 @@ func fromChatMsg(m chatMsg) ChatMsg {
 		ToolData:     m.toolData,
 		Result:       m.result,
 		ResultFailed: m.resultFailed,
+		SafetyKind:   m.safetyKind,
 	}
 }
 

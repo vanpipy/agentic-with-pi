@@ -1873,3 +1873,126 @@ func TestProcessStreamEventRollbackDoesNotEmit(t *testing.T) {
 		t.Errorf("Rollback event alone must emit 0 events, got %d: %+v", len(got.Emitted), got.Emitted)
 	}
 }
+
+func TestRunOneTurnEmitsSafetyRepairWhenToolOutputsMissing(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", ToolCalls: []llm.ToolCall{
+			{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: `{}`}},
+			{ID: "c2", Function: llm.FunctionCall{Name: "noop", Arguments: `{}`}},
+		}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	_, _ = agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+
+	var safetyRepairCount int
+	var sawRepair bool
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Category == agentcore.EventSafetyRepair {
+				sawRepair = true
+				safetyRepairCount = ev.SafetyCount
+			}
+		default:
+			goto done
+		}
+	}
+done:
+	if !sawRepair {
+		t.Fatalf("expected EventSafetyRepair emit when RepairMissingToolOutputs fills 1 gap, got none")
+	}
+	if safetyRepairCount != 1 {
+		t.Errorf("EventSafetyRepair.SafetyCount = %d, want 1 (one missing tool output recovered)", safetyRepairCount)
+	}
+}
+
+func TestLoopWithMsgsEmitsSafetyNudgeAfterThreshold(t *testing.T) {
+	chunksList := make([][]llm.StreamEvent, 5)
+	for i := range chunksList {
+		chunksList[i] = singleToolChunks("noop", fmt.Sprintf(`{"intent":"x","t":%d}`, i))
+	}
+	core := &fakeCore{streamChunksList: chunksList}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(5)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 256)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+
+	sawNudge := false
+	sawUserMessage := false
+	for ev := range ch {
+		if ev.Category == agentcore.EventSafetyNudge {
+			sawNudge = true
+		}
+		if ev.Category == agentcore.EventUserMessage && strings.Contains(ev.Content, systemReminderBatchNudgeMarker) {
+			sawUserMessage = true
+		}
+	}
+	if !sawNudge {
+		t.Errorf("expected EventSafetyNudge emit when BATCH_NUDGE fires after 3 single-tool turns; got none")
+	}
+	if !sawUserMessage {
+		t.Errorf("expected EventUserMessage containing system-reminder nudge text on wire; got none (TUI relies on this signal)")
+	}
+}
+
+func TestHandleEmptyPostToolContinuationEmitsSafetyEvent(t *testing.T) {
+	emptyStop := []llm.StreamEvent{
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunks: emptyStop}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	counter := 0
+	_, ok := agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 0, &counter)
+	if !ok {
+		t.Fatal("expected empty post-tool continuation to keep loop alive, got ok=false")
+	}
+
+	var sawSafetyEmptyContinue bool
+	var safetyContent string
+	var sawUserContinue bool
+	for {
+		select {
+		case ev := <-ch:
+			if ev.Category == agentcore.EventSafetyEmptyContinue {
+				sawSafetyEmptyContinue = true
+				safetyContent = ev.Content
+			}
+			if ev.Category == agentcore.EventUserMessage && ev.Content == "Please continue." {
+				sawUserContinue = true
+			}
+		default:
+			goto done
+		}
+	}
+done:
+	if !sawSafetyEmptyContinue {
+		t.Fatalf("expected EventSafetyEmptyContinue emit when handleEmptyPostToolContinuation fires, got none")
+	}
+	if !strings.Contains(safetyContent, "EMPTY_CONTINUE") {
+		t.Errorf("EventSafetyEmptyContinue.Content = %q, want contains EMPTY_CONTINUE marker", safetyContent)
+	}
+	if !sawUserContinue {
+		t.Errorf("expected EventUserMessage(\"Please continue.\") on wire so TUI can pattern-detect; got none")
+	}
+}

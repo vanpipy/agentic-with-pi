@@ -79,6 +79,8 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 			slog.Debug("agent: batch nudge injected", "consecutive", consecutiveSingleToolTurns)
 			consecutiveSingleToolTurns = 0
 			msgs = append(msgs, llm.Message{Role: "user", Content: systemReminderBatchNudge})
+			a.emit(ctx, ch, Event{Category: EventUserMessage, Content: systemReminderBatchNudge})
+			a.emit(ctx, ch, Event{Category: EventSafetyNudge, Content: "BATCH_NUDGE: consider batching independent tool calls"})
 		}
 		var ok bool
 		var step Step
@@ -99,6 +101,7 @@ func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Ev
 	if repaired, count := RepairMissingToolOutputs(msgs); count > 0 {
 		slog.Warn("agent: repaired missing tool outputs before next turn", "count", count)
 		msgs = repaired
+		a.emit(ctx, ch, Event{Category: EventSafetyRepair, Content: fmt.Sprintf("REPAIR: recovered %d interrupted tool outputs", count), SafetyCount: count})
 	}
 	msgs = a.initTurnState(msgs, turn)
 	a.logTurnStartLocked(msgs)
@@ -131,6 +134,7 @@ func (a *Agent) handleEmptyPostToolContinuation(ctx context.Context, msgs []llm.
 	}
 	*emptyContinuations++
 	slog.Debug("agent: empty post-tool continuation attempt", "attempt", *emptyContinuations, "max", MaxEmptyPostToolContinuations)
+	a.emit(ctx, ch, Event{Category: EventSafetyEmptyContinue, Content: fmt.Sprintf("EMPTY_CONTINUE: attempt %d/%d", *emptyContinuations, MaxEmptyPostToolContinuations)})
 	msgs = append(msgs, llm.Message{Role: "assistant", Content: "", Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig})
 	msgs = append(msgs, llm.Message{Role: "user", Content: emptyPostToolContinuationPrompt})
 	a.currentMsgs = msgs

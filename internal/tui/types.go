@@ -16,6 +16,7 @@ const (
 	RoleError
 	RoleSystem
 	RoleThinking
+	RoleSafety
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	roleError     = RoleError
 	roleSystem    = RoleSystem
 	roleThinking  = RoleThinking
+	roleSafety    = RoleSafety
 )
 
 type State int
@@ -66,6 +68,7 @@ type chatMsg struct {
 	toolData     *json_rpc.MessageContentPart
 	result       string
 	resultFailed bool
+	safetyKind   string
 }
 
 type msgUsage struct {

@@ -3,6 +3,7 @@ package tui_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
@@ -281,5 +282,111 @@ func TestChatLineCountCachesPerMessage(t *testing.T) {
 	}
 	if total := c.LineCountMissesForTest(); total != 6 {
 		t.Errorf("expected 6 cumulative renderedLines misses (1+2+3 from submit pre-warm), got %d", total)
+	}
+}
+
+func TestHandleServerEventSystemReminderUserMessageBecomesSafetyNudge(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000010",
+		"timestamp":"2026-09-28T03:00:00.000Z",
+		"message":{
+			"role":"user",
+			"content":[{"type":"text","text":"<system-reminder>You have made several consecutive single-tool-call turns. If the upcoming tool calls are independent (no data dependency between them), call them in the same turn to save round-trips. Only batch when truly independent.</system-reminder>"}]
+		},
+		"stopReason":"end_turn"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 chat message after system-reminder user event, got %d", len(msgs))
+	}
+	if msgs[0].Role != tui.RoleSafety {
+		t.Errorf("expected RoleSafety for system-reminder user event, got %v", msgs[0].Role)
+	}
+	if msgs[0].SafetyKind != "nudge" {
+		t.Errorf("expected SafetyKind=nudge for system-reminder user event, got %q", msgs[0].SafetyKind)
+	}
+	if msgs[0].Text == "" {
+		t.Errorf("expected safety body text to be populated")
+	}
+}
+
+func TestHandleServerEventPleaseContinueUserMessageBecomesSafetyEmptyContinue(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000011",
+		"timestamp":"2026-09-28T03:00:00.000Z",
+		"message":{
+			"role":"user",
+			"content":[{"type":"text","text":"Please continue."}]
+		},
+		"stopReason":"end_turn"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 chat message after Please continue. user event, got %d", len(msgs))
+	}
+	if msgs[0].Role != tui.RoleSafety {
+		t.Errorf("expected RoleSafety for Please continue. user event, got %v", msgs[0].Role)
+	}
+	if msgs[0].SafetyKind != "empty_continue" {
+		t.Errorf("expected SafetyKind=empty_continue, got %q", msgs[0].SafetyKind)
+	}
+}
+
+func TestHandleServerEventRegularUserMessageStaysUserRole(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000012",
+		"timestamp":"2026-09-28T03:00:00.000Z",
+		"message":{
+			"role":"user",
+			"content":[{"type":"text","text":"list files"}]
+		},
+		"stopReason":"end_turn"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	msgs := c.MessagesForTest()
+	for _, m := range msgs {
+		if m.Role == tui.RoleSafety {
+			t.Errorf("safety detection over-matched: plain user message got RoleSafety, kind=%q", m.SafetyKind)
+		}
+	}
+}
+
+func TestRenderMsgRoleSafetyHasGlyphAndBody(t *testing.T) {
+	layout := tui.RoleLayoutForTest(tui.RoleSafety)
+	if layout.Glyph() == "" {
+		t.Fatalf("expected RoleLayoutForTest(RoleSafety) to expose a non-empty glyph, got empty (roleSafety layout not wired)")
+	}
+	lines := tui.RenderMsgForTest(tui.ChatMsg{
+		Role:       tui.RoleSafety,
+		Text:       "consider batching independent tool calls",
+		SafetyKind: "nudge",
+	}, 80)
+	if len(lines) == 0 {
+		t.Fatalf("expected renderMsg(roleSafety) to produce at least 1 line, got 0")
+	}
+	if !strings.Contains(lines[0], "[nudge]") {
+		t.Errorf("expected rendered first line to contain [nudge] prefix, got %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "consider batching independent tool calls") {
+		t.Errorf("expected rendered first line to contain body text, got %q", lines[0])
+	}
+}
+
+func TestRenderMsgRoleSafetyUsesSafetyGlyphPrefix(t *testing.T) {
+	nudgeGlyph := tui.RoleLayoutForTest(tui.RoleSafety).Glyph()
+	userGlyph := tui.RoleLayoutForTest(tui.RoleUser).Glyph()
+	if nudgeGlyph == "" {
+		t.Fatal("RoleSafety glyph must be non-empty")
+	}
+	if nudgeGlyph == userGlyph {
+		t.Errorf("RoleSafety glyph (%q) must differ from RoleUser glyph (%q) so safety indicators are visually distinct", nudgeGlyph, userGlyph)
 	}
 }

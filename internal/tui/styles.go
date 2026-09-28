@@ -115,4 +115,7 @@ var (
 	thinkingExpanded  = lipgloss.NewStyle().Foreground(c.dim).Italic(true)
 
 	imagePlaceholder = lipgloss.NewStyle().Foreground(c.dim)
+
+	safetyGlyph = lipgloss.NewStyle().Foreground(c.tool).Bold(true)
+	safetyBody  = lipgloss.NewStyle().Foreground(c.dim)
 )
