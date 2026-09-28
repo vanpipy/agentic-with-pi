@@ -73,15 +73,24 @@ func (a *Agent) writeHeaderLocked() {
 }
 
 func (a *Agent) writeEvent(seq int, ev Event) {
-	if a.LogWriter == nil {
+	if a.LogWriter == nil || a.logBuf == nil {
 		return
 	}
 	a.logMu.Lock()
 	defer a.logMu.Unlock()
-	if a.logBuf == nil {
-		return
+	entry := categoryToEntry(seq, ev)
+	if err := writeJSONLine(a.logBuf, entry); err != nil {
+		slog.Debug("agent: event write failed", "err", err)
 	}
-	entry := sessionEvent{Kind: "event", Seq: seq, At: time.Now().UTC().Format(time.RFC3339Nano), Category: categoryName(ev.Category)}
+}
+
+func categoryToEntry(seq int, ev Event) sessionEvent {
+	entry := sessionEvent{
+		Kind:     "event",
+		Seq:      seq,
+		At:       time.Now().UTC().Format(time.RFC3339Nano),
+		Category: categoryName(ev.Category),
+	}
 	switch ev.Category {
 	case EventThoughtChunk:
 		if ev.Reasoning != "" {
@@ -124,9 +133,7 @@ func (a *Agent) writeEvent(seq int, ev Event) {
 	case EventUserMessage:
 		entry.UserMessage = ev.Content
 	}
-	if err := writeJSONLine(a.logBuf, entry); err != nil {
-		slog.Debug("agent: event write failed", "err", err)
-	}
+	return entry
 }
 
 func (a *Agent) writeCompactionLocked(ev Event) {
