@@ -1414,3 +1414,178 @@ func TestLoopWithMsgsSafetyNetHalts(t *testing.T) {
 		t.Errorf("StreamChat calls = %d, want 2 (SafetyNet=2 must halt the loop after the second turn)", core.streamCalls)
 	}
 }
+
+func TestRunOneTurnEmptyStepFinalWithToolMessageRetries(t *testing.T) {
+	emptyStop := []llm.StreamEvent{
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		emptyStop, emptyStop, emptyStop, emptyStop, emptyStop, emptyStop,
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 64)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	counter := 0
+	const wantMax = 5
+	for attempt := 1; attempt <= wantMax; attempt++ {
+		msgsOut, ok := agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 0, &counter)
+		if !ok {
+			t.Fatalf("attempt %d: ok=false, want true (should continue after empty post-tool hiccup)", attempt)
+		}
+		if counter != attempt {
+			t.Errorf("attempt %d: counter = %d, want %d", attempt, counter, attempt)
+		}
+		last := msgsOut[len(msgsOut)-1]
+		if last.Role != "user" || last.Content != "Please continue." {
+			t.Errorf("attempt %d: last message = %+v, want user/Please continue.", attempt, last)
+		}
+		var sawContinuation bool
+	loop:
+		for {
+			select {
+			case ev := <-ch:
+				if ev.Category == agentcore.EventUserMessage && ev.Content == "Please continue." {
+					sawContinuation = true
+				}
+			default:
+				break loop
+			}
+		}
+		if !sawContinuation {
+			t.Errorf("attempt %d: did not see EventUserMessage on the channel", attempt)
+		}
+		msgs = msgsOut
+	}
+
+	_, ok := agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 0, &counter)
+	if ok {
+		t.Errorf("attempt %d (after %d retries): ok=true, want false (safety net must give up)", wantMax+1, wantMax)
+	}
+	if counter != wantMax {
+		t.Errorf("counter at give-up = %d, want %d", counter, wantMax)
+	}
+}
+
+func TestRunOneTurnEmptyStepFinalWithoutToolMessageTerminates(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+
+	msgsOut, ok := agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+	if ok {
+		t.Errorf("ok=true, want false (empty StepFinal without preceding tool message is a genuine finish)")
+	}
+	if len(msgsOut) != 1 {
+		t.Errorf("msgs len = %d, want 1 (no continuation injected without preceding tool message)", len(msgsOut))
+	}
+}
+
+func TestRunOneTurnNonEmptyStepFinalTerminates(t *testing.T) {
+	core := &fakeCore{streamChunks: []llm.StreamEvent{
+		textDeltaChunk("final answer"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	msgsOut, ok := agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)
+	if ok {
+		t.Errorf("ok=true, want false (non-empty StepFinal must terminate regardless of preceding tool messages)")
+	}
+	if len(msgsOut) != 2 {
+		t.Errorf("msgs len = %d, want 2 (no continuation injected for non-empty finish)", len(msgsOut))
+	}
+}
+
+func TestRunOneTurnCounterResetsOnToolCall(t *testing.T) {
+	emptyStop := []llm.StreamEvent{
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	toolCall := []llm.StreamEvent{
+		toolUseStartChunk("c2", "noop"),
+		toolUseIDDeltaChunk("c2", "noop", `{"intent":"x"}`),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{emptyStop, toolCall}}
+	ag := newTestAgent(core, "m")
+	ag.WithTool(agentcore.ToolFunc{
+		N:  "noop",
+		Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil },
+	})
+	ch := make(chan agentcore.Event, 64)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: `{"intent":"x"}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	counter := 0
+	msgsOut, ok := agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 0, &counter)
+	if !ok {
+		t.Fatalf("turn 1: ok=false, want true (empty hiccup after tool result must continue)")
+	}
+	if counter != 1 {
+		t.Errorf("after turn 1 (empty hiccup): counter = %d, want 1", counter)
+	}
+	msgs = msgsOut
+
+	msgsOut, ok = agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 1, &counter)
+	if !ok {
+		t.Fatalf("turn 2: ok=false, want true (tool call keeps loop alive)")
+	}
+	if counter != 0 {
+		t.Errorf("after turn 2 (tool call): counter = %d, want 0 (reset on real tool call)", counter)
+	}
+}
+
+func TestRunOneTurnCounterResetsOnNonEmptyContent(t *testing.T) {
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		{messageDeltaStopChunk("end_turn"), messageStopChunk()},
+		{textDeltaChunk("answer"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
+	}}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 64)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	counter := 0
+	_, ok := agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgs, ch, 0, &counter)
+	if !ok {
+		t.Fatal("turn 1: ok=false, want true (empty hiccup must continue)")
+	}
+	if counter != 1 {
+		t.Errorf("after turn 1: counter = %d, want 1", counter)
+	}
+
+	msgsWithContinuation := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+		{Role: "user", Content: "Please continue."},
+	}
+	_, ok = agentcore.AgentRunOneTurnWithEmptyContinuationCounterForTest(ag, context.Background(), msgsWithContinuation, ch, 1, &counter)
+	if ok {
+		t.Error("turn 2: ok=true, want false (non-empty StepFinal terminates)")
+	}
+	if counter != 0 {
+		t.Errorf("after turn 2 (non-empty finish): counter = %d, want 0 (reset on non-empty content)", counter)
+	}
+}
