@@ -13,6 +13,7 @@ type CompactionSettings struct {
 	MaxContextTokens int
 	Proactive        bool
 	Semantic         bool
+	CacheTracker     *CacheTracker
 }
 
 const DefaultContextWindow = 128000
@@ -26,6 +27,9 @@ func ShouldCompactWithModel(msgs []llm.Message, model llm.Model, settings Compac
 		window = DefaultContextWindow
 	}
 	used := EstimateTotalTokens(msgs)
+	if settings.CacheTracker != nil {
+		return settings.CacheTracker.ShouldCompactGivenCache(used, window)
+	}
 	return used > window-settings.ReserveTokens
 }
 

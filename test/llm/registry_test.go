@@ -36,6 +36,9 @@ func (s *stubProvider) ModelCapabilities(model string) llm.ModelCapabilities {
 	return llm.ModelCapabilities{ID: model}
 }
 func (s *stubProvider) SupportsNativeCompact(model string) bool { return false }
+func (s *stubProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
+	return nil, nil
+}
 
 func TestRegisterAndGet(t *testing.T) {
 	r := llm.NewRegistry()

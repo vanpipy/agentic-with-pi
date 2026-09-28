@@ -556,3 +556,23 @@ func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, 
 
 	return &llm.StreamChunk{}, false, nil
 }
+
+func (p *MiniMaxProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
+	if systemPrompt == "" {
+		return nil, nil
+	}
+	midpoint := len(systemPrompt) / 2
+	splitAt := strings.Index(systemPrompt[midpoint:], "\n")
+	if splitAt < 0 {
+		return []llm.ContentBlock{
+			llm.ContentText{Text: systemPrompt, CacheControl: llm.CacheEphemeral1h()},
+		}, nil
+	}
+	splitAt += midpoint
+	prefix := systemPrompt[:splitAt]
+	suffix := systemPrompt[splitAt:]
+	return []llm.ContentBlock{
+		llm.ContentText{Text: prefix, CacheControl: llm.CacheEphemeral1h()},
+		llm.ContentText{Text: suffix},
+	}, nil
+}
