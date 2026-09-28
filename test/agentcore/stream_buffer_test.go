@@ -244,3 +244,53 @@ func TestStreamBufferFinalizeIsIdempotent(t *testing.T) {
 		t.Errorf("expected idempotent parentId, got %q then %q", first.ParentID, second.ParentID)
 	}
 }
+
+func TestStreamBufferAppendAfterFinalizePreservesID(t *testing.T) {
+	b := agentcore.NewStreamBuffer("parent-1")
+	b.AppendText("hello")
+	first := b.Finalize()
+	if first.ID == "" {
+		t.Fatal("first Finalize produced empty id")
+	}
+	b.AppendText(" world")
+	b.AppendToolCall("call-1", "bash", "run", json.RawMessage(`{"command":"date"}`))
+	second := b.Finalize()
+	if second.ID != first.ID {
+		t.Errorf("expected id preserved across append after Finalize, got %q then %q", first.ID, second.ID)
+	}
+	if second.ParentID != first.ParentID {
+		t.Errorf("expected parentId preserved across append after Finalize, got %q then %q", first.ParentID, second.ParentID)
+	}
+	if second.Timestamp != first.Timestamp {
+		t.Errorf("expected timestamp preserved across append after Finalize, got %q then %q", first.Timestamp, second.Timestamp)
+	}
+	if len(second.Message.Content) != 2 {
+		t.Fatalf("expected 2 parts after append, got %d", len(second.Message.Content))
+	}
+	if second.Message.Content[0].Text != "hello world" {
+		t.Errorf("expected concatenated text %q, got %q", "hello world", second.Message.Content[0].Text)
+	}
+	if second.Message.Content[1].Type != "toolCall" {
+		t.Errorf("expected second part toolCall, got %q", second.Message.Content[1].Type)
+	}
+}
+
+func TestStreamBufferFinalizeWithEmptyParentID(t *testing.T) {
+	b := agentcore.NewStreamBuffer("")
+	b.AppendText("hi")
+	msg := b.Finalize()
+	if msg.ParentID != "" {
+		t.Errorf("expected empty parentId when constructor parentID is empty, got %q", msg.ParentID)
+	}
+}
+
+func TestStreamBufferFinalizeReturnsCopyOfParts(t *testing.T) {
+	b := agentcore.NewStreamBuffer("")
+	b.AppendText("hello")
+	msg := b.Finalize()
+	msg.Message.Content[0].Text = "MUTATED"
+	second := b.Finalize()
+	if second.Message.Content[0].Text != "hello" {
+		t.Errorf("expected internal state unaffected by caller mutation, got %q", second.Message.Content[0].Text)
+	}
+}
