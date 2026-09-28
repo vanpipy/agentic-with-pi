@@ -57,20 +57,24 @@ func (a *Agent) preflightValidate(tc llm.ToolCall) string {
 		tc.Function.Name, strings.Join(missing, ", "), missing[0], strings.Join(parts, "; "))
 }
 
-func (a *Agent) checkPreflightStreak() error {
-	if len(a.preflightFailureStreak) == 0 {
+func checkPreflightStreak(ts *turnState) error {
+	if ts == nil || len(ts.preflightFailureStreak) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(a.preflightFailureStreak))
-	for name := range a.preflightFailureStreak {
+	names := make([]string, 0, len(ts.preflightFailureStreak))
+	for name := range ts.preflightFailureStreak {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		streak := a.preflightFailureStreak[name]
+		streak := ts.preflightFailureStreak[name]
 		if streak >= PreflightAbortThreshold {
 			return fmt.Errorf("Tool %s has produced invalid arguments %d turns in a row. The model cannot generate valid args for this tool. Stop calling it and either pick a different tool or ask the user for guidance.", name, streak)
 		}
 	}
 	return nil
+}
+
+func CheckPreflightStreakForTest(ts *turnState) error {
+	return checkPreflightStreak(ts)
 }

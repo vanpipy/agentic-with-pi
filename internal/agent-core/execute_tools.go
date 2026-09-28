@@ -11,10 +11,10 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
-func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
+func (a *Agent) executeTools(ctx context.Context, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event, ts *turnState) ([]llm.Message, bool) {
 	updated := msgs
 	for i, tc := range calls {
-		next, outcome := a.tryExecuteToolCall(ctx, tc, i, calls, updated, ch)
+		next, outcome := a.tryExecuteToolCall(ctx, tc, i, calls, updated, ch, ts)
 		if outcome != toolCallContinue {
 			return next, outcome == toolCallStopOk
 		}
@@ -31,7 +31,7 @@ const (
 	toolCallStopFail
 )
 
-func (a *Agent) tryExecuteToolCall(ctx context.Context, tc llm.ToolCall, idx int, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event) ([]llm.Message, toolCallOutcome) {
+func (a *Agent) tryExecuteToolCall(ctx context.Context, tc llm.ToolCall, idx int, calls []llm.ToolCall, msgs []llm.Message, ch chan<- Event, ts *turnState) ([]llm.Message, toolCallOutcome) {
 	if msg := emptyArgsMessage(tc); msg != "" {
 		a.emit(ctx, ch, Event{Category: EventError, ToolName: tc.Function.Name, ToolError: msg})
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
@@ -43,7 +43,7 @@ func (a *Agent) tryExecuteToolCall(ctx context.Context, tc llm.ToolCall, idx int
 		msgs = appendSkippedToolResults(msgs, calls, idx, err.Error())
 		return msgs, toolCallStopFail
 	}
-	if msg := a.preflightAndStreak(tc); msg != "" {
+	if msg := a.preflightAndStreak(tc, ts); msg != "" {
 		a.emit(ctx, ch, Event{Category: EventError, ToolName: tc.Function.Name, ToolError: msg})
 		msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: msg})
 		msgs = appendSkippedToolResults(msgs, calls, idx+1, fmt.Sprintf("Tool %s skipped: prior tool %s failed preflight validation", tc.Function.Name, tc.Function.Name))
@@ -51,13 +51,13 @@ func (a *Agent) tryExecuteToolCall(ctx context.Context, tc llm.ToolCall, idx int
 	}
 	sig := toolCallDedupKey(tc.Function.Name, tc.Function.Arguments)
 	if cached, ok := a.toolResultCache.Get(sig); ok {
-		next, ok := a.handleDedupHit(ctx, tc, sig, cached, msgs, ch)
+		next, ok := a.handleDedupHit(ctx, tc, sig, cached, msgs, ch, ts)
 		if !ok {
 			return next, toolCallStopFail
 		}
 		return next, toolCallContinue
 	}
-	next, ok := a.invokeAndProcess(ctx, tc, tool, sig, msgs, ch)
+	next, ok := a.invokeAndProcess(ctx, tc, tool, sig, msgs, ch, ts)
 	if !ok {
 		return next, toolCallStopFail
 	}
@@ -82,16 +82,18 @@ func (a *Agent) lookupTool(name string) (Tool, error) {
 		name, strings.Join(available, ", "))
 }
 
-func (a *Agent) preflightAndStreak(tc llm.ToolCall) string {
+func (a *Agent) preflightAndStreak(tc llm.ToolCall, ts *turnState) string {
 	msg := a.preflightValidate(tc)
-	if msg != "" {
-		a.preflightFailureStreak[tc.Function.Name]++
+	if msg != "" && ts != nil {
+		ts.preflightFailureStreak[tc.Function.Name]++
 	}
 	return msg
 }
 
-func (a *Agent) handleDedupHit(ctx context.Context, tc llm.ToolCall, sig, cached string, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
-	delete(a.preflightFailureStreak, tc.Function.Name)
+func (a *Agent) handleDedupHit(ctx context.Context, tc llm.ToolCall, sig, cached string, msgs []llm.Message, ch chan<- Event, ts *turnState) ([]llm.Message, bool) {
+	if ts != nil {
+		delete(ts.preflightFailureStreak, tc.Function.Name)
+	}
 	if !a.emit(ctx, ch, Event{Category: EventObserve, ToolName: tc.Function.Name, ToolResult: cached, ToolIntent: extractToolIntent(tc.Function.Arguments), FromCache: true}) {
 		return msgs, false
 	}
@@ -110,7 +112,7 @@ func (a *Agent) toolErrorEvent(tc llm.ToolCall, errMsg string) Event {
 	return Event{Category: EventError, ToolError: errMsg}
 }
 
-func (a *Agent) invokeAndProcess(ctx context.Context, tc llm.ToolCall, tool Tool, sig string, msgs []llm.Message, ch chan<- Event) ([]llm.Message, bool) {
+func (a *Agent) invokeAndProcess(ctx context.Context, tc llm.ToolCall, tool Tool, sig string, msgs []llm.Message, ch chan<- Event, ts *turnState) ([]llm.Message, bool) {
 	if !a.emit(ctx, ch, Event{Category: EventTool, ToolName: tc.Function.Name, ToolArgs: tc.Function.Arguments, ToolIntent: extractToolIntent(tc.Function.Arguments)}) {
 		return msgs, false
 	}
@@ -132,7 +134,9 @@ func (a *Agent) invokeAndProcess(ctx context.Context, tc llm.ToolCall, tool Tool
 		return msgs, true
 	}
 	a.toolResultCache.Put(sig, result)
-	delete(a.preflightFailureStreak, tc.Function.Name)
+	if ts != nil {
+		delete(ts.preflightFailureStreak, tc.Function.Name)
+	}
 	msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Content: applyOversizedGuard(result, tc.Function.Arguments, tc.Function.Name)})
 	return msgs, true
 }
@@ -197,12 +201,14 @@ func acceptsLargeOutput(argsJSON string) bool {
 }
 
 func AgentExecuteToolsForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]llm.Message, bool) {
-	return a.executeTools(context.Background(), calls, msgs, nil)
+	ts := a.ensureActiveTurnStateForTest()
+	return a.executeTools(context.Background(), calls, msgs, nil, ts)
 }
 
 func AgentExecuteToolsWithChanForTest(a *Agent, calls []llm.ToolCall, msgs []llm.Message) ([]Event, []llm.Message, bool) {
+	ts := a.ensureActiveTurnStateForTest()
 	ch := make(chan Event, len(calls)*4+4)
-	updated, ok := a.executeTools(context.Background(), calls, msgs, ch)
+	updated, ok := a.executeTools(context.Background(), calls, msgs, ch, ts)
 	close(ch)
 	var events []Event
 	for ev := range ch {
@@ -212,8 +218,9 @@ func AgentExecuteToolsWithChanForTest(a *Agent, calls []llm.ToolCall, msgs []llm
 }
 
 func AgentTryExecuteToolCallForTest(a *Agent, ctx context.Context, tc llm.ToolCall, idx int, calls []llm.ToolCall, msgs []llm.Message) ([]Event, []llm.Message, bool) {
+	ts := a.ensureActiveTurnStateForTest()
 	ch := make(chan Event, 8)
-	updated, outcome := a.tryExecuteToolCall(ctx, tc, idx, calls, msgs, ch)
+	updated, outcome := a.tryExecuteToolCall(ctx, tc, idx, calls, msgs, ch, ts)
 	close(ch)
 	var events []Event
 	for ev := range ch {
