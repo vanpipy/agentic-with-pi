@@ -150,6 +150,41 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.finishReason, len(result.toolCalls))
 }
 
+func (r *ReActStrategy) processStreamEventTyped(ctx context.Context, ev llm.StreamEvent, tp *stream.TypedProcessor, emit func(context.Context, Event) bool) bool {
+	continue_, stepDone, emits := tp.ProcessEvent(ctx, ev)
+	for _, e := range emits {
+		if !emitTypedEmit(ctx, e, emit) {
+			return false
+		}
+	}
+	if !continue_ {
+		return false
+	}
+	if stepDone {
+		_ = tp.Result()
+	}
+	return true
+}
+
+func emitTypedEmit(ctx context.Context, e stream.EmitEvent, emit func(context.Context, Event) bool) bool {
+	switch e.Kind {
+	case stream.EmitKindObserve:
+		var ev Event
+		if e.Reasoning != "" {
+			ev = Event{Category: EventThoughtChunk, Reasoning: e.Reasoning}
+		} else {
+			ev = Event{Category: EventThoughtChunk, Content: e.Content}
+		}
+		return emit(ctx, ev)
+	case stream.EmitKindTool:
+		return emit(ctx, Event{Category: EventTool, ToolName: e.ToolName, ToolArgs: e.ToolArgs, ToolIntent: e.ToolIntent})
+	case stream.EmitKindError:
+		return emit(ctx, Event{Category: EventError, ToolError: e.Content})
+	default:
+		return true
+	}
+}
+
 func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.LegacyStreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
 	if ev.Rollback {
 		contentBuf.Reset()
