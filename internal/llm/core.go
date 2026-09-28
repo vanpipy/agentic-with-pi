@@ -23,6 +23,22 @@ type Provider interface {
 	ConvertResponse(data []byte) (*StreamChunk, bool, error)
 
 	Models() []Model
+
+	SupportsCacheControl(model string) bool
+
+	ContextWindow(model string) int
+
+	MaxOutputTokens(model string) int
+
+	AvailableReasoningEfforts(model string) []string
+
+	AvailableServiceTiers(model string) []string
+
+	BetaHeaders(model string) []string
+
+	ModelCapabilities(model string) ModelCapabilities
+
+	SupportsNativeCompact(model string) bool
 }
 
 type core struct {

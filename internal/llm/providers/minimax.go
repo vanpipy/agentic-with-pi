@@ -54,6 +54,172 @@ func (p *MiniMaxProvider) Models() []llm.Model {
 	}
 }
 
+type modelSpec struct {
+	contextWindow         int
+	maxOutputTokens       int
+	supportsCache         bool
+	supportsCacheTTL1h    bool
+	supportsNativeCompact bool
+	supportsTools         bool
+	supportsVision        bool
+	supportsThinking      bool
+	reasoningEfforts      []string
+	serviceTiers          []string
+	betaHeaders           []string
+	contextMode           llm.AnthropicContextMode
+}
+
+var minimaxModelSpecs = map[string]modelSpec{
+	"MiniMax-M2": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		supportsThinking:   true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.1": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		supportsThinking:   true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.1-highspeed": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.5": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		supportsThinking:   true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.5-highspeed": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.7": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		supportsThinking:   true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M2.7-highspeed": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		contextMode:        llm.ContextStandard,
+	},
+	"MiniMax-M3": {
+		contextWindow:      200000,
+		maxOutputTokens:    8192,
+		supportsCache:      true,
+		supportsCacheTTL1h: true,
+		supportsTools:      true,
+		supportsVision:     true,
+		supportsThinking:   true,
+		contextMode:        llm.ContextStandard,
+	},
+}
+
+func (p *MiniMaxProvider) lookupSpec(model string) (modelSpec, bool) {
+	spec, ok := minimaxModelSpecs[model]
+	return spec, ok
+}
+
+func (p *MiniMaxProvider) SupportsCacheControl(model string) bool {
+	spec, ok := p.lookupSpec(model)
+	return ok && spec.supportsCache
+}
+
+func (p *MiniMaxProvider) ContextWindow(model string) int {
+	if spec, ok := p.lookupSpec(model); ok {
+		return spec.contextWindow
+	}
+	return 128000
+}
+
+func (p *MiniMaxProvider) MaxOutputTokens(model string) int {
+	if spec, ok := p.lookupSpec(model); ok {
+		return spec.maxOutputTokens
+	}
+	return 8192
+}
+
+func (p *MiniMaxProvider) AvailableReasoningEfforts(model string) []string {
+	return nil
+}
+
+func (p *MiniMaxProvider) AvailableServiceTiers(model string) []string {
+	return nil
+}
+
+func (p *MiniMaxProvider) BetaHeaders(model string) []string {
+	if spec, ok := p.lookupSpec(model); ok {
+		return spec.betaHeaders
+	}
+	return nil
+}
+
+func (p *MiniMaxProvider) SupportsNativeCompact(model string) bool {
+	spec, ok := p.lookupSpec(model)
+	return ok && spec.supportsNativeCompact
+}
+
+func (p *MiniMaxProvider) ModelCapabilities(model string) llm.ModelCapabilities {
+	spec, ok := p.lookupSpec(model)
+	if !ok {
+		return llm.ModelCapabilities{
+			ID:              model,
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+			ContextMode:     llm.ContextStandard,
+		}
+	}
+	return llm.ModelCapabilities{
+		ID:                    model,
+		ContextWindow:         spec.contextWindow,
+		MaxOutputTokens:       spec.maxOutputTokens,
+		SupportsTools:         spec.supportsTools,
+		SupportsVision:        spec.supportsVision,
+		SupportsCache:         spec.supportsCache,
+		SupportsCacheTTL1h:    spec.supportsCacheTTL1h,
+		SupportsNativeCompact: spec.supportsNativeCompact,
+		SupportsThinking:      spec.supportsThinking,
+		ReasoningEfforts:      spec.reasoningEfforts,
+		ServiceTiers:          spec.serviceTiers,
+		BetaHeaders:           spec.betaHeaders,
+		ContextMode:           spec.contextMode,
+	}
+}
+
 type anthropicMessageContent struct {
 	Type string `json:"type"`
 
