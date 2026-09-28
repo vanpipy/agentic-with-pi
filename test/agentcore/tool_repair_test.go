@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -26,7 +28,7 @@ func pairedCallAndResultMessages() []llm.Message {
 
 func TestRepairMissingToolOutputsNoMissing(t *testing.T) {
 	msgs := pairedCallAndResultMessages()
-	repaired, count := agentcore.RepairMissingToolOutputs(msgs)
+	repaired, count := util.RepairMissingToolOutputs(msgs)
 	if count != 0 {
 		t.Errorf("count = %d, want 0 (all paired, no repairs)", count)
 	}
@@ -47,7 +49,7 @@ func TestRepairMissingToolOutputsMissingOne(t *testing.T) {
 			{ID: "c1", Type: "function", Function: llm.FunctionCall{Name: "ls", Arguments: "{}"}},
 		}},
 	}
-	repaired, count := agentcore.RepairMissingToolOutputs(msgs)
+	repaired, count := util.RepairMissingToolOutputs(msgs)
 	if count != 1 {
 		t.Fatalf("count = %d, want 1", count)
 	}
@@ -78,7 +80,7 @@ func TestRepairMissingToolOutputsMissingMultiple(t *testing.T) {
 			{ID: "c3", Type: "function", Function: llm.FunctionCall{Name: "read", Arguments: "{}"}},
 		}},
 	}
-	repaired, count := agentcore.RepairMissingToolOutputs(msgs)
+	repaired, count := util.RepairMissingToolOutputs(msgs)
 	if count != 3 {
 		t.Fatalf("count = %d, want 3", count)
 	}
@@ -111,8 +113,8 @@ func TestRepairMissingToolOutputsIdempotent(t *testing.T) {
 			{ID: "c1", Type: "function", Function: llm.FunctionCall{Name: "ls", Arguments: "{}"}},
 		}},
 	}
-	once, count1 := agentcore.RepairMissingToolOutputs(msgs)
-	twice, count2 := agentcore.RepairMissingToolOutputs(once)
+	once, count1 := util.RepairMissingToolOutputs(msgs)
+	twice, count2 := util.RepairMissingToolOutputs(once)
 	if count1 != 1 {
 		t.Fatalf("first run count = %d, want 1", count1)
 	}
@@ -136,7 +138,7 @@ func TestRepairMissingToolOutputsOrderPreserved(t *testing.T) {
 		}},
 		{Role: "tool", ToolCallID: "c1", Content: "first result"},
 	}
-	repaired, count := agentcore.RepairMissingToolOutputs(msgs)
+	repaired, count := util.RepairMissingToolOutputs(msgs)
 	if count != 1 {
 		t.Fatalf("count = %d, want 1 (only c2 missing)", count)
 	}
@@ -161,7 +163,7 @@ func TestRunOneTurnRepairsBeforeStep(t *testing.T) {
 	chunks := []llm.StreamEvent{messageDeltaStopChunk("end_turn"), messageStopChunk()}
 	core := &fakeCore{streamChunks: chunks}
 	ag := newTestAgent(core, "test-model")
-	ag.WithCompaction(agentcore.CompactionSettings{Enabled: false})
+	ag.WithCompaction(compact.CompactionSettings{Enabled: false})
 
 	msgs := []llm.Message{
 		{Role: "user", Content: "hi"},

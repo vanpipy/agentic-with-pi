@@ -1,4 +1,4 @@
-package agentcore
+package compact
 
 import (
 	"encoding/json"
@@ -186,7 +186,7 @@ func estimateMessageTokens(m llm.Message) int {
 	return n
 }
 
-func estimateTotalTokens(msgs []llm.Message) int {
+func EstimateTotalTokens(msgs []llm.Message) int {
 	total := 0
 	for _, m := range msgs {
 		total += estimateMessageTokens(m)

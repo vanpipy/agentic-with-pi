@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -20,13 +21,13 @@ func TestTryExecuteToolCallEmptyArgsSkip(t *testing.T) {
 	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(context.Context, string) (string, error) { return "ok", nil }})
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: "   "}}
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
 	if !ok {
 		t.Fatal("ok = false, want true (empty-args skip continues the chain)")
 	}
 	var sawErr bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "empty arguments") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "empty arguments") {
 			sawErr = true
 		}
 	}
@@ -49,13 +50,13 @@ func TestTryExecuteToolCallUnknownToolError(t *testing.T) {
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ghost", Arguments: `{"intent":"x"}`}}
 	calls := []llm.ToolCall{tc, {ID: "c2", Function: llm.FunctionCall{Name: "registered", Arguments: `{"intent":"y"}`}}}
 	inputMsgs := []llm.Message{{Role: "user", Content: "u"}}
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, calls, inputMsgs)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, calls, inputMsgs)
 	if ok {
 		t.Fatal("ok = true, want false (unknown tool aborts the chain)")
 	}
 	var sawErr bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "is not registered") && strings.Contains(ev.ToolError, "registered") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "is not registered") && strings.Contains(ev.ToolError, "registered") {
 			sawErr = true
 		}
 	}
@@ -92,7 +93,7 @@ func TestTryExecuteToolCallPreflightFailureRecords(t *testing.T) {
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "needs_path", Arguments: `{}`}}
 	calls := []llm.ToolCall{tc, {ID: "c2", Function: llm.FunctionCall{Name: "needs_path", Arguments: `{}`}}}
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, calls, nil)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, calls, nil)
 	if !ok {
 		t.Fatal("ok = false, want true (preflight failure continues the chain)")
 	}
@@ -101,7 +102,7 @@ func TestTryExecuteToolCallPreflightFailureRecords(t *testing.T) {
 	}
 	var sawPreflight bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "missing required field") && strings.Contains(ev.ToolError, "path") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "missing required field") && strings.Contains(ev.ToolError, "path") {
 			sawPreflight = true
 		}
 	}
@@ -129,7 +130,7 @@ func TestTryExecuteToolCallDedupHitReturnsCached(t *testing.T) {
 	ag.PreflightFailureStreakForTest()["echo"] = 3
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "echo", Arguments: `{"intent":"x","v":1}`}}
-	calls1, ok := agentcore.AgentExecuteToolsForTest(ag, []llm.ToolCall{tc}, nil)
+	calls1, ok := stream.AgentExecuteToolsForTest(ag, []llm.ToolCall{tc}, nil)
 	if !ok {
 		t.Fatal("prime cache: executeTools ok = false")
 	}
@@ -137,7 +138,7 @@ func TestTryExecuteToolCallDedupHitReturnsCached(t *testing.T) {
 		t.Fatalf("prime cache: tool calls = %d, want 1", calls)
 	}
 
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, calls1)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, calls1)
 	if !ok {
 		t.Fatal("ok = false, want true (cache hit continues the chain)")
 	}
@@ -149,7 +150,7 @@ func TestTryExecuteToolCallDedupHitReturnsCached(t *testing.T) {
 	}
 	var sawCacheObserve bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventObserve && ev.FromCache && ev.ToolResult == "v" {
+		if ev.Kind == stream.EmitKindObserve && ev.FromCache && ev.ToolResult == "v" {
 			sawCacheObserve = true
 		}
 	}
@@ -170,16 +171,16 @@ func TestTryExecuteToolCallInvokeSuccess(t *testing.T) {
 	ag.WithTool(agentcore.ToolFunc{N: "echo", Fn: func(context.Context, string) (string, error) { return "done", nil }})
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "echo", Arguments: `{"intent":"hi"}`}}
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
 	if !ok {
 		t.Fatal("ok = false, want true")
 	}
 	var sawTool, sawObserve bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventTool && ev.ToolName == "echo" {
+		if ev.Kind == stream.EmitKindTool && ev.ToolName == "echo" {
 			sawTool = true
 		}
-		if ev.Category == agentcore.EventObserve && ev.ToolResult == "done" && !ev.FromCache {
+		if ev.Kind == stream.EmitKindObserve && ev.ToolResult == "done" && !ev.FromCache {
 			sawObserve = true
 		}
 	}
@@ -202,16 +203,16 @@ func TestTryExecuteToolCallInvokeErrorMapping(t *testing.T) {
 	ag.WithTool(agentcore.ToolFunc{N: "boom", Fn: func(context.Context, string) (string, error) { return "", errors.New("kaboom") }})
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "boom", Arguments: `{"intent":"x"}`}}
-	events, updated, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
+	events, updated, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
 	if !ok {
 		t.Fatal("ok = false, want true (tool error continues the chain)")
 	}
 	var sawObserveErr, sawExtraErr bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventObserve && ev.ToolError == "kaboom" {
+		if ev.Kind == stream.EmitKindObserve && ev.ToolError == "kaboom" {
 			sawObserveErr = true
 		}
-		if ev.Category == agentcore.EventError && ev.ToolError == "kaboom" && !ev.FromCache {
+		if ev.Kind == stream.EmitKindError && ev.ToolError == "kaboom" && !ev.FromCache {
 			sawExtraErr = true
 		}
 	}
@@ -235,13 +236,13 @@ func TestTryExecuteToolCallInvokeErrorInvalidToolCategory(t *testing.T) {
 	ag.WithTool(agentcore.ToolFunc{N: "invalid", Fn: func(context.Context, string) (string, error) { return "", errors.New("bad shape") }})
 
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "invalid", Arguments: `{"intent":"x"}`}}
-	events, _, ok := agentcore.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
+	events, _, ok := stream.AgentTryExecuteToolCallForTest(ag, context.Background(), tc, 0, []llm.ToolCall{tc}, nil)
 	if !ok {
 		t.Fatal("ok = false, want true")
 	}
 	var sawInvalid bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventInvalid && ev.ToolError == "bad shape" {
+		if ev.Kind == stream.EmitKindInvalid && ev.ToolError == "bad shape" {
 			sawInvalid = true
 		}
 	}

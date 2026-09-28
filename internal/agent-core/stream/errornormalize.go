@@ -1,4 +1,4 @@
-package agentcore
+package stream
 
 import (
 	"regexp"

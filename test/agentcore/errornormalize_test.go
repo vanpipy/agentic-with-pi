@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
 func TestNormalizeToolError_StripsExampleSegment(t *testing.T) {
 	a := "Tool bash: missing required field(s) [file]. Pass them as a JSON object argument. Example: {\"file\": \"<value>\"}. Field descriptions: file: The path"
 	b := "Tool bash: missing required field(s) [file]. Pass them as a JSON object argument. Example: {\"file\": \"\"}. Field descriptions: file: The path"
-	if gotA, gotB := agentcore.NormalizeToolError(a), agentcore.NormalizeToolError(b); gotA != gotB {
+	if gotA, gotB := stream.NormalizeToolError(a), stream.NormalizeToolError(b); gotA != gotB {
 		t.Errorf("normalize should strip dynamic Example placeholder, got %q vs %q", gotA, gotB)
 	}
 }
@@ -19,14 +20,14 @@ func TestNormalizeToolError_StripsExampleSegment(t *testing.T) {
 func TestNormalizeToolError_StripsFieldDescriptionsTrailer(t *testing.T) {
 	a := "Tool bash: missing required field(s) [command]. Field descriptions: command: shell command"
 	b := "Tool bash: missing required field(s) [command]. Field descriptions: command: shell; never embedded secrets"
-	if gotA, gotB := agentcore.NormalizeToolError(a), agentcore.NormalizeToolError(b); gotA != gotB {
+	if gotA, gotB := stream.NormalizeToolError(a), stream.NormalizeToolError(b); gotA != gotB {
 		t.Errorf("normalize should strip dynamic Field descriptions trailer, got %q vs %q", gotA, gotB)
 	}
 }
 
 func TestNormalizeToolError_PreservesToolNameAndPrefix(t *testing.T) {
 	in := "Tool ls failed: kaboom"
-	got := agentcore.NormalizeToolError(in)
+	got := stream.NormalizeToolError(in)
 	if !strings.HasPrefix(got, "Tool ls failed:") {
 		t.Errorf("normalize should preserve 'Tool <name> failed:' prefix, got %q", got)
 	}
@@ -34,7 +35,7 @@ func TestNormalizeToolError_PreservesToolNameAndPrefix(t *testing.T) {
 
 func TestNormalizeToolError_CollapsesWhitespace(t *testing.T) {
 	in := "Tool  bash   failed:   kaboom\n\twith newline"
-	got := agentcore.NormalizeToolError(in)
+	got := stream.NormalizeToolError(in)
 	if strings.Contains(got, "  ") {
 		t.Errorf("normalize should collapse multiple spaces, got %q", got)
 	}
@@ -48,14 +49,14 @@ func TestNormalizeToolError_CollapsesWhitespace(t *testing.T) {
 
 func TestNormalizeToolError_NoChangeForStableText(t *testing.T) {
 	in := "Tool ls failed: kaboom"
-	got := agentcore.NormalizeToolError(in)
+	got := stream.NormalizeToolError(in)
 	if got != in {
 		t.Errorf("normalize should be idempotent on already-stable text, got %q", got)
 	}
 }
 
 func TestNormalizeToolError_Empty(t *testing.T) {
-	if got := agentcore.NormalizeToolError(""); got != "" {
+	if got := stream.NormalizeToolError(""); got != "" {
 		t.Errorf("normalize(\"\") = %q, want \"\"", got)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -36,7 +38,7 @@ func firstCategoryFor(t *testing.T, buf *bytes.Buffer) string {
 }
 
 func TestNewToolResultCachePositiveCapacityStoresValue(t *testing.T) {
-	c := agentcore.NewToolResultCache(7)
+	c := util.NewToolResultCache(7)
 	if got := c.Capacity(); got != 7 {
 		t.Errorf("Capacity() = %d, want 7", got)
 	}
@@ -47,7 +49,7 @@ func TestNewToolResultCachePositiveCapacityStoresValue(t *testing.T) {
 }
 
 func TestNewToolResultCacheOneCapacity(t *testing.T) {
-	c := agentcore.NewToolResultCache(1)
+	c := util.NewToolResultCache(1)
 	if got := c.Capacity(); got != 1 {
 		t.Errorf("Capacity() = %d, want 1", got)
 	}
@@ -58,54 +60,54 @@ func TestNewToolResultCacheOneCapacity(t *testing.T) {
 }
 
 func TestNewToolResultCacheNegativeCapacityDefaultsToTwenty(t *testing.T) {
-	c := agentcore.NewToolResultCache(-3)
+	c := util.NewToolResultCache(-3)
 	if got := c.Capacity(); got != 20 {
 		t.Errorf("negative capacity: Capacity() = %d, want 20", got)
 	}
 }
 
 func TestNewToolResultCacheZeroCapacityDefaultsToTwenty(t *testing.T) {
-	c := agentcore.NewToolResultCache(0)
+	c := util.NewToolResultCache(0)
 	if got := c.Capacity(); got != 20 {
 		t.Errorf("zero capacity: Capacity() = %d, want 20", got)
 	}
 }
 
 func TestToolResultCacheLenNilReceiverReturnsZero(t *testing.T) {
-	var c *agentcore.ToolResultCache
+	var c *util.ToolResultCache
 	if got := c.Len(); got != 0 {
 		t.Errorf("nil Len() = %d, want 0", got)
 	}
 }
 
 func TestToolResultCacheGetNilReceiverReturnsMiss(t *testing.T) {
-	var c *agentcore.ToolResultCache
+	var c *util.ToolResultCache
 	if v, ok := c.Get("any"); ok || v != "" {
 		t.Errorf("nil Get = (%q,%v), want (\"\",false)", v, ok)
 	}
 }
 
 func TestToolResultCachePutNilReceiverIsNoOp(t *testing.T) {
-	var c *agentcore.ToolResultCache
+	var c *util.ToolResultCache
 	c.Put("sig", "result")
 }
 
 func TestToolResultCacheCapacityNilReceiverReturnsZero(t *testing.T) {
-	var c *agentcore.ToolResultCache
+	var c *util.ToolResultCache
 	if got := c.Capacity(); got != 0 {
 		t.Errorf("nil Capacity() = %d, want 0", got)
 	}
 }
 
 func TestToolResultCacheCapacityReportsAssignedValue(t *testing.T) {
-	c := agentcore.NewToolResultCache(13)
+	c := util.NewToolResultCache(13)
 	if got := c.Capacity(); got != 13 {
 		t.Errorf("Capacity() = %d, want 13", got)
 	}
 }
 
 func TestToolResultCacheCapacityUnchangedAfterEviction(t *testing.T) {
-	c := agentcore.NewToolResultCache(2)
+	c := util.NewToolResultCache(2)
 	c.Put("a", "1")
 	c.Put("b", "2")
 	c.Put("c", "3")
@@ -115,7 +117,7 @@ func TestToolResultCacheCapacityUnchangedAfterEviction(t *testing.T) {
 }
 
 func TestToolCallDedupKeyFallsBackOnInvalidJSON(t *testing.T) {
-	got := agentcore.ToolCallDedupKeyForTest("bash", "not-valid-json")
+	got := util.ToolCallDedupKeyForTest("bash", "not-valid-json")
 	if got == "" {
 		t.Errorf("fallback dedup key empty, want non-empty hex")
 	}
@@ -125,16 +127,16 @@ func TestToolCallDedupKeyFallsBackOnInvalidJSON(t *testing.T) {
 }
 
 func TestToolCallDedupKeyInvalidJSONProducesDeterministicHash(t *testing.T) {
-	first := agentcore.ToolCallDedupKeyForTest("bash", "{invalid")
-	second := agentcore.ToolCallDedupKeyForTest("bash", "{invalid")
+	first := util.ToolCallDedupKeyForTest("bash", "{invalid")
+	second := util.ToolCallDedupKeyForTest("bash", "{invalid")
 	if first != second {
 		t.Errorf("invalid-JSON fallback non-deterministic: %q vs %q", first, second)
 	}
 }
 
 func TestToolCallDedupKeyInvalidJSONHashDiffersFromCanonicalHash(t *testing.T) {
-	invalid := agentcore.ToolCallDedupKeyForTest("bash", "{invalid")
-	canonical := agentcore.ToolCallDedupKeyForTest("bash", `{"x":1}`)
+	invalid := util.ToolCallDedupKeyForTest("bash", "{invalid")
+	canonical := util.ToolCallDedupKeyForTest("bash", `{"x":1}`)
 	if invalid == canonical {
 		t.Errorf("invalid-JSON hash should differ from canonical hash, both = %q", invalid)
 	}
@@ -295,49 +297,49 @@ func TestWriteEventToolEmitsToolFields(t *testing.T) {
 func TestComputeFileListsTableDriven(t *testing.T) {
 	cases := []struct {
 		name         string
-		ops          agentcore.FileOperations
+		ops          compact.FileOperations
 		wantReadOnly []string
 		wantModified []string
 	}{
 		{
 			name:         "all_empty",
-			ops:          agentcore.FileOperations{Read: map[string]bool{}, Written: map[string]bool{}, Edited: map[string]bool{}},
+			ops:          compact.FileOperations{Read: map[string]bool{}, Written: map[string]bool{}, Edited: map[string]bool{}},
 			wantReadOnly: nil,
 			wantModified: nil,
 		},
 		{
 			name:         "read_only_files",
-			ops:          agentcore.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{}, Edited: map[string]bool{}},
+			ops:          compact.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{}, Edited: map[string]bool{}},
 			wantReadOnly: []string{"/a", "/b"},
 			wantModified: nil,
 		},
 		{
 			name:         "written_files_only",
-			ops:          agentcore.FileOperations{Read: map[string]bool{}, Written: map[string]bool{"/x": true, "/y": true}, Edited: map[string]bool{}},
+			ops:          compact.FileOperations{Read: map[string]bool{}, Written: map[string]bool{"/x": true, "/y": true}, Edited: map[string]bool{}},
 			wantReadOnly: nil,
 			wantModified: []string{"/x", "/y"},
 		},
 		{
 			name:         "edited_files_only",
-			ops:          agentcore.FileOperations{Read: map[string]bool{}, Written: map[string]bool{}, Edited: map[string]bool{"/e1": true, "/e2": true}},
+			ops:          compact.FileOperations{Read: map[string]bool{}, Written: map[string]bool{}, Edited: map[string]bool{"/e1": true, "/e2": true}},
 			wantReadOnly: nil,
 			wantModified: []string{"/e1", "/e2"},
 		},
 		{
 			name:         "read_and_edited_overlap",
-			ops:          agentcore.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{}, Edited: map[string]bool{"/b": true}},
+			ops:          compact.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{}, Edited: map[string]bool{"/b": true}},
 			wantReadOnly: []string{"/a"},
 			wantModified: []string{"/b"},
 		},
 		{
 			name:         "read_and_written_overlap",
-			ops:          agentcore.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{"/b": true}, Edited: map[string]bool{}},
+			ops:          compact.FileOperations{Read: map[string]bool{"/a": true, "/b": true}, Written: map[string]bool{"/b": true}, Edited: map[string]bool{}},
 			wantReadOnly: []string{"/a"},
 			wantModified: []string{"/b"},
 		},
 		{
 			name: "all_three_categories",
-			ops: agentcore.FileOperations{
+			ops: compact.FileOperations{
 				Read:    map[string]bool{"/r1": true, "/r2": true, "/w1": true},
 				Written: map[string]bool{"/w1": true, "/w2": true},
 				Edited:  map[string]bool{"/e1": true},
@@ -347,7 +349,7 @@ func TestComputeFileListsTableDriven(t *testing.T) {
 		},
 		{
 			name:         "sorted_outputs",
-			ops:          agentcore.FileOperations{Read: map[string]bool{"/zebra": true, "/alpha": true, "/mango": true}, Written: map[string]bool{}, Edited: map[string]bool{}},
+			ops:          compact.FileOperations{Read: map[string]bool{"/zebra": true, "/alpha": true, "/mango": true}, Written: map[string]bool{}, Edited: map[string]bool{}},
 			wantReadOnly: []string{"/alpha", "/mango", "/zebra"},
 			wantModified: nil,
 		},
@@ -355,7 +357,7 @@ func TestComputeFileListsTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			readOnly, modified := agentcore.ComputeFileLists(tc.ops)
+			readOnly, modified := compact.ComputeFileLists(tc.ops)
 			if !equalStringSlices(readOnly, tc.wantReadOnly) {
 				t.Errorf("readOnly = %v, want %v", readOnly, tc.wantReadOnly)
 			}
@@ -426,7 +428,7 @@ func TestFormatFileOperationsTableDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out := agentcore.FormatFileOperations(tc.readFiles, tc.modifiedFiles)
+			out := compact.FormatFileOperations(tc.readFiles, tc.modifiedFiles)
 			if tc.wantEmpty {
 				if out != "" {
 					t.Errorf("output = %q, want empty", out)
@@ -458,7 +460,7 @@ func TestExtractPreviousSummaryHitReturnsTrimmed(t *testing.T) {
 		{Role: "assistant", Content: prefix + body},
 		{Role: "user", Content: "follow up"},
 	}
-	got := agentcore.ExtractPreviousSummary(msgs)
+	got := compact.ExtractPreviousSummary(msgs)
 	if got != body {
 		t.Errorf("ExtractPreviousSummary = %q, want %q", got, body)
 	}
@@ -469,7 +471,7 @@ func TestExtractPreviousSummaryMissWhenNoPrefix(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: "no prefix here"},
 	}
-	if got := agentcore.ExtractPreviousSummary(msgs); got != "" {
+	if got := compact.ExtractPreviousSummary(msgs); got != "" {
 		t.Errorf("ExtractPreviousSummary = %q, want empty", got)
 	}
 }
@@ -481,7 +483,7 @@ func TestExtractPreviousSummaryIgnoresNonAssistantRoles(t *testing.T) {
 		{Role: "system", Content: prefix + "should not match system role"},
 		{Role: "tool", Content: prefix + "should not match tool role"},
 	}
-	if got := agentcore.ExtractPreviousSummary(msgs); got != "" {
+	if got := compact.ExtractPreviousSummary(msgs); got != "" {
 		t.Errorf("ExtractPreviousSummary = %q, want empty (non-assistant roles)", got)
 	}
 }
@@ -489,7 +491,7 @@ func TestExtractPreviousSummaryIgnoresNonAssistantRoles(t *testing.T) {
 func TestCompactionStrategyActOnUnknownReturnsError(t *testing.T) {
 	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	unknown := agentcore.CompactionStrategy("not_a_real_strategy")
+	unknown := compact.CompactionStrategy("not_a_real_strategy")
 	out, action, err := unknown.ActOn(context.Background(), a, msgs, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown strategy, got nil")
@@ -500,7 +502,7 @@ func TestCompactionStrategyActOnUnknownReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "not_a_real_strategy") {
 		t.Errorf("err = %q, want contains the bad strategy name", err.Error())
 	}
-	if action != agentcore.ActionNone {
+	if action != compact.ActionNone {
 		t.Errorf("action = %q, want ActionNone", action)
 	}
 	if len(out) != len(msgs) {
@@ -514,7 +516,7 @@ func TestCompactionStrategyActOnUnknownReturnsError(t *testing.T) {
 }
 
 func TestCompactionStrategyActOnUnknownIgnoresNilAgent(t *testing.T) {
-	unknown := agentcore.CompactionStrategy("foo")
+	unknown := compact.CompactionStrategy("foo")
 	_, _, err := unknown.ActOn(context.Background(), nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for unknown strategy, got nil")
@@ -525,7 +527,7 @@ func TestProactiveActOnAcceptsObservedPointer(t *testing.T) {
 	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
 	v := 123
-	_, _, err := agentcore.StrategyProactive.ActOn(context.Background(), a, msgs, &v)
+	_, _, err := compact.StrategyProactive.ActOn(context.Background(), a, msgs, &v)
 	if err != nil {
 		t.Fatalf("proactive should be a noop: %v", err)
 	}
@@ -711,11 +713,11 @@ func TestRunReactiveCompactionIncludesPreviousSummaryMarker(t *testing.T) {
 		{Role: "user", Content: "u4"},
 		{Role: "assistant", Content: "a4"},
 	}
-	out, action, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := compact.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionFullCompacted {
+	if action != compact.ActionFullCompacted {
 		t.Errorf("action = %q, want full", action)
 	}
 	if len(out) < 2 {
@@ -755,7 +757,7 @@ func TestRunReactiveCompactionLogsToBufferWhenLogWriterSet(t *testing.T) {
 		{Role: "user", Content: "u11"},
 		{Role: "assistant", Content: "a11"},
 	}
-	_, _, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	_, _, err := compact.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -796,7 +798,7 @@ func TestRunReactiveCompactionStreamErrPropagates(t *testing.T) {
 		{Role: "user", Content: "u5"},
 		{Role: "assistant", Content: "a5"},
 	}
-	_, _, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	_, _, err := compact.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err == nil {
 		t.Fatal("expected error from StreamChat, got nil")
 	}
@@ -821,7 +823,7 @@ func TestRunReactiveCompactionLengthFinishReasonFails(t *testing.T) {
 		{Role: "user", Content: "u5"},
 		{Role: "assistant", Content: "a5"},
 	}
-	_, _, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	_, _, err := compact.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err == nil {
 		t.Fatal("expected error for length finish, got nil")
 	}
@@ -858,26 +860,26 @@ func TestExtractPreviousSummaryReturnsFirstMatch(t *testing.T) {
 		{Role: "user", Content: "hi"},
 		{Role: "assistant", Content: prefix + "second"},
 	}
-	got := agentcore.ExtractPreviousSummary(msgs)
+	got := compact.ExtractPreviousSummary(msgs)
 	if got != "first" {
 		t.Errorf("got %q, want first (first match wins)", got)
 	}
 }
 
 func TestExtractPreviousSummaryEmptyMsgs(t *testing.T) {
-	if got := agentcore.ExtractPreviousSummary(nil); got != "" {
+	if got := compact.ExtractPreviousSummary(nil); got != "" {
 		t.Errorf("nil msgs: got %q, want empty", got)
 	}
-	if got := agentcore.ExtractPreviousSummary([]llm.Message{}); got != "" {
+	if got := compact.ExtractPreviousSummary([]llm.Message{}); got != "" {
 		t.Errorf("empty msgs: got %q, want empty", got)
 	}
 }
 
 func TestSelectStrategyEmergencyBranch(t *testing.T) {
 	obs := 10
-	got := agentcore.SelectStrategy(
+	got := compact.SelectStrategy(
 		[]llm.Message{{Role: "user", Content: "short"}},
-		agentcore.CompactionSettings{
+		compact.CompactionSettings{
 			Enabled:          true,
 			ReserveTokens:    100,
 			MaxContextTokens: 100000,
@@ -886,16 +888,16 @@ func TestSelectStrategyEmergencyBranch(t *testing.T) {
 		},
 		&obs,
 	)
-	if got != agentcore.StrategyEmergency {
+	if got != compact.StrategyEmergency {
 		t.Errorf("got %q, want StrategyEmergency (default branch when nothing fires)", got)
 	}
 }
 
 func TestSelectStrategyEmergencyBranchWhenDisabled(t *testing.T) {
 	obs := 100000
-	got := agentcore.SelectStrategy(
+	got := compact.SelectStrategy(
 		[]llm.Message{{Role: "user", Content: strings.Repeat("a", 4000)}},
-		agentcore.CompactionSettings{
+		compact.CompactionSettings{
 			Enabled:          false,
 			ReserveTokens:    100,
 			MaxContextTokens: 1000,
@@ -904,19 +906,19 @@ func TestSelectStrategyEmergencyBranchWhenDisabled(t *testing.T) {
 		},
 		&obs,
 	)
-	if got != agentcore.StrategyEmergency {
+	if got != compact.StrategyEmergency {
 		t.Errorf("got %q, want StrategyEmergency (disabled short-circuits)", got)
 	}
 }
 
 func TestComputeFileListsSortStabilityIsInputIndependent(t *testing.T) {
-	ops := agentcore.FileOperations{
+	ops := compact.FileOperations{
 		Read:    map[string]bool{"/x": true, "/y": true, "/z": true},
 		Written: map[string]bool{"/m": true},
 		Edited:  map[string]bool{},
 	}
-	r1, m1 := agentcore.ComputeFileLists(ops)
-	r2, m2 := agentcore.ComputeFileLists(ops)
+	r1, m1 := compact.ComputeFileLists(ops)
+	r2, m2 := compact.ComputeFileLists(ops)
 	if !equalStringSlices(r1, r2) {
 		t.Errorf("readOnly non-deterministic: %v vs %v", r1, r2)
 	}
@@ -926,7 +928,7 @@ func TestComputeFileListsSortStabilityIsInputIndependent(t *testing.T) {
 }
 
 func TestFormatFileOperationsBothSectionsOrderReadFirst(t *testing.T) {
-	out := agentcore.FormatFileOperations([]string{"/r"}, []string{"/m"})
+	out := compact.FormatFileOperations([]string{"/r"}, []string{"/m"})
 	rIdx := strings.Index(out, "<read-files>")
 	mIdx := strings.Index(out, "<modified-files>")
 	if rIdx < 0 || mIdx < 0 {
@@ -938,19 +940,19 @@ func TestFormatFileOperationsBothSectionsOrderReadFirst(t *testing.T) {
 }
 
 func TestFormatFileOperationsEmptyNonNilSlices(t *testing.T) {
-	out := agentcore.FormatFileOperations([]string{}, []string{})
+	out := compact.FormatFileOperations([]string{}, []string{})
 	if out != "" {
 		t.Errorf("got %q, want empty", out)
 	}
 }
 
 func TestSortReadAndModifiedAlphabetically(t *testing.T) {
-	ops := agentcore.FileOperations{
+	ops := compact.FileOperations{
 		Read:    map[string]bool{"/c": true, "/a": true, "/b": true},
 		Written: map[string]bool{"/z": true, "/y": true, "/x": true},
 		Edited:  map[string]bool{},
 	}
-	readOnly, modified := agentcore.ComputeFileLists(ops)
+	readOnly, modified := compact.ComputeFileLists(ops)
 	if !sort.StringsAreSorted(readOnly) {
 		t.Errorf("readOnly not sorted: %v", readOnly)
 	}

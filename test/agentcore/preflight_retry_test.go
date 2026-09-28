@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -50,7 +51,7 @@ func TestAgent_PreflightRetryCounter_AbortsAfterTwoFailures(t *testing.T) {
 			Function: llm.FunctionCall{Name: "bash", Arguments: `{"intent":"x"}`},
 		}}
 		msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: calls})
-		msgs, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+		msgs, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	}
 
 	streak := ag.PreflightFailureStreakForTest()
@@ -98,7 +99,7 @@ func TestAgent_PreflightRetryCounter_PerToolClearing(t *testing.T) {
 		Function: llm.FunctionCall{Name: "read", Arguments: `{"intent":"x"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badRead})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badRead, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badRead, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["read"]; got != 1 {
 		t.Fatalf("after first read failure: read streak = %d, want 1", got)
@@ -109,7 +110,7 @@ func TestAgent_PreflightRetryCounter_PerToolClearing(t *testing.T) {
 		Function: llm.FunctionCall{Name: "write", Arguments: `{"content":"hi","intent":"w"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: goodWrite})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, goodWrite, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, goodWrite, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["read"]; got != 1 {
 		t.Errorf("after successful write: read streak = %d, want 1 (write success clears only write's own counter, not read)", got)
@@ -120,7 +121,7 @@ func TestAgent_PreflightRetryCounter_PerToolClearing(t *testing.T) {
 		Function: llm.FunctionCall{Name: "read", Arguments: `{"intent":"y"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badRead2})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badRead2, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badRead2, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["read"]; got != 2 {
 		t.Fatalf("after second read failure: read streak = %d, want 2 (write success did not reset read's counter)", got)
@@ -159,14 +160,14 @@ func TestAgent_PreflightRetryCounter_DifferentToolsIndependent(t *testing.T) {
 		Function: llm.FunctionCall{Name: "read", Arguments: `{"intent":"x"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badRead})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badRead, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badRead, msgs)
 
 	badWrite := []llm.ToolCall{{
 		ID:       "c2",
 		Function: llm.FunctionCall{Name: "write", Arguments: `{"intent":"y"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badWrite})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badWrite, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badWrite, msgs)
 
 	streak := ag.PreflightFailureStreakForTest()
 	if got := streak["read"]; got != 1 {
@@ -194,7 +195,7 @@ func TestAgent_PreflightRetryCounter_ResetForRunClears(t *testing.T) {
 	}}
 	msgs := []llm.Message{{Role: "user", Content: "explore"}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: calls})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["bash"]; got != 1 {
 		t.Fatalf("after first failure: bash streak = %d, want 1", got)
@@ -216,7 +217,7 @@ func TestAgent_PreflightRetryCounter_ThresholdIsTwo(t *testing.T) {
 		Function: llm.FunctionCall{Name: "bash", Arguments: `{"intent":"x"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badCall})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badCall, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badCall, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["bash"]; got != 1 {
 		t.Fatalf("after one failure: bash streak = %d, want 1", got)
@@ -241,7 +242,7 @@ func TestAgent_PreflightRetryCounter_SuccessClearsOwnToolOnly(t *testing.T) {
 		Function: llm.FunctionCall{Name: "read", Arguments: `{"intent":"x"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: badRead})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, badRead, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, badRead, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["read"]; got != 1 {
 		t.Fatalf("after first failure: read streak = %d, want 1", got)
@@ -252,7 +253,7 @@ func TestAgent_PreflightRetryCounter_SuccessClearsOwnToolOnly(t *testing.T) {
 		Function: llm.FunctionCall{Name: "read", Arguments: `{"command":"ls","intent":"y"}`},
 	}}
 	msgs = append(msgs, llm.Message{Role: "assistant", ToolCalls: goodRead})
-	msgs, _ = agentcore.AgentExecuteToolsForTest(ag, goodRead, msgs)
+	msgs, _ = stream.AgentExecuteToolsForTest(ag, goodRead, msgs)
 
 	if got := ag.PreflightFailureStreakForTest()["read"]; got != 0 {
 		t.Errorf("after successful read: read streak = %d, want 0 (own-tool success clears own counter)", got)

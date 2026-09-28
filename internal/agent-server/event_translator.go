@@ -6,12 +6,13 @@ import (
 	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 type streamTranslator struct {
 	parentID  string
-	streamBuf *agentcore.StreamBuffer
+	streamBuf *stream.StreamBuffer
 }
 
 // StreamTranslator is the exported alias of streamTranslator so external
@@ -33,7 +34,7 @@ func (t *streamTranslator) ParentIDForTest() string {
 	return t.parentID
 }
 
-func (t *streamTranslator) StreamBufForTest() *agentcore.StreamBuffer {
+func (t *streamTranslator) StreamBufForTest() *stream.StreamBuffer {
 	return t.streamBuf
 }
 
@@ -64,7 +65,7 @@ func (t *streamTranslator) Translate(ev agentcore.Event) []WireEmit {
 }
 
 func (t *streamTranslator) onUserMessage(ev agentcore.Event) []WireEmit {
-	buf := agentcore.NewStreamBuffer(t.parentID)
+	buf := stream.NewStreamBuffer(t.parentID)
 	buf.SetRole("user")
 	buf.AppendText(ev.Content)
 	buf.SetStopReason("end_turn")
@@ -74,7 +75,7 @@ func (t *streamTranslator) onUserMessage(ev agentcore.Event) []WireEmit {
 }
 
 func (t *streamTranslator) onThoughtStart(ev agentcore.Event) []WireEmit {
-	t.streamBuf = agentcore.NewStreamBuffer(t.parentID)
+	t.streamBuf = stream.NewStreamBuffer(t.parentID)
 	return nil
 }
 
@@ -115,7 +116,7 @@ func (t *streamTranslator) onTool(ev agentcore.Event) []WireEmit {
 	assistantMsg := t.streamBuf.Finalize()
 	t.parentID = assistantMsg.ID
 	emits := []WireEmit{{EventName: json_rpc.EventMessage, Payload: assistantMsg}}
-	toolResultBuf := agentcore.NewStreamBuffer(toolCallID)
+	toolResultBuf := stream.NewStreamBuffer(toolCallID)
 	toolResultBuf.SetRole("toolResult")
 	if ev.ToolError != "" {
 		toolResultBuf.AppendText(ev.ToolError)
@@ -131,7 +132,7 @@ func (t *streamTranslator) onTool(ev agentcore.Event) []WireEmit {
 	toolResultMsg := toolResultBuf.Finalize()
 	t.parentID = toolResultMsg.ID
 	emits = append(emits, WireEmit{EventName: json_rpc.EventMessage, Payload: toolResultMsg})
-	t.streamBuf = agentcore.NewStreamBuffer(toolResultMsg.ID)
+	t.streamBuf = stream.NewStreamBuffer(toolResultMsg.ID)
 	return emits
 }
 
@@ -142,7 +143,7 @@ func (t *streamTranslator) onObserve(ev agentcore.Event) []WireEmit {
 	t.streamBuf.SetStopReason("toolUse")
 	msg := t.streamBuf.Finalize()
 	t.parentID = msg.ID
-	t.streamBuf = agentcore.NewStreamBuffer(msg.ID)
+	t.streamBuf = stream.NewStreamBuffer(msg.ID)
 	return []WireEmit{{EventName: json_rpc.EventMessage, Payload: msg}}
 }
 

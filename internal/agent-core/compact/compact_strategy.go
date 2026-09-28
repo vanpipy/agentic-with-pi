@@ -1,4 +1,4 @@
-package agentcore
+package compact
 
 import (
 	"context"
@@ -54,11 +54,23 @@ func SelectStrategy(msgs []llm.Message, settings CompactionSettings, observedInp
 	return StrategyEmergency
 }
 
-func (s CompactionStrategy) ActOn(ctx context.Context, a *Agent, msgs []llm.Message, observed *int) ([]llm.Message, CompactionAction, error) {
+type StrategyRunner interface {
+	CompactRunner
+	LLM() llm.Core
+	KeepRecentTurns() int
+	ModelID() string
+	LogSeq() int
+	WithLogLocked(do func())
+	WriteCompactionEntry(summary string, before, after, firstKeptSeq int, model string)
+	WriteCompactionV3Entry(trigger, detail, strategy string, before, after, firstKeptSeq int, model string, durMS int64)
+	FlushLogBuf()
+}
+
+func (s CompactionStrategy) ActOn(ctx context.Context, runner StrategyRunner, msgs []llm.Message, observed *int) ([]llm.Message, CompactionAction, error) {
 	switch s {
 	case StrategyReactive:
 		previousSummary := ExtractPreviousSummary(msgs)
-		out, err := runReactiveCompaction(ctx, a, msgs, previousSummary)
+		out, err := runReactiveCompaction(ctx, runner, msgs, previousSummary)
 		if err != nil {
 			return msgs, ActionNone, err
 		}
@@ -70,23 +82,23 @@ func (s CompactionStrategy) ActOn(ctx context.Context, a *Agent, msgs []llm.Mess
 	}
 }
 
-func runReactiveCompaction(ctx context.Context, a *Agent, msgs []llm.Message, previousSummary string) ([]llm.Message, error) {
+func runReactiveCompaction(ctx context.Context, runner StrategyRunner, msgs []llm.Message, previousSummary string) ([]llm.Message, error) {
 	if len(msgs) == 0 {
 		return msgs, nil
 	}
 	compactionStart := time.Now()
-	systemMsg, toSummarize, recent, ok := splitReactiveInputs(msgs, a.compaction.KeepRecentTurns)
+	systemMsg, toSummarize, recent, ok := splitReactiveInputs(msgs, runner.KeepRecentTurns())
 	if !ok {
 		slog.Debug("agent: nothing to compact")
 		return msgs, nil
 	}
 	slog.Debug("agent: compacting", "messages_to_summarize", len(toSummarize), "messages_to_keep", len(recent))
-	summaryText, err := StreamSummary(ctx, a.core, BuildSummaryRequest(toSummarize, previousSummary, a.Model.ID))
+	summaryText, err := StreamSummary(ctx, runner.LLM(), BuildSummaryRequest(toSummarize, previousSummary, runner.ModelID()))
 	if err != nil {
 		return nil, err
 	}
 	out, summaryText := AppendFileOpsSummary(systemMsg, toSummarize, recent, summaryText)
-	writeReactiveCompactionLog(a, compactionStart, msgs, out, summaryText)
+	writeReactiveCompactionLog(runner, compactionStart, msgs, out, summaryText)
 	return out, nil
 }
 
@@ -103,24 +115,15 @@ func splitReactiveInputs(msgs []llm.Message, keepRecentTurns int) (systemMsg llm
 	return systemMsg, restMsgs[:cutPoint], restMsgs[cutPoint:], true
 }
 
-func writeReactiveCompactionLog(a *Agent, compactionStart time.Time, beforeMsgs, afterMsgs []llm.Message, summaryText string) {
-	a.logMu.Lock()
-	defer a.logMu.Unlock()
-	tokensBefore := estimateTotalTokens(beforeMsgs)
-	tokensAfter := estimateTotalTokens(afterMsgs)
-	a.writeCompactionLocked(Event{
-		Category:        EventCompaction,
-		Summary:         summaryText,
-		TokensBefore:    tokensBefore,
-		TokensAfter:     tokensAfter,
-		FirstKeptSeq:    a.logSeq,
-		CompactionModel: a.Model.ID,
+func writeReactiveCompactionLog(runner StrategyRunner, compactionStart time.Time, beforeMsgs, afterMsgs []llm.Message, summaryText string) {
+	tokensBefore := EstimateTotalTokens(beforeMsgs)
+	tokensAfter := EstimateTotalTokens(afterMsgs)
+	firstKeptSeq := runner.LogSeq()
+	runner.WithLogLocked(func() {
+		runner.WriteCompactionEntry(summaryText, tokensBefore, tokensAfter, firstKeptSeq, runner.ModelID())
+		runner.WriteCompactionV3Entry("reactive_threshold", "", string(StrategyReactive), tokensBefore, tokensAfter, firstKeptSeq, runner.ModelID(), time.Since(compactionStart).Milliseconds())
 	})
-	durMS := time.Since(compactionStart).Milliseconds()
-	a.writeCompactionV3Locked("reactive_threshold", "", string(StrategyReactive), tokensBefore, tokensAfter, a.logSeq, a.Model.ID, durMS)
-	if a.logBuf != nil {
-		_ = a.logBuf.Flush()
-	}
+	runner.FlushLogBuf()
 }
 
 func StreamSummary(ctx context.Context, core llm.Core, req *llm.ChatRequest) (string, error) {

@@ -1,4 +1,4 @@
-package agentcore
+package util
 
 import (
 	"crypto/sha256"

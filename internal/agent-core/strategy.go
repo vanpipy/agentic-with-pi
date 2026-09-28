@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -237,12 +238,12 @@ func (r *ReActStrategy) ShouldAbort(msgs []llm.Message, lastFailedToolError stri
 	if lastFailedToolError == "" {
 		return nil
 	}
-	normalised := NormalizeToolError(lastFailedToolError)
+	normalised := stream.NormalizeToolError(lastFailedToolError)
 	consecutiveTurns := 0
 	i := len(msgs) - 1
 	for i >= 0 {
 		m := msgs[i]
-		if !(m.Role == "tool" && NormalizeToolError(m.Content) == normalised) {
+		if !(m.Role == "tool" && stream.NormalizeToolError(m.Content) == normalised) {
 			break
 		}
 		consecutiveTurns++

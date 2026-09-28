@@ -1,10 +1,19 @@
-package agentcore
+package compact
 
 import (
 	"context"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
+
+type CompactionSettings struct {
+	Enabled          bool
+	ReserveTokens    int
+	KeepRecentTurns  int
+	MaxContextTokens int
+	Proactive        bool
+	Semantic         bool
+}
 
 const DefaultContextWindow = 128000
 
@@ -16,22 +25,27 @@ func ShouldCompactWithModel(msgs []llm.Message, model llm.Model, settings Compac
 	if window <= 0 {
 		window = DefaultContextWindow
 	}
-	used := estimateTotalTokens(msgs)
+	used := EstimateTotalTokens(msgs)
 	return used > window-settings.ReserveTokens
 }
 
-func Compact(ctx context.Context, a *Agent) error {
+type CompactRunner interface {
+	Apply(ctx context.Context, msgs []llm.Message) ([]llm.Message, bool)
+	SetMessages(msgs []llm.Message)
+}
+
+func Compact(ctx context.Context, a CompactRunner) error {
 	if a == nil {
 		return nil
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	msgs, ok := a.applyCompaction(ctx, a.currentMsgs, nil)
+	msgs, ok := a.Apply(ctx, nil)
 	if !ok {
 		return ErrCompactionFailed
 	}
-	a.currentMsgs = msgs
+	a.SetMessages(msgs)
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -631,7 +632,7 @@ func TestAgentExecuteToolsEmitsAllBranchesInOneTurn(t *testing.T) {
 	}
 
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	_, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	_, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if ok {
 		t.Error("ok = true, want false (missing tool aborts)")
 	}
@@ -649,7 +650,7 @@ func TestPreflightValidateEmptyArgsReturnsEmpty(t *testing.T) {
 	})
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "needs_x", Arguments: ""}}
 	calls := []llm.ToolCall{tc}
-	_, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	_, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	if !ok {
 		t.Error("ok = false, want true (empty args short-circuits preflight)")
 	}
@@ -671,13 +672,13 @@ func TestPreflightValidateMissingFieldWithPropertyDescription(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "needs_path", Arguments: `{}`}},
 	}
-	events, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	events, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	if !ok {
 		t.Error("ok = false, want true")
 	}
 	var sawDesc bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "the file path") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "the file path") {
 			sawDesc = true
 		}
 	}
@@ -702,10 +703,10 @@ func TestPreflightValidateMissingFieldNoDescriptionFallsBackToName(t *testing.T)
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "needs_x", Arguments: `{}`}},
 	}
-	events, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	events, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	var sawFieldName bool
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "missing required field") {
+		if ev.Kind == stream.EmitKindError && strings.Contains(ev.ToolError, "missing required field") {
 			sawFieldName = true
 		}
 	}
@@ -726,12 +727,12 @@ func TestPreflightValidateNoRequiredFieldsReturnsEmpty(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "no_required", Arguments: `{}`}},
 	}
-	events, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	events, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	if !ok {
 		t.Error("ok = false, want true")
 	}
 	for _, ev := range events {
-		if ev.Category == agentcore.EventError {
+		if ev.Kind == stream.EmitKindError {
 			t.Errorf("unexpected error event: %+v", ev)
 		}
 	}
@@ -747,7 +748,7 @@ func TestPreflightValidateSchemaNilReturnsEmpty(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "no_schema", Arguments: `{}`}},
 	}
-	_, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	_, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	if !ok {
 		t.Error("ok = false, want true")
 	}
@@ -755,14 +756,14 @@ func TestPreflightValidateSchemaNilReturnsEmpty(t *testing.T) {
 
 func TestApplyOversizedGuardAcceptsLargeOutputWhenRequested(t *testing.T) {
 	ag := agentcore.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m"})
-	big := strings.Repeat("x", agentcore.OversizedResultThreshold+10)
+	big := strings.Repeat("x", stream.OversizedResultThreshold+10)
 	ag.WithTool(agentcore.ToolFunc{N: "big_tool", Fn: func(context.Context, string) (string, error) { return big, nil }})
 
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "big_tool", Arguments: `{"intent":"big","accept_large_output":true}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	updated, ok := agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	updated, ok := stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatal("executeTools failed")
 	}
@@ -775,14 +776,14 @@ func TestApplyOversizedGuardAcceptsLargeOutputWhenRequested(t *testing.T) {
 
 func TestApplyOversizedGuardReplacesOutputWhenTooLarge(t *testing.T) {
 	ag := agentcore.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m"})
-	big := strings.Repeat("x", agentcore.OversizedResultThreshold+10)
+	big := strings.Repeat("x", stream.OversizedResultThreshold+10)
 	ag.WithTool(agentcore.ToolFunc{N: "big_tool", Fn: func(context.Context, string) (string, error) { return big, nil }})
 
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "big_tool", Arguments: `{"intent":"big"}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	updated, ok := agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	updated, ok := stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatal("executeTools failed")
 	}
@@ -793,7 +794,7 @@ func TestApplyOversizedGuardReplacesOutputWhenTooLarge(t *testing.T) {
 		}
 	}
 	if !sawWithheld {
-		t.Errorf("expected output to be withheld for >%d bytes; updated=%+v", agentcore.OversizedResultThreshold, updated)
+		t.Errorf("expected output to be withheld for >%d bytes; updated=%+v", stream.OversizedResultThreshold, updated)
 	}
 }
 
@@ -894,12 +895,12 @@ func TestAgentExecuteToolsCacheHitMissPathCovers(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "echo", Arguments: `{"intent":"x","v":1}`}},
 	}
-	updated1, _ := agentcore.AgentExecuteToolsForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	updated1, _ := stream.AgentExecuteToolsForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 	if calls_count != 1 {
 		t.Fatalf("first call count = %d, want 1", calls_count)
 	}
 
-	_, _, _ = agentcore.AgentExecuteToolsWithChanForTest(ag, calls, updated1)
+	_, _, _ = stream.AgentExecuteToolsWithChanForTest(ag, calls, updated1)
 	if calls_count != 1 {
 		t.Errorf("second call count = %d, want 1 (cache hit)", calls_count)
 	}
@@ -914,13 +915,13 @@ func TestAgentExecuteToolsCacheHitClearsPreflightStreak(t *testing.T) {
 	calls := []llm.ToolCall{
 		{ID: "c1", Function: llm.FunctionCall{Name: "alpha", Arguments: `{"intent":"x"}`}},
 	}
-	updated1, _ := agentcore.AgentExecuteToolsForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
+	updated1, _ := stream.AgentExecuteToolsForTest(ag, calls, []llm.Message{{Role: "user", Content: "x"}})
 
 	if ag.PreflightFailureStreakForTest()["alpha"] != 0 {
 		t.Errorf("streak after success = %d, want 0 (cleared)", ag.PreflightFailureStreakForTest()["alpha"])
 	}
 
-	_, _, _ = agentcore.AgentExecuteToolsWithChanForTest(ag, calls, updated1)
+	_, _, _ = stream.AgentExecuteToolsWithChanForTest(ag, calls, updated1)
 	if ag.PreflightFailureStreakForTest()["alpha"] != 0 {
 		t.Errorf("streak after cache hit = %d, want 0 (still cleared)", ag.PreflightFailureStreakForTest()["alpha"])
 	}
@@ -1315,7 +1316,7 @@ func TestAgentExecuteToolsErrorOnEmptyArgsStopsCurrentTurn(t *testing.T) {
 		{ID: "c1", Function: llm.FunctionCall{Name: "ok", Arguments: ""}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	_, _, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	_, _, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if !ok {
 		t.Error("ok = false, want true (empty args skips but doesn't abort turn)")
 	}
@@ -1423,7 +1424,7 @@ func TestAgentExecuteToolsReturnsSkippedToolResultsForUnknownTool(t *testing.T) 
 		{ID: "c3", Function: llm.FunctionCall{Name: "ghost2", Arguments: `{}`}},
 	}
 	msgs := []llm.Message{{Role: "user", Content: "x"}}
-	_, updated, ok := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
+	_, updated, ok := stream.AgentExecuteToolsWithChanForTest(ag, calls, msgs)
 	if ok {
 		t.Error("ok = true, want false")
 	}
@@ -2155,7 +2156,7 @@ func TestApplyOversizedGuardWithAcceptLargeOutputReturnsFull(t *testing.T) {
 		{Role: "user", Content: "go"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
 	}
-	_, _, _ = agentcore.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
+	_, _, _ = stream.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
 }
 
 func TestApplyOversizedGuardMalformedJSONArgsReturnsWithheld(t *testing.T) {
@@ -2173,7 +2174,7 @@ func TestApplyOversizedGuardMalformedJSONArgsReturnsWithheld(t *testing.T) {
 		{Role: "user", Content: "go"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
 	}
-	_, updated, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
+	_, updated, _ := stream.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
 	if len(updated) == 0 {
 		t.Fatal("expected updated msgs")
 	}
@@ -2198,7 +2199,7 @@ func TestApplyOversizedGuardAcceptLargeOutputFalseReturnsWithheld(t *testing.T) 
 		{Role: "user", Content: "go"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
 	}
-	_, updated, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
+	_, updated, _ := stream.AgentExecuteToolsWithChanForTest(ag, []llm.ToolCall{tc}, msgs)
 	last := updated[len(updated)-1]
 	if !strings.Contains(last.Content, "WITHHELD") {
 		t.Errorf("expected WITHHELD; got %q", last.Content[:min(100, len(last.Content))])

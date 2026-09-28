@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/agent-server"
 	"github.com/vanpiyp/awp/internal/llm"
@@ -43,7 +44,7 @@ func dialTestServer(t *testing.T, dir string) net.Conn {
 
 func TestMarshalAgentEventForWireUserMessageEmitsMessage(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventUserMessage, Content: "hi"},
 		&parentID, &streamBuf,
@@ -61,7 +62,7 @@ func TestMarshalAgentEventForWireUserMessageEmitsMessage(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtStartCreatesStreamBuf(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventThoughtStart},
 		&parentID, &streamBuf,
@@ -76,7 +77,7 @@ func TestMarshalAgentEventForWireThoughtStartCreatesStreamBuf(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtChunkNilStreamBufNoPanic(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "thinking"},
 		&parentID, &streamBuf,
@@ -88,7 +89,7 @@ func TestMarshalAgentEventForWireThoughtChunkNilStreamBufNoPanic(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtChunkWithStreamBuf(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "thinking"},
 		&parentID, &streamBuf,
@@ -100,7 +101,7 @@ func TestMarshalAgentEventForWireThoughtChunkWithStreamBuf(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtEndWithUsage(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventThoughtEnd, Usage: &llm.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}},
 		&parentID, &streamBuf,
@@ -112,7 +113,7 @@ func TestMarshalAgentEventForWireThoughtEndWithUsage(t *testing.T) {
 
 func TestMarshalAgentEventForWireThoughtEndNoUsage(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventThoughtEnd},
 		&parentID, &streamBuf,
@@ -124,7 +125,7 @@ func TestMarshalAgentEventForWireThoughtEndNoUsage(t *testing.T) {
 
 func TestMarshalAgentEventForWireToolEmitsAssistantAndToolResult(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("parent-x")
+	streamBuf := stream.NewStreamBuffer("parent-x")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{
 			Category:   agentcore.EventTool,
@@ -144,7 +145,7 @@ func TestMarshalAgentEventForWireToolEmitsAssistantAndToolResult(t *testing.T) {
 
 func TestMarshalAgentEventForWireToolEmptyArgsUsesEmptyObject(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventTool, ToolName: "ls", ToolArgs: ""},
 		&parentID, &streamBuf,
@@ -156,7 +157,7 @@ func TestMarshalAgentEventForWireToolEmptyArgsUsesEmptyObject(t *testing.T) {
 
 func TestMarshalAgentEventForWireToolNoIntentFallsBackToExtract(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventTool, ToolName: "ls", ToolArgs: `{"intent":"fallback"}`},
 		&parentID, &streamBuf,
@@ -168,7 +169,7 @@ func TestMarshalAgentEventForWireToolNoIntentFallsBackToExtract(t *testing.T) {
 
 func TestMarshalAgentEventForWireToolErrorInResult(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventTool, ToolName: "ls", ToolArgs: `{}`, ToolError: "denied"},
 		&parentID, &streamBuf,
@@ -180,7 +181,7 @@ func TestMarshalAgentEventForWireToolErrorInResult(t *testing.T) {
 
 func TestMarshalAgentEventForWireToolNilStreamBufNoEmit(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventTool, ToolName: "ls", ToolArgs: `{}`},
 		&parentID, &streamBuf,
@@ -192,7 +193,7 @@ func TestMarshalAgentEventForWireToolNilStreamBufNoEmit(t *testing.T) {
 
 func TestMarshalAgentEventForWireObserveEmitsMessageAndResetsBuf(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventObserve, ToolName: "ls", ToolResult: "out", ToolIntent: "x"},
 		&parentID, &streamBuf,
@@ -207,7 +208,7 @@ func TestMarshalAgentEventForWireObserveEmitsMessageAndResetsBuf(t *testing.T) {
 
 func TestMarshalAgentEventForWireObserveNilStreamBufNoEmit(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventObserve, ToolName: "ls", ToolResult: "out"},
 		&parentID, &streamBuf,
@@ -219,7 +220,7 @@ func TestMarshalAgentEventForWireObserveNilStreamBufNoEmit(t *testing.T) {
 
 func TestMarshalAgentEventForWireFinalAnswerEmitsAndClearsBuf(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{
 			Category: agentcore.EventFinalAnswer,
@@ -238,7 +239,7 @@ func TestMarshalAgentEventForWireFinalAnswerEmitsAndClearsBuf(t *testing.T) {
 
 func TestMarshalAgentEventForWireFinalAnswerNoUsage(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventFinalAnswer, Content: "ok"},
 		&parentID, &streamBuf,
@@ -250,7 +251,7 @@ func TestMarshalAgentEventForWireFinalAnswerNoUsage(t *testing.T) {
 
 func TestMarshalAgentEventForWireFinalAnswerNilBufNoEmit(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventFinalAnswer, Content: "ok"},
 		&parentID, &streamBuf,
@@ -262,7 +263,7 @@ func TestMarshalAgentEventForWireFinalAnswerNilBufNoEmit(t *testing.T) {
 
 func TestMarshalAgentEventForWireErrorEmitsMessageAndCustomEvent(t *testing.T) {
 	var parentID string
-	streamBuf := agentcore.NewStreamBuffer("p1")
+	streamBuf := stream.NewStreamBuffer("p1")
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventError, ToolError: "boom"},
 		&parentID, &streamBuf,
@@ -280,7 +281,7 @@ func TestMarshalAgentEventForWireErrorEmitsMessageAndCustomEvent(t *testing.T) {
 
 func TestMarshalAgentEventForWireErrorNilBufNoEmit(t *testing.T) {
 	var parentID string
-	var streamBuf *agentcore.StreamBuffer
+	var streamBuf *stream.StreamBuffer
 	emits := agentserver.MarshalAgentEventForWireForTest(
 		agentcore.Event{Category: agentcore.EventError, ToolError: "boom"},
 		&parentID, &streamBuf,

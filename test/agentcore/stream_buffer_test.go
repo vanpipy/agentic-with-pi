@@ -7,14 +7,14 @@ import (
 	"sync"
 	"testing"
 
-	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 )
 
 var uuidV7Re = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func TestStreamBufferThinkingChunksConcat(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendThinking("Hello", "")
 	b.AppendThinking(" world", "")
 	b.AppendThinking("!", "")
@@ -31,7 +31,7 @@ func TestStreamBufferThinkingChunksConcat(t *testing.T) {
 }
 
 func TestStreamBufferTextChunksConcat(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendText("a")
 	b.AppendText("b")
 	msg := b.Finalize()
@@ -47,7 +47,7 @@ func TestStreamBufferTextChunksConcat(t *testing.T) {
 }
 
 func TestStreamBufferThinkingAndTextAreSeparate(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendThinking("think", "")
 	b.AppendText("text")
 	msg := b.Finalize()
@@ -63,7 +63,7 @@ func TestStreamBufferThinkingAndTextAreSeparate(t *testing.T) {
 }
 
 func TestStreamBufferToolCallIsSeparatePart(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendText("I'll use a tool")
 	b.AppendToolCall("call-abc", "bash", "run date", json.RawMessage(`{"command":"date"}`))
 	msg := b.Finalize()
@@ -88,7 +88,7 @@ func TestStreamBufferToolCallIsSeparatePart(t *testing.T) {
 }
 
 func TestStreamBufferParentIDPropagates(t *testing.T) {
-	b := agentcore.NewStreamBuffer("parent-uuid-v7")
+	b := stream.NewStreamBuffer("parent-uuid-v7")
 	msg := b.Finalize()
 	if msg.ParentID != "parent-uuid-v7" {
 		t.Errorf("expected parent propagation %q, got %q", "parent-uuid-v7", msg.ParentID)
@@ -96,14 +96,14 @@ func TestStreamBufferParentIDPropagates(t *testing.T) {
 }
 
 func TestStreamBufferParentAccessorReturnsStoredID(t *testing.T) {
-	b := agentcore.NewStreamBuffer("parent-xyz")
+	b := stream.NewStreamBuffer("parent-xyz")
 	if got := b.ParentID(); got != "parent-xyz" {
 		t.Errorf("ParentID() = %q, want parent-xyz", got)
 	}
 }
 
 func TestStreamBufferFinalizeGeneratesUUIDv7(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	msg := b.Finalize()
 	if !uuidV7Re.MatchString(msg.ID) {
 		t.Errorf("expected UUID v7 format, got %q", msg.ID)
@@ -111,7 +111,7 @@ func TestStreamBufferFinalizeGeneratesUUIDv7(t *testing.T) {
 }
 
 func TestStreamBufferFinalizeSetsTimestamp(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	msg := b.Finalize()
 	if msg.Timestamp == "" {
 		t.Fatal("expected non-empty timestamp")
@@ -125,7 +125,7 @@ func TestStreamBufferFinalizeSetsTimestamp(t *testing.T) {
 }
 
 func TestStreamBufferRoleIsEmptyByDefault(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	msg := b.Finalize()
 	if msg.Message.Role != "" {
 		t.Errorf("expected empty role by default, got %q", msg.Message.Role)
@@ -133,7 +133,7 @@ func TestStreamBufferRoleIsEmptyByDefault(t *testing.T) {
 }
 
 func TestStreamBufferSetRolePropagates(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.SetRole("assistant")
 	msg := b.Finalize()
 	if msg.Message.Role != "assistant" {
@@ -142,7 +142,7 @@ func TestStreamBufferSetRolePropagates(t *testing.T) {
 }
 
 func TestStreamBufferUsageAndStopReasonAndDetails(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.SetUsage(json_rpc.UsageStats{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15})
 	b.SetStopReason("end_turn")
 	b.SetDetails(json_rpc.MessageDetails{ToolName: "bash"})
@@ -165,7 +165,7 @@ func TestStreamBufferUsageAndStopReasonAndDetails(t *testing.T) {
 }
 
 func TestStreamBufferThinkingSignaturePropagates(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendThinking("reasoning", "")
 	b.AppendThinking(" more", "sig-xyz")
 	msg := b.Finalize()
@@ -181,7 +181,7 @@ func TestStreamBufferThinkingSignaturePropagates(t *testing.T) {
 }
 
 func TestStreamBufferEmptyAppendIsNoop(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendThinking("", "")
 	b.AppendText("")
 	msg := b.Finalize()
@@ -194,7 +194,7 @@ func TestStreamBufferMonotonicIDsAcrossBuffers(t *testing.T) {
 	const N = 100
 	ids := make([]string, N)
 	for i := range ids {
-		ids[i] = agentcore.NewStreamBuffer("").Finalize().ID
+		ids[i] = stream.NewStreamBuffer("").Finalize().ID
 	}
 	seen := make(map[string]bool, N)
 	for _, id := range ids {
@@ -206,7 +206,7 @@ func TestStreamBufferMonotonicIDsAcrossBuffers(t *testing.T) {
 }
 
 func TestStreamBufferConcurrentAppendIsRaceFree(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	const goroutines = 8
 	const perGoroutine = 50
 	var wg sync.WaitGroup
@@ -230,7 +230,7 @@ func TestStreamBufferConcurrentAppendIsRaceFree(t *testing.T) {
 }
 
 func TestStreamBufferFinalizeIsIdempotent(t *testing.T) {
-	b := agentcore.NewStreamBuffer("parent-1")
+	b := stream.NewStreamBuffer("parent-1")
 	b.AppendText("hello")
 	first := b.Finalize()
 	if first.ID == "" {
@@ -246,7 +246,7 @@ func TestStreamBufferFinalizeIsIdempotent(t *testing.T) {
 }
 
 func TestStreamBufferAppendAfterFinalizePreservesID(t *testing.T) {
-	b := agentcore.NewStreamBuffer("parent-1")
+	b := stream.NewStreamBuffer("parent-1")
 	b.AppendText("hello")
 	first := b.Finalize()
 	if first.ID == "" {
@@ -276,7 +276,7 @@ func TestStreamBufferAppendAfterFinalizePreservesID(t *testing.T) {
 }
 
 func TestStreamBufferFinalizeWithEmptyParentID(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendText("hi")
 	msg := b.Finalize()
 	if msg.ParentID != "" {
@@ -285,7 +285,7 @@ func TestStreamBufferFinalizeWithEmptyParentID(t *testing.T) {
 }
 
 func TestStreamBufferFinalizeReturnsCopyOfParts(t *testing.T) {
-	b := agentcore.NewStreamBuffer("")
+	b := stream.NewStreamBuffer("")
 	b.AppendText("hello")
 	msg := b.Finalize()
 	msg.Message.Content[0].Text = "MUTATED"

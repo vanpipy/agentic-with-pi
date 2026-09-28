@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
@@ -17,107 +18,107 @@ func TestSelectStrategyTableDriven(t *testing.T) {
 	cases := []struct {
 		name     string
 		msgs     []llm.Message
-		settings agentcore.CompactionSettings
+		settings compact.CompactionSettings
 		observed *int
-		want     agentcore.CompactionStrategy
+		want     compact.CompactionStrategy
 	}{
 		{
 			name:     "disabled_falls_to_emergency",
 			msgs:     []llm.Message{{Role: "user", Content: "x"}},
-			settings: agentcore.CompactionSettings{Enabled: false, ReserveTokens: 100, MaxContextTokens: 1000},
+			settings: compact.CompactionSettings{Enabled: false, ReserveTokens: 100, MaxContextTokens: 1000},
 			observed: none(),
-			want:     agentcore.StrategyEmergency,
+			want:     compact.StrategyEmergency,
 		},
 		{
 			name:     "should_compact_returns_reactive",
 			msgs:     []llm.Message{{Role: "user", Content: strings.Repeat("a", 4000)}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000},
 			observed: big(strings.Repeat("a", 4000)),
-			want:     agentcore.StrategyReactive,
+			want:     compact.StrategyReactive,
 		},
 		{
 			name:     "below_threshold_with_proactive_returns_proactive",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true},
 			observed: small("short"),
-			want:     agentcore.StrategyProactive,
+			want:     compact.StrategyProactive,
 		},
 		{
 			name:     "below_threshold_with_semantic_returns_semantic",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Semantic: true},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Semantic: true},
 			observed: small("short"),
-			want:     agentcore.StrategySemantic,
+			want:     compact.StrategySemantic,
 		},
 		{
 			name:     "proactive_beats_semantic_in_precedence",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true, Semantic: true},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000, Proactive: true, Semantic: true},
 			observed: small("short"),
-			want:     agentcore.StrategyProactive,
+			want:     compact.StrategyProactive,
 		},
 		{
 			name:     "reactive_beats_proactive_in_precedence",
 			msgs:     []llm.Message{{Role: "user", Content: strings.Repeat("a", 4000)}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000, Proactive: true},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 1000, Proactive: true},
 			observed: big(strings.Repeat("a", 4000)),
-			want:     agentcore.StrategyReactive,
+			want:     compact.StrategyReactive,
 		},
 		{
 			name:     "no_flags_falls_to_emergency",
 			msgs:     []llm.Message{{Role: "user", Content: "short"}},
-			settings: agentcore.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000},
+			settings: compact.CompactionSettings{Enabled: true, ReserveTokens: 100, MaxContextTokens: 100000},
 			observed: small("short"),
-			want:     agentcore.StrategyEmergency,
+			want:     compact.StrategyEmergency,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := agentcore.SelectStrategy(tc.msgs, tc.settings, tc.observed)
+			got := compact.SelectStrategy(tc.msgs, tc.settings, tc.observed)
 			if got != tc.want {
-				t.Errorf("agentcore.SelectStrategy = %q, want %q", got, tc.want)
+				t.Errorf("compact.SelectStrategy = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
 func TestCompactionStrategyConstants(t *testing.T) {
-	if string(agentcore.StrategyReactive) != "reactive" {
-		t.Errorf("agentcore.StrategyReactive = %q, want reactive", agentcore.StrategyReactive)
+	if string(compact.StrategyReactive) != "reactive" {
+		t.Errorf("compact.StrategyReactive = %q, want reactive", compact.StrategyReactive)
 	}
-	if string(agentcore.StrategyProactive) != "proactive" {
-		t.Errorf("agentcore.StrategyProactive = %q, want proactive", agentcore.StrategyProactive)
+	if string(compact.StrategyProactive) != "proactive" {
+		t.Errorf("compact.StrategyProactive = %q, want proactive", compact.StrategyProactive)
 	}
-	if string(agentcore.StrategySemantic) != "semantic" {
-		t.Errorf("agentcore.StrategySemantic = %q, want semantic", agentcore.StrategySemantic)
+	if string(compact.StrategySemantic) != "semantic" {
+		t.Errorf("compact.StrategySemantic = %q, want semantic", compact.StrategySemantic)
 	}
-	if string(agentcore.StrategyEmergency) != "emergency" {
-		t.Errorf("agentcore.StrategyEmergency = %q, want emergency", agentcore.StrategyEmergency)
+	if string(compact.StrategyEmergency) != "emergency" {
+		t.Errorf("compact.StrategyEmergency = %q, want emergency", compact.StrategyEmergency)
 	}
 }
 
 func TestCompactionActionConstants(t *testing.T) {
-	if string(agentcore.ActionNone) != "none" {
-		t.Errorf("agentcore.ActionNone = %q, want none", agentcore.ActionNone)
+	if string(compact.ActionNone) != "none" {
+		t.Errorf("compact.ActionNone = %q, want none", compact.ActionNone)
 	}
-	if string(agentcore.ActionBackgroundStarted) != "background_started" {
-		t.Errorf("agentcore.ActionBackgroundStarted = %q, want background_started", agentcore.ActionBackgroundStarted)
+	if string(compact.ActionBackgroundStarted) != "background_started" {
+		t.Errorf("compact.ActionBackgroundStarted = %q, want background_started", compact.ActionBackgroundStarted)
 	}
-	if string(agentcore.ActionFullCompacted) != "full_compacted" {
-		t.Errorf("agentcore.ActionFullCompacted = %q, want full_compacted", agentcore.ActionFullCompacted)
+	if string(compact.ActionFullCompacted) != "full_compacted" {
+		t.Errorf("compact.ActionFullCompacted = %q, want full_compacted", compact.ActionFullCompacted)
 	}
-	if string(agentcore.ActionEmergencyHard) != "emergency_hard" {
-		t.Errorf("agentcore.ActionEmergencyHard = %q, want emergency_hard", agentcore.ActionEmergencyHard)
+	if string(compact.ActionEmergencyHard) != "emergency_hard" {
+		t.Errorf("compact.ActionEmergencyHard = %q, want emergency_hard", compact.ActionEmergencyHard)
 	}
-	if string(agentcore.ActionIncrementalRecovered) != "incremental_recovered" {
-		t.Errorf("agentcore.ActionIncrementalRecovered = %q, want incremental_recovered", agentcore.ActionIncrementalRecovered)
+	if string(compact.ActionIncrementalRecovered) != "incremental_recovered" {
+		t.Errorf("compact.ActionIncrementalRecovered = %q, want incremental_recovered", compact.ActionIncrementalRecovered)
 	}
 }
 
 func TestCompactionStatsFields(t *testing.T) {
 	obs := 1234
-	s := agentcore.CompactionStats{
+	s := compact.CompactionStats{
 		TotalTurns:          10,
 		ActiveMessages:      20,
 		HasSummary:          true,
@@ -141,12 +142,12 @@ func TestCompactionStatsFields(t *testing.T) {
 func TestProactiveActOnReturnsActionNone(t *testing.T) {
 	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := agentcore.StrategyProactive.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := compact.StrategyProactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionNone {
-		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
+	if action != compact.ActionNone {
+		t.Errorf("action = %q, want %q", action, compact.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -156,12 +157,12 @@ func TestProactiveActOnReturnsActionNone(t *testing.T) {
 func TestSemanticActOnReturnsActionNone(t *testing.T) {
 	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := agentcore.StrategySemantic.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := compact.StrategySemantic.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionNone {
-		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
+	if action != compact.ActionNone {
+		t.Errorf("action = %q, want %q", action, compact.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -171,12 +172,12 @@ func TestSemanticActOnReturnsActionNone(t *testing.T) {
 func TestEmergencyActOnReturnsActionNone(t *testing.T) {
 	a := &agentcore.Agent{}
 	msgs := []llm.Message{{Role: "user", Content: "hi"}}
-	out, action, err := agentcore.StrategyEmergency.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := compact.StrategyEmergency.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionNone {
-		t.Errorf("action = %q, want %q", action, agentcore.ActionNone)
+	if action != compact.ActionNone {
+		t.Errorf("action = %q, want %q", action, compact.ActionNone)
 	}
 	if len(out) != 1 || out[0].Content != "hi" {
 		t.Errorf("msgs changed unexpectedly: %+v", out)
@@ -185,12 +186,12 @@ func TestEmergencyActOnReturnsActionNone(t *testing.T) {
 
 func TestReactiveActOnEmptyMsgsReturnsInput(t *testing.T) {
 	a := &agentcore.Agent{}
-	out, action, err := agentcore.StrategyReactive.ActOn(context.Background(), a, nil, nil)
+	out, action, err := compact.StrategyReactive.ActOn(context.Background(), a, nil, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionFullCompacted {
-		t.Errorf("action = %q, want %q (Reactive returns full_compacted)", action, agentcore.ActionFullCompacted)
+	if action != compact.ActionFullCompacted {
+		t.Errorf("action = %q, want %q (Reactive returns full_compacted)", action, compact.ActionFullCompacted)
 	}
 	if out != nil {
 		t.Errorf("out = %+v, want nil", out)
@@ -206,12 +207,12 @@ func TestReactiveActOnDelegatesToRunReactive(t *testing.T) {
 		{Role: "assistant", Content: "a1"},
 		{Role: "user", Content: "u2"},
 	}
-	out, action, err := agentcore.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
+	out, action, err := compact.StrategyReactive.ActOn(context.Background(), a, msgs, nil)
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if action != agentcore.ActionFullCompacted {
-		t.Errorf("action = %q, want %q", action, agentcore.ActionFullCompacted)
+	if action != compact.ActionFullCompacted {
+		t.Errorf("action = %q, want %q", action, compact.ActionFullCompacted)
 	}
 	if len(out) < 2 {
 		t.Fatalf("expected system + summary + recent, got len=%d", len(out))
@@ -239,8 +240,8 @@ func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest
 }
 
 func TestStrategyEnumsAreDistinct(t *testing.T) {
-	all := []agentcore.CompactionStrategy{agentcore.StrategyReactive, agentcore.StrategyProactive, agentcore.StrategySemantic, agentcore.StrategyEmergency}
-	seen := map[agentcore.CompactionStrategy]bool{}
+	all := []compact.CompactionStrategy{compact.StrategyReactive, compact.StrategyProactive, compact.StrategySemantic, compact.StrategyEmergency}
+	seen := map[compact.CompactionStrategy]bool{}
 	for _, s := range all {
 		if seen[s] {
 			t.Errorf("duplicate strategy value: %q", s)
@@ -250,8 +251,8 @@ func TestStrategyEnumsAreDistinct(t *testing.T) {
 }
 
 func TestActionEnumsAreDistinct(t *testing.T) {
-	all := []agentcore.CompactionAction{agentcore.ActionNone, agentcore.ActionBackgroundStarted, agentcore.ActionFullCompacted, agentcore.ActionEmergencyHard, agentcore.ActionIncrementalRecovered}
-	seen := map[agentcore.CompactionAction]bool{}
+	all := []compact.CompactionAction{compact.ActionNone, compact.ActionBackgroundStarted, compact.ActionFullCompacted, compact.ActionEmergencyHard, compact.ActionIncrementalRecovered}
+	seen := map[compact.CompactionAction]bool{}
 	for _, s := range all {
 		if seen[s] {
 			t.Errorf("duplicate action value: %q", s)
@@ -264,7 +265,7 @@ func TestStrategyActOnCtxCancelled(t *testing.T) {
 	a := &agentcore.Agent{}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, _, err := agentcore.StrategyProactive.ActOn(ctx, a, nil, nil)
+	_, _, err := compact.StrategyProactive.ActOn(ctx, a, nil, nil)
 	if err != nil {
 		t.Fatalf("proactive should not error on cancelled ctx for stub: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestStrategyActOnCtxCancelled(t *testing.T) {
 
 func TestBuildSummaryRequestUsesFreshPromptWhenNoPrev(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Content: "u1"}}
-	req := agentcore.BuildSummaryRequest(msgs, "", "model-x")
+	req := compact.BuildSummaryRequest(msgs, "", "model-x")
 	if req == nil {
 		t.Fatal("BuildSummaryRequest returned nil")
 	}
@@ -285,7 +286,7 @@ func TestBuildSummaryRequestUsesFreshPromptWhenNoPrev(t *testing.T) {
 	if req.Messages[0].Role != "system" {
 		t.Errorf("Messages[0].Role = %q, want system", req.Messages[0].Role)
 	}
-	if req.Messages[0].Content != agentcore.SummarizationPrompt {
+	if req.Messages[0].Content != compact.SummarizationPrompt {
 		t.Errorf("first system prompt should be SummarizationPrompt when no previous summary")
 	}
 	if req.Messages[1].Role != "user" {
@@ -299,8 +300,8 @@ func TestBuildSummaryRequestUsesFreshPromptWhenNoPrev(t *testing.T) {
 func TestBuildSummaryRequestUsesUpdatePromptWhenPrev(t *testing.T) {
 	msgs := []llm.Message{{Role: "user", Content: "u1"}}
 	prev := "previous summary content"
-	req := agentcore.BuildSummaryRequest(msgs, prev, "model-x")
-	if req.Messages[0].Content != agentcore.UpdateSummarizationPrompt {
+	req := compact.BuildSummaryRequest(msgs, prev, "model-x")
+	if req.Messages[0].Content != compact.UpdateSummarizationPrompt {
 		t.Errorf("expected UpdateSummarizationPrompt when previous summary is non-empty")
 	}
 	if !strings.Contains(req.Messages[1].Content, prev) {
@@ -317,7 +318,7 @@ func TestBuildSummaryRequestUsesUpdatePromptWhenPrev(t *testing.T) {
 func TestStreamSummaryReturnsSummaryOnSuccess(t *testing.T) {
 	core := streamSummaryStubCore{chunks: []string{"hello ", "world"}, finish: llm.FinishReasonStop}
 	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
-	got, err := agentcore.StreamSummary(context.Background(), core, req)
+	got, err := compact.StreamSummary(context.Background(), core, req)
 	if err != nil {
 		t.Fatalf("StreamSummary err: %v", err)
 	}
@@ -329,7 +330,7 @@ func TestStreamSummaryReturnsSummaryOnSuccess(t *testing.T) {
 func TestStreamSummaryReturnsErrorOnLLMFailure(t *testing.T) {
 	core := streamSummaryStubCore{returnErr: errFakeLLM}
 	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
-	_, err := agentcore.StreamSummary(context.Background(), core, req)
+	_, err := compact.StreamSummary(context.Background(), core, req)
 	if err == nil {
 		t.Fatal("expected error from failing core, got nil")
 	}
@@ -341,7 +342,7 @@ func TestStreamSummaryReturnsErrorOnLLMFailure(t *testing.T) {
 func TestStreamSummaryReturnsErrorOnLengthFinish(t *testing.T) {
 	core := streamSummaryStubCore{chunks: []string{"partial"}, finish: llm.FinishReasonLength}
 	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
-	_, err := agentcore.StreamSummary(context.Background(), core, req)
+	_, err := compact.StreamSummary(context.Background(), core, req)
 	if err == nil {
 		t.Fatal("expected error on FinishReasonLength, got nil")
 	}
@@ -372,7 +373,7 @@ func TestAppendFileOpsSummaryAppendsFromExtractedOps(t *testing.T) {
 			},
 		}}},
 	}
-	out, finalText := agentcore.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
+	out, finalText := compact.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
 	if !strings.Contains(finalText, "<modified-files>") {
 		t.Errorf("finalText missing <modified-files>: %q", finalText)
 	}
@@ -427,7 +428,7 @@ func TestAppendFileOpsSummaryNoFileOpsHasNoSections(t *testing.T) {
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
 	}
-	out, finalText := agentcore.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
+	out, finalText := compact.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
 	if len(out) != 3 {
 		t.Fatalf("len(out) = %d, want 3", len(out))
 	}

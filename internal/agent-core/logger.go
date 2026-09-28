@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/vanpiyp/awp/internal/agent-core/compact"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	"github.com/vanpiyp/awp/internal/paths"
 )
@@ -252,7 +254,7 @@ func (a *Agent) WriteCustomMessage(parentID, customType, content string, details
 	return writeJSONLine(a.logBuf, entry)
 }
 
-func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
+func (a *Agent) writeAlignedEvent(ev Event) *stream.StreamBuffer {
 	a.logMu.Lock()
 	parentID := a.currentParentID
 	buf := a.currentStreamBuf
@@ -260,7 +262,7 @@ func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
 
 	switch ev.Category {
 	case EventUserMessage:
-		userBuf := NewStreamBuffer(parentID)
+		userBuf := stream.NewStreamBuffer(parentID)
 		userBuf.SetRole("user")
 		userBuf.AppendText(ev.Content)
 		userBuf.SetStopReason("end_turn")
@@ -272,7 +274,7 @@ func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
 		return nil
 
 	case EventThoughtStart:
-		newBuf := NewStreamBuffer(parentID)
+		newBuf := stream.NewStreamBuffer(parentID)
 		newBuf.SetRole("assistant")
 		a.logMu.Lock()
 		a.currentStreamBuf = newBuf
@@ -335,7 +337,7 @@ func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
 				a.logMu.Unlock()
 			}
 		}
-		toolResultBuf := NewStreamBuffer(toolCallID)
+		toolResultBuf := stream.NewStreamBuffer(toolCallID)
 		toolResultBuf.SetRole("toolResult")
 		if ev.ToolError != "" {
 			toolResultBuf.AppendText(ev.ToolError)
@@ -355,7 +357,7 @@ func (a *Agent) writeAlignedEvent(ev Event) *StreamBuffer {
 		}
 		a.logMu.Lock()
 		a.currentParentID = toolResultMsg.ID
-		nextBuf := NewStreamBuffer(toolResultMsg.ID)
+		nextBuf := stream.NewStreamBuffer(toolResultMsg.ID)
 		nextBuf.SetRole("assistant")
 		a.currentStreamBuf = nextBuf
 		a.logMu.Unlock()
@@ -551,7 +553,7 @@ func (a *Agent) writeTurnStartLocked(userMsgID string) {
 	}
 	ctxWindow := a.Model.MaxContextTokens
 	if ctxWindow <= 0 {
-		ctxWindow = DefaultContextWindow
+		ctxWindow = compact.DefaultContextWindow
 	}
 	var observed *int
 	if a.observedInputTokens > 0 {
@@ -565,7 +567,7 @@ func (a *Agent) writeTurnStartLocked(userMsgID string) {
 		Turn:                a.currentTurn,
 		UserMessageID:       userMsgID,
 		ContextWindow:       ctxWindow,
-		EstimateTokens:      estimateTotalTokens(a.currentMsgs),
+		EstimateTokens:      compact.EstimateTotalTokens(a.currentMsgs),
 		ObservedInputTokens: observed,
 	}
 	if err := writeJSONLine(a.v3LogBuf, entry); err != nil {

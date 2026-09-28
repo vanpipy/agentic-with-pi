@@ -9,11 +9,13 @@ import (
 	"testing"
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
+	"github.com/vanpiyp/awp/internal/agent-core/stream"
+	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
 func TestToolResultCachePutGet(t *testing.T) {
-	c := agentcore.NewToolResultCache(5)
+	c := util.NewToolResultCache(5)
 	c.Put("a", "result-a")
 	c.Put("b", "result-b")
 
@@ -29,7 +31,7 @@ func TestToolResultCachePutGet(t *testing.T) {
 }
 
 func TestToolResultCacheFIFOEviction(t *testing.T) {
-	c := agentcore.NewToolResultCache(3)
+	c := util.NewToolResultCache(3)
 	c.Put("a", "1")
 	c.Put("b", "2")
 	c.Put("c", "3")
@@ -57,7 +59,7 @@ func TestToolResultCacheFIFOEviction(t *testing.T) {
 }
 
 func TestToolResultCachePutExistingUpdatesInPlace(t *testing.T) {
-	c := agentcore.NewToolResultCache(3)
+	c := util.NewToolResultCache(3)
 	c.Put("a", "1")
 	c.Put("b", "2")
 	c.Put("c", "3")
@@ -72,7 +74,7 @@ func TestToolResultCachePutExistingUpdatesInPlace(t *testing.T) {
 }
 
 func TestToolResultCacheEmptySigNoOp(t *testing.T) {
-	c := agentcore.NewToolResultCache(3)
+	c := util.NewToolResultCache(3)
 	c.Put("", "should-not-store")
 
 	if got := c.Len(); got != 0 {
@@ -103,7 +105,7 @@ func TestAgentDedupIdenticalCallsAcrossTurns(t *testing.T) {
 	}}
 
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	msgs, ok := agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	msgs, ok := stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatal("first executeTools failed")
 	}
@@ -116,7 +118,7 @@ func TestAgentDedupIdenticalCallsAcrossTurns(t *testing.T) {
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":1}`},
 	}}
 	msgs2 := []llm.Message{{Role: "assistant", ToolCalls: calls2}}
-	msgs2, ok = agentcore.AgentExecuteToolsForTest(ag, calls2, msgs2)
+	msgs2, ok = stream.AgentExecuteToolsForTest(ag, calls2, msgs2)
 	if !ok {
 		t.Fatal("second executeTools failed")
 	}
@@ -148,7 +150,7 @@ func TestAgentDedupIdenticalCallsInSameTurn(t *testing.T) {
 		{ID: "c3", Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":1}`}},
 	}
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	msgs, ok := agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	msgs, ok := stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	if !ok {
 		t.Fatal("executeTools failed")
 	}
@@ -183,14 +185,14 @@ func TestAgentDedupDifferentArgsGetFreshExecution(t *testing.T) {
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":1}`},
 	}}
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 
 	calls2 := []llm.ToolCall{{
 		ID:       "c2",
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":2}`},
 	}}
 	msgs2 := []llm.Message{{Role: "assistant", ToolCalls: calls2}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls2, msgs2)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls2, msgs2)
 
 	if got := invocations.Load(); got != 2 {
 		t.Errorf("invocations = %d, want 2 (different args = no dedup)", got)
@@ -208,7 +210,7 @@ func TestAgentDedupFIFOEviction(t *testing.T) {
 			Function: llm.FunctionCall{Name: "mytool", Arguments: fmt.Sprintf(`{"x":%d}`, i)},
 		}}
 		msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-		_, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+		_, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 	}
 
 	if got := invocations.Load(); got != 21 {
@@ -220,7 +222,7 @@ func TestAgentDedupFIFOEviction(t *testing.T) {
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":0}`},
 	}}
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 
 	if got := invocations.Load(); got != 22 {
 		t.Errorf("after re-running call[0]: invocations = %d, want 22 (oldest evicted, fresh execution)", got)
@@ -235,11 +237,11 @@ func TestAgentDedupEventObserveHasFromCacheFlag(t *testing.T) {
 		ID:       "c1",
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":1}`},
 	}}
-	events1, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "assistant", ToolCalls: calls}})
+	events1, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls, []llm.Message{{Role: "assistant", ToolCalls: calls}})
 
 	var sawObserve bool
 	for _, ev := range events1 {
-		if ev.Category == agentcore.EventObserve && ev.ToolName == "mytool" {
+		if ev.Kind == stream.EmitKindObserve && ev.ToolName == "mytool" {
 			sawObserve = true
 			if ev.FromCache {
 				t.Errorf("first call: EventObserve.FromCache = true, want false (real invocation)")
@@ -254,11 +256,11 @@ func TestAgentDedupEventObserveHasFromCacheFlag(t *testing.T) {
 		ID:       "c2",
 		Function: llm.FunctionCall{Name: "mytool", Arguments: `{"x":1}`},
 	}}
-	events2, _, _ := agentcore.AgentExecuteToolsWithChanForTest(ag, calls2, []llm.Message{{Role: "assistant", ToolCalls: calls2}})
+	events2, _, _ := stream.AgentExecuteToolsWithChanForTest(ag, calls2, []llm.Message{{Role: "assistant", ToolCalls: calls2}})
 
 	var cachedObserve int
 	for _, ev := range events2 {
-		if ev.Category == agentcore.EventObserve && ev.ToolName == "mytool" {
+		if ev.Kind == stream.EmitKindObserve && ev.ToolName == "mytool" {
 			if !ev.FromCache {
 				t.Errorf("second call: EventObserve.FromCache = false, want true (dedup hit)")
 			}
@@ -293,14 +295,14 @@ func TestAgentDedupDoesNotCacheErrors(t *testing.T) {
 		Function: llm.FunctionCall{Name: "flaky", Arguments: `{"x":1}`},
 	}}
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 
 	calls2 := []llm.ToolCall{{
 		ID:       "c2",
 		Function: llm.FunctionCall{Name: "flaky", Arguments: `{"x":1}`},
 	}}
 	msgs2 := []llm.Message{{Role: "assistant", ToolCalls: calls2}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls2, msgs2)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls2, msgs2)
 
 	if got := invocations.Load(); got != 2 {
 		t.Errorf("invocations = %d, want 2 (errors should not be cached)", got)
@@ -308,10 +310,10 @@ func TestAgentDedupDoesNotCacheErrors(t *testing.T) {
 }
 
 func TestAgentDedupKeyIsOrderInsensitive(t *testing.T) {
-	c := agentcore.NewToolResultCache(5)
-	c.Put(agentcore.ToolCallDedupKeyForTest("mytool", `{"a":1,"b":2}`), "result")
+	c := util.NewToolResultCache(5)
+	c.Put(util.ToolCallDedupKeyForTest("mytool", `{"a":1,"b":2}`), "result")
 
-	v, ok := c.Get(agentcore.ToolCallDedupKeyForTest("mytool", `{"b":2,"a":1}`))
+	v, ok := c.Get(util.ToolCallDedupKeyForTest("mytool", `{"b":2,"a":1}`))
 	if !ok {
 		t.Errorf("expected hit: same key with reordered args should be the same dedup key")
 	}
@@ -321,17 +323,17 @@ func TestAgentDedupKeyIsOrderInsensitive(t *testing.T) {
 }
 
 func TestAgentDedupKeyDiffersOnNames(t *testing.T) {
-	c := agentcore.NewToolResultCache(5)
-	c.Put(agentcore.ToolCallDedupKeyForTest("tool_a", `{"x":1}`), "a-result")
+	c := util.NewToolResultCache(5)
+	c.Put(util.ToolCallDedupKeyForTest("tool_a", `{"x":1}`), "a-result")
 
-	if _, ok := c.Get(agentcore.ToolCallDedupKeyForTest("tool_b", `{"x":1}`)); ok {
+	if _, ok := c.Get(util.ToolCallDedupKeyForTest("tool_b", `{"x":1}`)); ok {
 		t.Errorf("different tool names should produce different dedup keys")
 	}
 }
 
 func TestAgentDedupArgsWithUnicodeNormalize(t *testing.T) {
-	c := agentcore.NewToolResultCache(5)
-	key := agentcore.ToolCallDedupKeyForTest("bash", `{"command":"echo \\u4e2d\\u6587"}`)
+	c := util.NewToolResultCache(5)
+	key := util.ToolCallDedupKeyForTest("bash", `{"command":"echo \\u4e2d\\u6587"}`)
 	c.Put(key, "result")
 
 	v, ok := c.Get(key)
@@ -360,7 +362,7 @@ func TestAgentDedupSkippedWhenPreflightFails(t *testing.T) {
 		Function: llm.FunctionCall{Name: "needsintent", Arguments: `{"x":1}`},
 	}}
 	msgs := []llm.Message{{Role: "assistant", ToolCalls: calls}}
-	_, _ = agentcore.AgentExecuteToolsForTest(ag, calls, msgs)
+	_, _ = stream.AgentExecuteToolsForTest(ag, calls, msgs)
 
 	if got := invocations.Load(); got != 0 {
 		t.Errorf("invocations = %d, want 0 (preflight should fail before tool runs)", got)
