@@ -2125,3 +2125,74 @@ func TestRunOneTurnUsesTurnStateEmptyContinuations(t *testing.T) {
 		t.Errorf("after empty-post-tool continuation: emptyContinuations = %d, want 1 (runOneTurn should increment via handleEmptyPostToolContinuation)", got)
 	}
 }
+
+func TestCompactorAsyncCancelsWithinBudget(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	fn := func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	c := agentcore.NewCompactor(fn)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := c.CompactAsync(ctx); err != nil {
+		t.Fatalf("CompactAsync returned err: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("compactor goroutine did not start within 1s")
+	}
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer waitCancel()
+	waitDone := make(chan error, 1)
+	go func() {
+		waitDone <- c.WaitIdle(waitCtx)
+	}()
+	select {
+	case err := <-waitDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("WaitIdle err = %v, want context.Canceled", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("WaitIdle did not return within 500ms after cancel")
+	}
+}
+
+func TestCompactorWaitIdleReturnsSuccessAfterFnCompletes(t *testing.T) {
+	c := agentcore.NewCompactor(func(ctx context.Context) error { return nil })
+	if err := c.CompactAsync(context.Background()); err != nil {
+		t.Fatalf("CompactAsync err: %v", err)
+	}
+	if err := c.WaitIdle(context.Background()); err != nil {
+		t.Fatalf("WaitIdle err = %v, want nil", err)
+	}
+}
+
+func TestCompactorCompactAsyncIsIdempotent(t *testing.T) {
+	var calls int32
+	c := agentcore.NewCompactor(func(ctx context.Context) error {
+		atomic.AddInt32(&calls, 1)
+		return nil
+	})
+	for i := 0; i < 3; i++ {
+		if err := c.CompactAsync(context.Background()); err != nil {
+			t.Fatalf("CompactAsync call #%d: %v", i, err)
+		}
+	}
+	if err := c.WaitIdle(context.Background()); err != nil {
+		t.Fatalf("WaitIdle err: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("compactFn calls = %d, want 1 (CompactAsync must be idempotent)", got)
+	}
+}
