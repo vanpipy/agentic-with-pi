@@ -94,6 +94,19 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 		}
 	}
 	a.emitSafetyNetHalt(ctx, ch)
+	a.runEndOfLoopAsyncCompact(ctx)
+}
+
+func (a *Agent) runEndOfLoopAsyncCompact(ctx context.Context) {
+	if a == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	c := NewCompactor(func(cctx context.Context) error { return Compact(cctx, a) })
+	_ = c.CompactAsync(ctx)
+	_ = c.WaitIdle(ctx)
 }
 
 func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, ts *turnState) ([]llm.Message, bool, Step) {
