@@ -35,6 +35,22 @@ func (f *fakeProvider) ConvertResponse(d []byte) (*llm.StreamChunk, bool, error)
 	return f.convertChunk(d)
 }
 func (f *fakeProvider) Models() []llm.Model { return f.models }
+func (f *fakeProvider) SupportsCacheControl(model string) bool {
+	return false
+}
+func (f *fakeProvider) ContextWindow(model string) int   { return 0 }
+func (f *fakeProvider) MaxOutputTokens(model string) int { return 0 }
+func (f *fakeProvider) AvailableReasoningEfforts(model string) []string {
+	return nil
+}
+func (f *fakeProvider) AvailableServiceTiers(model string) []string {
+	return nil
+}
+func (f *fakeProvider) BetaHeaders(model string) []string { return nil }
+func (f *fakeProvider) ModelCapabilities(model string) llm.ModelCapabilities {
+	return llm.ModelCapabilities{ID: model}
+}
+func (f *fakeProvider) SupportsNativeCompact(model string) bool { return false }
 
 type fakeProtocol struct {
 	streamItems []protocol.StreamItem

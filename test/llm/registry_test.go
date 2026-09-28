@@ -20,6 +20,22 @@ func (s *stubProvider) ConvertResponse([]byte) (*llm.StreamChunk, bool, error) {
 	return nil, false, nil
 }
 func (s *stubProvider) Models() []llm.Model { return s.models }
+func (s *stubProvider) SupportsCacheControl(model string) bool {
+	return false
+}
+func (s *stubProvider) ContextWindow(model string) int   { return 0 }
+func (s *stubProvider) MaxOutputTokens(model string) int { return 0 }
+func (s *stubProvider) AvailableReasoningEfforts(model string) []string {
+	return nil
+}
+func (s *stubProvider) AvailableServiceTiers(model string) []string {
+	return nil
+}
+func (s *stubProvider) BetaHeaders(model string) []string { return nil }
+func (s *stubProvider) ModelCapabilities(model string) llm.ModelCapabilities {
+	return llm.ModelCapabilities{ID: model}
+}
+func (s *stubProvider) SupportsNativeCompact(model string) bool { return false }
 
 func TestRegisterAndGet(t *testing.T) {
 	r := llm.NewRegistry()
