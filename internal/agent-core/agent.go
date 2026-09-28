@@ -146,6 +146,8 @@ type Agent struct {
 	v3LogWriter            io.Writer
 	v3LogBuf               *bufio.Writer
 	activeTurnState        *turnState
+	interrupt              *SoftInterrupt
+	interruptInit          sync.Once
 }
 
 type turnState struct {
@@ -229,6 +231,17 @@ func (a *Agent) SetSystemPrompts(p string)        { a.SystemPrompts = p }
 func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 	a.compaction = s
 	return a
+}
+
+func (a *Agent) Interrupt() *SoftInterrupt {
+	a.interruptInit.Do(func() {
+		a.interrupt = NewSoftInterrupt()
+		a.core = &interruptAwareCore{inner: a.core, intr: a.interrupt}
+		if rs, ok := a.strategy.(*ReActStrategy); ok {
+			rs.core = a.core
+		}
+	})
+	return a.interrupt
 }
 
 func (a *Agent) ResetForRun() {

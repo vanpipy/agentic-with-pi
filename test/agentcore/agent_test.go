@@ -2196,3 +2196,68 @@ func TestCompactorCompactAsyncIsIdempotent(t *testing.T) {
 		t.Fatalf("compactFn calls = %d, want 1 (CompactAsync must be idempotent)", got)
 	}
 }
+
+type slowStreamCore struct {
+	inner *fakeCore
+	delay time.Duration
+}
+
+func (s *slowStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	raw, err := s.inner.StreamChat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	out := make(chan llm.StreamEvent, 32)
+	go func() {
+		defer close(out)
+		for ev := range raw {
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-time.After(s.delay):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
+func TestSoftInterruptHaltsRunWithinBudget(t *testing.T) {
+	chunks := []llm.StreamEvent{
+		textDeltaChunk("hello"),
+		textDeltaChunk(" world"),
+		textDeltaChunk(" foo"),
+		textDeltaChunk(" bar"),
+		textDeltaChunk(" baz"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	inner := &fakeCore{streamChunks: chunks}
+	slow := &slowStreamCore{inner: inner, delay: 5 * time.Second}
+	ag := agentcore.NewAgent(slow).WithModel(llm.Model{ID: "test-model", SupportsTool: true})
+	intr := ag.Interrupt()
+	if intr == nil {
+		t.Fatal("Interrupt() returned nil")
+	}
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		intr.Raise(agentcore.SignalUser)
+	}()
+
+	start := time.Now()
+	for range ag.RunStream(context.Background(), "test") {
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("interrupt took %v, expected <500ms", elapsed)
+	}
+	if intr.Last() != agentcore.SignalUser {
+		t.Fatalf("expected last signal SignalUser, got %v", intr.Last())
+	}
+}
