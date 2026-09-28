@@ -89,8 +89,9 @@ type StreamChunk struct {
 }
 
 type StreamEvent struct {
-	Chunk *StreamChunk
-	Err   error
+	Chunk    *StreamChunk
+	Err      error
+	Rollback bool
 }
 
 type FunctionDef struct {

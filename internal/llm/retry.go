@@ -37,57 +37,108 @@ func NewRetryCore(inner Core, config RetryConfig) *RetryCore {
 }
 
 func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
-	var (
-		out     <-chan StreamEvent
-		callErr error
-	)
-	err := r.withRetry(ctx, func(ctx context.Context) error {
-		ch, e := r.inner.StreamChat(ctx, req)
-		if e != nil {
-			return e
-		}
-		out = ch
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, callErr
-}
-
-func (r *RetryCore) withRetry(ctx context.Context, op func(context.Context) error) error {
-	var lastErr error
 	backoff := r.config.InitialBackoff
+	var (
+		ch          <-chan StreamEvent
+		connErr     error
+		lastAttempt int
+	)
 	for attempt := 0; attempt <= r.config.MaxRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
-		err := op(ctx)
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		if !IsRetryable(err) {
-			return err
-		}
-		if attempt == r.config.MaxRetries {
+		ch, connErr = r.inner.StreamChat(ctx, req)
+		if connErr == nil {
+			lastAttempt = attempt
 			break
 		}
-		sleep := r.jitter(backoff)
-		timer := time.NewTimer(sleep)
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
+		if !IsRetryable(connErr) || attempt == r.config.MaxRetries {
+			return nil, connErr
 		}
-		next := time.Duration(float64(backoff) * r.config.Multiplier)
-		if next > r.config.MaxBackoff {
-			next = r.config.MaxBackoff
+		if sleepErr := r.sleepBackoff(ctx, backoff); sleepErr != nil {
+			return nil, sleepErr
 		}
-		backoff = next
+		backoff = r.growBackoff(backoff)
 	}
-	return lastErr
+	out := make(chan StreamEvent, 32)
+	go r.forwardWithMidRetry(ctx, req, ch, out, lastAttempt, backoff)
+	return out, nil
+}
+
+func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan StreamEvent, out chan<- StreamEvent, attempt int, backoff time.Duration) {
+	defer close(out)
+	for {
+		emittedCount := 0
+		midRetry := false
+		for ev := range ch {
+			emittedCount++
+			if ev.Err != nil {
+				if emittedCount > 1 && IsRetryable(ev.Err) && attempt < r.config.MaxRetries {
+					select {
+					case out <- StreamEvent{Rollback: true}:
+					case <-ctx.Done():
+						return
+					}
+					midRetry = true
+				} else {
+					select {
+					case out <- StreamEvent{Err: ev.Err}:
+					case <-ctx.Done():
+					}
+					return
+				}
+				break
+			}
+			select {
+			case out <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if !midRetry {
+			return
+		}
+		if sleepErr := r.sleepBackoff(ctx, backoff); sleepErr != nil {
+			return
+		}
+		backoff = r.growBackoff(backoff)
+		attempt++
+		if attempt > r.config.MaxRetries {
+			return
+		}
+		if err := ctx.Err(); err != nil {
+			return
+		}
+		var connErr error
+		ch, connErr = r.inner.StreamChat(ctx, req)
+		if connErr != nil {
+			select {
+			case out <- StreamEvent{Err: connErr}:
+			case <-ctx.Done():
+			}
+			return
+		}
+	}
+}
+
+func (r *RetryCore) sleepBackoff(ctx context.Context, backoff time.Duration) error {
+	sleep := r.jitter(backoff)
+	timer := time.NewTimer(sleep)
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		timer.Stop()
+		return ctx.Err()
+	}
+}
+
+func (r *RetryCore) growBackoff(backoff time.Duration) time.Duration {
+	next := time.Duration(float64(backoff) * r.config.Multiplier)
+	if next > r.config.MaxBackoff {
+		return r.config.MaxBackoff
+	}
+	return next
 }
 
 func (r *RetryCore) jitter(d time.Duration) time.Duration {
