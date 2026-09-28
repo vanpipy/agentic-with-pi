@@ -262,6 +262,16 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 }
 
 func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.StreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
+	if ev.Rollback {
+		contentBuf.Reset()
+		reasoningBuf.Reset()
+		result.content = ""
+		result.reasoning = ""
+		result.reasoningSig = ""
+		result.toolCalls = nil
+		slog.Debug("agent: stream rollback — discarded partial output")
+		return true
+	}
 	if ev.Err != nil {
 		if isCtxErr(ev.Err) {
 			return false
@@ -623,6 +633,41 @@ func AccumulateStreamToolCallsForTest(events []llm.StreamEvent) []llm.ToolCall {
 		}
 	}
 	return result.toolCalls
+}
+
+type ProcessStreamEventsForTestResult struct {
+	Content      string
+	Reasoning    string
+	ReasoningSig string
+	ToolCalls    []llm.ToolCall
+	Emitted      []Event
+	Continue     bool
+}
+
+func ProcessStreamEventsForTest(events []llm.StreamEvent) ProcessStreamEventsForTestResult {
+	rs := &ReActStrategy{}
+	var result turnResult
+	var contentBuf, reasoningBuf strings.Builder
+	var emitted []Event
+	emit := func(_ context.Context, ev Event) bool {
+		emitted = append(emitted, ev)
+		return true
+	}
+	ok := true
+	for _, ev := range events {
+		if !rs.processStreamEvent(context.Background(), ev, &result, &contentBuf, &reasoningBuf, emit) {
+			ok = false
+			break
+		}
+	}
+	return ProcessStreamEventsForTestResult{
+		Content:      contentBuf.String(),
+		Reasoning:    reasoningBuf.String(),
+		ReasoningSig: result.reasoningSig,
+		ToolCalls:    result.toolCalls,
+		Emitted:      emitted,
+		Continue:     ok,
+	}
 }
 
 func NewAgentWithLogBufForTest(w io.Writer) *Agent {
