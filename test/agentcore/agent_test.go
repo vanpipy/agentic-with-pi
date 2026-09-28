@@ -1785,3 +1785,91 @@ func TestLoopWithMsgsCounterResetsOnMultiToolCall(t *testing.T) {
 		}
 	}
 }
+
+func rollbackEvent() llm.StreamEvent {
+	return llm.StreamEvent{Rollback: true}
+}
+
+func TestProcessStreamEventRollbackResetsContentBuf(t *testing.T) {
+	events := []llm.StreamEvent{
+		textDeltaChunk("hello"),
+		rollbackEvent(),
+		textDeltaChunk("world"),
+	}
+	got := agentcore.ProcessStreamEventsForTest(events)
+	if got.Content != "world" {
+		t.Errorf("after Rollback, Content = %q, want %q (failed-attempt partial must be discarded)", got.Content, "world")
+	}
+	if !got.Continue {
+		t.Errorf("Rollback must return continue=true; got continue=false (stream would terminate)")
+	}
+}
+
+func TestProcessStreamEventRollbackResetsReasoningBuf(t *testing.T) {
+	reasoningChunk := llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Index: 0,
+		Delta: llm.Message{Reasoning: "thinking..."},
+	}}}}
+	events := []llm.StreamEvent{
+		reasoningChunk,
+		rollbackEvent(),
+		reasoningChunk,
+	}
+	got := agentcore.ProcessStreamEventsForTest(events)
+	if got.Reasoning != "thinking..." {
+		t.Errorf("after Rollback, Reasoning = %q, want %q (reasoning buffer must reset then accumulate only post-rollback)", got.Reasoning, "thinking...")
+	}
+}
+
+func TestProcessStreamEventRollbackResetsResultFields(t *testing.T) {
+	reasoningChunk := llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Index: 0,
+		Delta: llm.Message{Reasoning: "thinking"},
+	}}}}
+	sigChunk := llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		Index: 0,
+		Delta: llm.Message{ReasoningSig: "sig123"},
+	}}}}
+	events := []llm.StreamEvent{
+		reasoningChunk,
+		sigChunk,
+		toolUseStartChunk("call_1", "read"),
+		rollbackEvent(),
+		textDeltaChunk("after"),
+	}
+	got := agentcore.ProcessStreamEventsForTest(events)
+	if got.Content != "after" {
+		t.Errorf("after Rollback, Content = %q, want %q", got.Content, "after")
+	}
+	if got.Reasoning != "" {
+		t.Errorf("after Rollback, Reasoning = %q, want \"\"", got.Reasoning)
+	}
+	if got.ReasoningSig != "" {
+		t.Errorf("after Rollback, ReasoningSig = %q, want \"\"", got.ReasoningSig)
+	}
+	if got.ToolCalls != nil {
+		t.Errorf("after Rollback, ToolCalls = %+v, want nil", got.ToolCalls)
+	}
+}
+
+func TestProcessStreamEventNoRollbackAccumulates(t *testing.T) {
+	events := []llm.StreamEvent{
+		textDeltaChunk("foo"),
+		textDeltaChunk("bar"),
+		textDeltaChunk("baz"),
+	}
+	got := agentcore.ProcessStreamEventsForTest(events)
+	if got.Content != "foobarbaz" {
+		t.Errorf("without Rollback, Content = %q, want %q (control: accumulate behavior preserved)", got.Content, "foobarbaz")
+	}
+}
+
+func TestProcessStreamEventRollbackDoesNotEmit(t *testing.T) {
+	events := []llm.StreamEvent{
+		rollbackEvent(),
+	}
+	got := agentcore.ProcessStreamEventsForTest(events)
+	if len(got.Emitted) != 0 {
+		t.Errorf("Rollback event alone must emit 0 events, got %d: %+v", len(got.Emitted), got.Emitted)
+	}
+}
