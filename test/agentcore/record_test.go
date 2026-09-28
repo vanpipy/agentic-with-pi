@@ -15,12 +15,12 @@ import (
 
 type fakeCoreForRecord struct{}
 
-func (f *fakeCoreForRecord) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
-	ch := make(chan llm.StreamEvent, 3)
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+func (f *fakeCoreForRecord) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+	ch := make(chan llm.LegacyStreamEvent, 3)
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Delta: llm.Message{Content: "ok"},
 	}}}}
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		FinishReason: llm.FinishReasonStop,
 	}}}}
 	close(ch)

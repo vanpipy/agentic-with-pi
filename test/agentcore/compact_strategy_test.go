@@ -227,14 +227,14 @@ func TestReactiveActOnDelegatesToRunReactive(t *testing.T) {
 
 type strategyTestFakeCore struct{}
 
-func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
-	ch := make(chan llm.StreamEvent, 4)
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+	ch := make(chan llm.LegacyStreamEvent, 4)
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Index: 0,
 		Delta: llm.Message{Content: "summary text"},
 	}}}}
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{}}
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}}
 	close(ch)
 	return ch, nil
 }
@@ -458,18 +458,18 @@ type streamSummaryStubCore struct {
 	returnErr error
 }
 
-func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	if s.returnErr != nil {
 		return nil, s.returnErr
 	}
-	ch := make(chan llm.StreamEvent, len(s.chunks)+1)
+	ch := make(chan llm.LegacyStreamEvent, len(s.chunks)+1)
 	for _, c := range s.chunks {
-		ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+		ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 			Index: 0,
 			Delta: llm.Message{Content: c},
 		}}}}
 	}
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: s.finish}}}}
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: s.finish}}}}
 	close(ch)
 	return ch, nil
 }

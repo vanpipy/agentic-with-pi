@@ -12,15 +12,15 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
-func streamToolChunk(toolCalls []llm.ToolCall) llm.StreamEvent {
-	return llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+func streamToolChunk(toolCalls []llm.ToolCall) llm.LegacyStreamEvent {
+	return llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Index:        0,
 		Delta:        llm.Message{ToolCalls: toolCalls},
 		FinishReason: llm.FinishReasonToolUse,
 	}}}}
 }
 
-func streamPlaceholderToolCall(id, name, args string) llm.StreamEvent {
+func streamPlaceholderToolCall(id, name, args string) llm.LegacyStreamEvent {
 	return streamToolChunk([]llm.ToolCall{{
 		ID:       id,
 		Type:     "function",
@@ -28,7 +28,7 @@ func streamPlaceholderToolCall(id, name, args string) llm.StreamEvent {
 	}})
 }
 
-func streamDeltaToolCall(id, args string) llm.StreamEvent {
+func streamDeltaToolCall(id, args string) llm.LegacyStreamEvent {
 	return streamToolChunk([]llm.ToolCall{{
 		ID:       id,
 		Type:     "function",
@@ -37,7 +37,7 @@ func streamDeltaToolCall(id, args string) llm.StreamEvent {
 }
 
 func TestStreamMerge_T1_SingleCallMergesMultipleDeltasIntoOneEntry(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 		streamDeltaToolCall("c1", `{"com`),
 		streamDeltaToolCall("c1", `mand`),
@@ -59,7 +59,7 @@ func TestStreamMerge_T1_SingleCallMergesMultipleDeltasIntoOneEntry(t *testing.T)
 }
 
 func TestStreamMerge_T2_TwoParallelCallsKeepDistinctEntries(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("cA", "bash", ""),
 		streamPlaceholderToolCall("cB", "read", ""),
 		streamDeltaToolCall("cA", `{"com`),
@@ -89,7 +89,7 @@ func TestStreamMerge_T2_TwoParallelCallsKeepDistinctEntries(t *testing.T) {
 func TestStreamMerge_T3_ByteOrderPreservedAcrossDeltas(t *testing.T) {
 	a := `{"command":"echo hi","note":"first part "`
 	b := `,"trailing":"x"}`
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 		streamDeltaToolCall("c1", a),
 		streamDeltaToolCall("c1", b),
@@ -137,7 +137,7 @@ func newBashToolAgent(t *testing.T) *agentcore.Agent {
 }
 
 func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 	}
 	calls := agentcore.AccumulateStreamToolCallsForTest(events)
@@ -194,7 +194,7 @@ func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T
 }
 
 func TestStreamMerge_BackwardCompat_TestHelperPlaceholdersThenDelta(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		toolUseStartChunk("c1", "read"),
 		toolUseIDDeltaChunk("c1", "read", `{"path":"AGENTS.md"}`),
 	}
@@ -211,7 +211,7 @@ func TestStreamMerge_BackwardCompat_TestHelperPlaceholdersThenDelta(t *testing.T
 }
 
 func TestStreamMerge_DeltaWithoutIDAppendsToLastPlaceholder(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 		streamToolChunk([]llm.ToolCall{{
 			Type:     "function",
@@ -228,7 +228,7 @@ func TestStreamMerge_DeltaWithoutIDAppendsToLastPlaceholder(t *testing.T) {
 }
 
 func TestStreamMerge_NewIDAppendsAndKeepsPriorIntact(t *testing.T) {
-	events := []llm.StreamEvent{
+	events := []llm.LegacyStreamEvent{
 		streamPlaceholderToolCall("cA", "bash", ""),
 		streamDeltaToolCall("cA", `{"command":"ls"}`),
 		streamPlaceholderToolCall("cB", "read", ""),
@@ -291,14 +291,14 @@ func TestStreamMerge_ExecutesMergedCallEndToEnd(t *testing.T) {
 			return "ok:" + parsed.Command, nil
 		},
 	})
-	chunks := [][]llm.StreamEvent{
+	chunks := [][]llm.LegacyStreamEvent{
 		{
 			streamPlaceholderToolCall("c1", "bash", ""),
 			streamDeltaToolCall("c1", `{"command`),
 			streamDeltaToolCall("c1", `":"date`),
 			streamDeltaToolCall("c1", `"}`),
-			llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonToolUse}}}},
-			llm.StreamEvent{Chunk: &llm.StreamChunk{}},
+			llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonToolUse}}}},
+			llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}},
 		},
 		{
 			textDeltaChunk("done at " + "2026-09-25"),

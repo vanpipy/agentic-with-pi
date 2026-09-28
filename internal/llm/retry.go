@@ -36,10 +36,10 @@ func NewRetryCore(inner Core, config RetryConfig) *RetryCore {
 	return &RetryCore{inner: inner, config: config}
 }
 
-func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
 	backoff := r.config.InitialBackoff
 	var (
-		ch          <-chan StreamEvent
+		ch          <-chan LegacyStreamEvent
 		connErr     error
 		lastAttempt int
 	)
@@ -60,12 +60,12 @@ func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan St
 		}
 		backoff = r.growBackoff(backoff)
 	}
-	out := make(chan StreamEvent, 32)
+	out := make(chan LegacyStreamEvent, 32)
 	go r.forwardWithMidRetry(ctx, req, ch, out, lastAttempt, backoff)
 	return out, nil
 }
 
-func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan StreamEvent, out chan<- StreamEvent, attempt int, backoff time.Duration) {
+func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan LegacyStreamEvent, out chan<- LegacyStreamEvent, attempt int, backoff time.Duration) {
 	defer close(out)
 	for {
 		emittedCount := 0
@@ -75,14 +75,14 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 			if ev.Err != nil {
 				if emittedCount > 1 && IsRetryable(ev.Err) && attempt < r.config.MaxRetries {
 					select {
-					case out <- StreamEvent{Rollback: true}:
+					case out <- LegacyStreamEvent{Rollback: true}:
 					case <-ctx.Done():
 						return
 					}
 					midRetry = true
 				} else {
 					select {
-					case out <- StreamEvent{Err: ev.Err}:
+					case out <- LegacyStreamEvent{Err: ev.Err}:
 					case <-ctx.Done():
 					}
 					return
@@ -113,7 +113,7 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 		ch, connErr = r.inner.StreamChat(ctx, req)
 		if connErr != nil {
 			select {
-			case out <- StreamEvent{Err: connErr}:
+			case out <- LegacyStreamEvent{Err: connErr}:
 			case <-ctx.Done():
 			}
 			return

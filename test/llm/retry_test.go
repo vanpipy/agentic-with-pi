@@ -10,22 +10,22 @@ import (
 )
 
 type scriptedCore struct {
-	scripts     [][]llm.StreamEvent
+	scripts     [][]llm.LegacyStreamEvent
 	connectErrs []error
 	calls       int
 }
 
-func (s *scriptedCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (s *scriptedCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	idx := s.calls
 	s.calls++
 	if idx < len(s.connectErrs) && s.connectErrs[idx] != nil {
 		return nil, s.connectErrs[idx]
 	}
-	var events []llm.StreamEvent
+	var events []llm.LegacyStreamEvent
 	if idx < len(s.scripts) {
 		events = s.scripts[idx]
 	}
-	ch := make(chan llm.StreamEvent, len(events)+1)
+	ch := make(chan llm.LegacyStreamEvent, len(events)+1)
 	for _, ev := range events {
 		ch <- ev
 	}
@@ -33,8 +33,8 @@ func (s *scriptedCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 	return ch, nil
 }
 
-func collectStreamEvents(events <-chan llm.StreamEvent) []llm.StreamEvent {
-	var out []llm.StreamEvent
+func collectStreamEvents(events <-chan llm.LegacyStreamEvent) []llm.LegacyStreamEvent {
+	var out []llm.LegacyStreamEvent
 	for ev := range events {
 		out = append(out, ev)
 	}
@@ -43,7 +43,7 @@ func collectStreamEvents(events <-chan llm.StreamEvent) []llm.StreamEvent {
 
 func TestRetryCoreMidStreamErrorRollbackAndRetry(t *testing.T) {
 	inner := &scriptedCore{
-		scripts: [][]llm.StreamEvent{
+		scripts: [][]llm.LegacyStreamEvent{
 			{
 				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "part1"}}}}},
 				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "part2"}}}}},
@@ -110,7 +110,7 @@ func TestRetryCoreMidStreamErrorRollbackAndRetry(t *testing.T) {
 
 func TestRetryCoreMidStreamErrorNoRetryIfNotRetryable(t *testing.T) {
 	inner := &scriptedCore{
-		scripts: [][]llm.StreamEvent{
+		scripts: [][]llm.LegacyStreamEvent{
 			{
 				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "x"}}}}},
 				{Err: &llm.Error{Kind: llm.ErrorKindAuth, Code: 401, Message: "bad key"}},
@@ -145,9 +145,9 @@ func TestRetryCoreMidStreamErrorNoRetryIfNotRetryable(t *testing.T) {
 
 func TestRetryCoreMidStreamErrorMaxRetriesExceeded(t *testing.T) {
 	transient := &llm.Error{Kind: llm.ErrorKindNetwork, Code: 0, Message: "tls bad record"}
-	scripts := make([][]llm.StreamEvent, 4)
+	scripts := make([][]llm.LegacyStreamEvent, 4)
 	for i := range scripts {
-		scripts[i] = []llm.StreamEvent{
+		scripts[i] = []llm.LegacyStreamEvent{
 			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "p"}}}}},
 			{Err: transient},
 		}
@@ -165,7 +165,7 @@ func TestRetryCoreMidStreamErrorMaxRetriesExceeded(t *testing.T) {
 	}
 
 	var rollbackCount int
-	var lastEvent llm.StreamEvent
+	var lastEvent llm.LegacyStreamEvent
 	for _, ev := range got {
 		if ev.Rollback {
 			rollbackCount++
@@ -206,7 +206,7 @@ func TestRetryCoreCleanStreamNoRollback(t *testing.T) {
 
 func TestRetryCoreRollbackOnlyAfterFirstEvent(t *testing.T) {
 	inner := &scriptedCore{
-		scripts: [][]llm.StreamEvent{
+		scripts: [][]llm.LegacyStreamEvent{
 			{
 				{Err: &llm.Error{Kind: llm.ErrorKindServer, Code: 503, Message: "boom on first event"}},
 			},
@@ -232,16 +232,16 @@ func TestRetryCoreRollbackOnlyAfterFirstEvent(t *testing.T) {
 
 type recordingCore struct {
 	streamCalls  int
-	streamEvents []llm.StreamEvent
+	streamEvents []llm.LegacyStreamEvent
 	streamErr    error
 }
 
-func (r *recordingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (r *recordingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	r.streamCalls++
 	if r.streamErr != nil {
 		return nil, r.streamErr
 	}
-	ch := make(chan llm.StreamEvent, len(r.streamEvents))
+	ch := make(chan llm.LegacyStreamEvent, len(r.streamEvents))
 	for _, ev := range r.streamEvents {
 		ch <- ev
 	}
@@ -259,15 +259,15 @@ func fastConfig(maxRetries int) llm.RetryConfig {
 	}
 }
 
-func okStream(content string) []llm.StreamEvent {
-	return []llm.StreamEvent{
+func okStream(content string) []llm.LegacyStreamEvent {
+	return []llm.LegacyStreamEvent{
 		{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 			Delta: llm.Message{Content: content},
 		}}}},
 	}
 }
 
-func drain(events <-chan llm.StreamEvent) (firstErr error, totalContent string) {
+func drain(events <-chan llm.LegacyStreamEvent) (firstErr error, totalContent string) {
 	for ev := range events {
 		if ev.Err != nil && firstErr == nil {
 			firstErr = ev.Err
@@ -299,7 +299,7 @@ func TestRetryStreamForwardsEvents(t *testing.T) {
 
 func TestRetryStreamPropagatesStreamError(t *testing.T) {
 	inner := &recordingCore{
-		streamEvents: []llm.StreamEvent{
+		streamEvents: []llm.LegacyStreamEvent{
 			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "x"}}}}},
 			{Err: errors.New("mid-stream fail")},
 		},
@@ -343,7 +343,7 @@ type flakyCore struct {
 	calls    int
 }
 
-func (f *flakyCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (f *flakyCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	f.calls++
 	if f.calls <= f.failures {
 		return nil, &llm.Error{
@@ -355,9 +355,9 @@ func (f *flakyCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-cha
 	return okStreamChannel("recovered"), nil
 }
 
-func okStreamChannel(content string) <-chan llm.StreamEvent {
-	ch := make(chan llm.StreamEvent, 1)
-	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+func okStreamChannel(content string) <-chan llm.LegacyStreamEvent {
+	ch := make(chan llm.LegacyStreamEvent, 1)
+	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Delta: llm.Message{Content: content},
 	}}}}
 	close(ch)
@@ -412,7 +412,7 @@ type timingCore struct {
 	calls []time.Time
 }
 
-func (t *timingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (t *timingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	t.calls = append(t.calls, time.Now())
 	return okStreamChannel("ok"), nil
 }
@@ -478,7 +478,7 @@ type probeCore struct {
 	calls int
 }
 
-func (p *probeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+func (p *probeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
 	p.calls++
 	return okStreamChannel("ok"), nil
 }
