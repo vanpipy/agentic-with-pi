@@ -3,11 +3,19 @@ package agentcore
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
+
+const emptyPostToolContinuationPrompt = "Please continue."
+
+// MaxEmptyPostToolContinuations mirrors jcode's MAX_EMPTY_POST_TOOL_CONTINUATION_ATTEMPTS
+// = 5. The counter is per turn-loop, so genuinely-finished agents still exit promptly.
+// Without this, a single empty response can silently end a long-running task.
+const MaxEmptyPostToolContinuations = 5
 
 func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 	ch := make(chan Event, 32)
@@ -60,9 +68,10 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 
 func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
 	emit := a.bindEmit(ch)
+	emptyContinuations := 0
 	for turn := 0; turn < a.SafetyNet; turn++ {
 		var ok bool
-		msgs, ok = a.runOneTurn(ctx, msgs, ch, emit, turn)
+		msgs, ok = a.runOneTurn(ctx, msgs, ch, emit, turn, &emptyContinuations)
 		if !ok {
 			return
 		}
@@ -70,7 +79,7 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 	a.emitSafetyNetHalt(ctx, ch)
 }
 
-func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int) ([]llm.Message, bool) {
+func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, emptyContinuations *int) ([]llm.Message, bool) {
 	msgs = a.initTurnState(msgs, turn)
 	a.logTurnStartLocked(msgs)
 	var ok bool
@@ -78,10 +87,37 @@ func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Ev
 		return msgs, false
 	}
 	var step Step
-	if step, ok = a.runStrategyStep(ctx, msgs, emit); !ok || step.Kind == StepFinal {
+	step, ok = a.runStrategyStep(ctx, msgs, emit)
+	if !ok {
+		return msgs, false
+	}
+	emptyPostTool := step.Kind == StepFinal && step.Content == "" && (lastMessageRoleIsTool(msgs) || *emptyContinuations > 0)
+	if emptyPostTool {
+		return a.handleEmptyPostToolContinuation(ctx, msgs, ch, step, emptyContinuations)
+	}
+	*emptyContinuations = 0
+	if step.Kind == StepFinal {
 		return msgs, false
 	}
 	return a.appendAssistantToolsAndAbort(ctx, msgs, ch, step)
+}
+
+func (a *Agent) handleEmptyPostToolContinuation(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step, emptyContinuations *int) ([]llm.Message, bool) {
+	if *emptyContinuations >= MaxEmptyPostToolContinuations {
+		slog.Warn("agent: safety-net reached for empty post-tool continuations", "max", MaxEmptyPostToolContinuations)
+		return msgs, false
+	}
+	*emptyContinuations++
+	slog.Debug("agent: empty post-tool continuation attempt", "attempt", *emptyContinuations, "max", MaxEmptyPostToolContinuations)
+	msgs = append(msgs, llm.Message{Role: "assistant", Content: "", Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig})
+	msgs = append(msgs, llm.Message{Role: "user", Content: emptyPostToolContinuationPrompt})
+	a.currentMsgs = msgs
+	a.emit(ctx, ch, Event{Category: EventUserMessage, Content: emptyPostToolContinuationPrompt})
+	return msgs, true
+}
+
+func lastMessageRoleIsTool(msgs []llm.Message) bool {
+	return len(msgs) > 0 && msgs[len(msgs)-1].Role == "tool"
 }
 
 func (a *Agent) initTurnState(msgs []llm.Message, turn int) []llm.Message {
@@ -231,8 +267,13 @@ func preSizedHistory(a *Agent, userMsg string) []llm.Message {
 }
 
 func AgentRunOneTurnForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int) ([]llm.Message, bool) {
+	counter := 0
+	return AgentRunOneTurnWithEmptyContinuationCounterForTest(a, ctx, msgs, ch, turn, &counter)
+}
+
+func AgentRunOneTurnWithEmptyContinuationCounterForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int, counter *int) ([]llm.Message, bool) {
 	emit := a.bindEmit(ch)
-	return a.runOneTurn(ctx, msgs, ch, emit, turn)
+	return a.runOneTurn(ctx, msgs, ch, emit, turn, counter)
 }
 
 func AgentLoopWithMsgsForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event) {
