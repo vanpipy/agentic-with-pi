@@ -251,3 +251,37 @@ func SerializeForSummary(msgs []llm.Message) string {
 	}
 	return b.String()
 }
+
+func BuildSummaryRequest(toSummarize []llm.Message, previousSummary, modelID string) *llm.ChatRequest {
+	systemContent := SummarizationPrompt
+	if previousSummary != "" {
+		systemContent = UpdateSummarizationPrompt
+	}
+	userContent := SerializeForSummary(toSummarize)
+	if previousSummary != "" {
+		userContent = "<previous-summary>\n" + previousSummary + "\n</previous-summary>\n\n" + userContent
+	}
+	return &llm.ChatRequest{
+		Model: modelID,
+		Messages: []llm.Message{
+			{Role: "system", Content: systemContent},
+			{Role: "user", Content: userContent},
+		},
+	}
+}
+
+func AppendFileOpsSummary(systemMsg llm.Message, toSummarize, recent []llm.Message, summaryText string) (out []llm.Message, finalSummaryText string) {
+	fileOps := ExtractFileOps(toSummarize)
+	readOnly, modified := ComputeFileLists(fileOps)
+	finalSummaryText = summaryText + FormatFileOperations(readOnly, modified)
+
+	summaryMsg := llm.Message{
+		Role:    "assistant",
+		Content: "Previous conversation summary:\n" + finalSummaryText,
+	}
+
+	out = make([]llm.Message, 0, 2+len(recent))
+	out = append(out, systemMsg, summaryMsg)
+	out = append(out, recent...)
+	return out, finalSummaryText
+}

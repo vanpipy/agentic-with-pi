@@ -269,3 +269,208 @@ func TestStrategyActOnCtxCancelled(t *testing.T) {
 		t.Fatalf("proactive should not error on cancelled ctx for stub: %v", err)
 	}
 }
+
+func TestBuildSummaryRequestUsesFreshPromptWhenNoPrev(t *testing.T) {
+	msgs := []llm.Message{{Role: "user", Content: "u1"}}
+	req := agentcore.BuildSummaryRequest(msgs, "", "model-x")
+	if req == nil {
+		t.Fatal("BuildSummaryRequest returned nil")
+	}
+	if req.Model != "model-x" {
+		t.Errorf("Model = %q, want model-x", req.Model)
+	}
+	if len(req.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2 (system + user)", len(req.Messages))
+	}
+	if req.Messages[0].Role != "system" {
+		t.Errorf("Messages[0].Role = %q, want system", req.Messages[0].Role)
+	}
+	if req.Messages[0].Content != agentcore.SummarizationPrompt {
+		t.Errorf("first system prompt should be SummarizationPrompt when no previous summary")
+	}
+	if req.Messages[1].Role != "user" {
+		t.Errorf("Messages[1].Role = %q, want user", req.Messages[1].Role)
+	}
+	if !strings.Contains(req.Messages[1].Content, "u1") {
+		t.Errorf("user message content missing serialized data: %q", req.Messages[1].Content)
+	}
+}
+
+func TestBuildSummaryRequestUsesUpdatePromptWhenPrev(t *testing.T) {
+	msgs := []llm.Message{{Role: "user", Content: "u1"}}
+	prev := "previous summary content"
+	req := agentcore.BuildSummaryRequest(msgs, prev, "model-x")
+	if req.Messages[0].Content != agentcore.UpdateSummarizationPrompt {
+		t.Errorf("expected UpdateSummarizationPrompt when previous summary is non-empty")
+	}
+	if !strings.Contains(req.Messages[1].Content, prev) {
+		t.Errorf("user content missing previous-summary block: %q", req.Messages[1].Content)
+	}
+	if !strings.Contains(req.Messages[1].Content, "<previous-summary>") {
+		t.Errorf("user content missing <previous-summary> wrapper")
+	}
+	if !strings.Contains(req.Messages[1].Content, "u1") {
+		t.Errorf("user content missing serialized messages: %q", req.Messages[1].Content)
+	}
+}
+
+func TestStreamSummaryReturnsSummaryOnSuccess(t *testing.T) {
+	core := streamSummaryStubCore{chunks: []string{"hello ", "world"}, finish: llm.FinishReasonStop}
+	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
+	got, err := agentcore.StreamSummary(context.Background(), core, req)
+	if err != nil {
+		t.Fatalf("StreamSummary err: %v", err)
+	}
+	if got != "hello world" {
+		t.Errorf("StreamSummary = %q, want %q", got, "hello world")
+	}
+}
+
+func TestStreamSummaryReturnsErrorOnLLMFailure(t *testing.T) {
+	core := streamSummaryStubCore{returnErr: errFakeLLM}
+	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
+	_, err := agentcore.StreamSummary(context.Background(), core, req)
+	if err == nil {
+		t.Fatal("expected error from failing core, got nil")
+	}
+	if !strings.Contains(err.Error(), "summarize") {
+		t.Errorf("error should mention summarize: %v", err)
+	}
+}
+
+func TestStreamSummaryReturnsErrorOnLengthFinish(t *testing.T) {
+	core := streamSummaryStubCore{chunks: []string{"partial"}, finish: llm.FinishReasonLength}
+	req := &llm.ChatRequest{Model: "m", Messages: []llm.Message{{Role: "user", Content: "x"}}}
+	_, err := agentcore.StreamSummary(context.Background(), core, req)
+	if err == nil {
+		t.Fatal("expected error on FinishReasonLength, got nil")
+	}
+	if !strings.Contains(err.Error(), "token cap") {
+		t.Errorf("error should mention token cap on length: %v", err)
+	}
+}
+
+func TestAppendFileOpsSummaryAppendsFromExtractedOps(t *testing.T) {
+	systemMsg := llm.Message{Role: "system", Content: "sys"}
+	recent := []llm.Message{{Role: "user", Content: "u2"}}
+	toSummarize := []llm.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1", ToolCalls: []llm.ToolCall{{
+			ID:   "t1",
+			Type: "function",
+			Function: llm.FunctionCall{
+				Name:      "write",
+				Arguments: `{"path":"foo.go"}`,
+			},
+		}}},
+		{Role: "assistant", Content: "a2", ToolCalls: []llm.ToolCall{{
+			ID:   "t2",
+			Type: "function",
+			Function: llm.FunctionCall{
+				Name:      "read",
+				Arguments: `{"path":"bar.go"}`,
+			},
+		}}},
+	}
+	out, finalText := agentcore.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
+	if !strings.Contains(finalText, "<modified-files>") {
+		t.Errorf("finalText missing <modified-files>: %q", finalText)
+	}
+	if !strings.Contains(finalText, "foo.go") {
+		t.Errorf("finalText missing modified file foo.go: %q", finalText)
+	}
+	if !strings.Contains(finalText, "<read-files>") {
+		t.Errorf("finalText missing <read-files>: %q", finalText)
+	}
+	if !strings.Contains(finalText, "bar.go") {
+		t.Errorf("finalText missing read file bar.go: %q", finalText)
+	}
+	if !strings.Contains(finalText, "summary body") {
+		t.Errorf("finalText missing summary body: %q", finalText)
+	}
+	if len(out) != 3 {
+		t.Fatalf("len(out) = %d, want 3 (system + summary + 1 recent)", len(out))
+	}
+	if out[0].Role != "system" || out[0].Content != "sys" {
+		t.Errorf("out[0] = %+v, want system msg", out[0])
+	}
+	if out[1].Role != "assistant" {
+		t.Errorf("out[1].Role = %q, want assistant", out[1].Role)
+	}
+	if !strings.HasPrefix(out[1].Content, "Previous conversation summary:\n") {
+		t.Errorf("out[1] missing summary prefix: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "summary body") {
+		t.Errorf("out[1] missing summary body: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "<modified-files>") {
+		t.Errorf("out[1] missing <modified-files> tag: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "foo.go") {
+		t.Errorf("out[1] missing modified file foo.go: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "<read-files>") {
+		t.Errorf("out[1] missing <read-files> tag: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "bar.go") {
+		t.Errorf("out[1] missing read file bar.go: %q", out[1].Content)
+	}
+	if out[2].Role != "user" || out[2].Content != "u2" {
+		t.Errorf("out[2] = %+v, want recent msg", out[2])
+	}
+}
+
+func TestAppendFileOpsSummaryNoFileOpsHasNoSections(t *testing.T) {
+	systemMsg := llm.Message{Role: "system", Content: "sys"}
+	recent := []llm.Message{{Role: "user", Content: "u2"}}
+	toSummarize := []llm.Message{
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+	}
+	out, finalText := agentcore.AppendFileOpsSummary(systemMsg, toSummarize, recent, "summary body")
+	if len(out) != 3 {
+		t.Fatalf("len(out) = %d, want 3", len(out))
+	}
+	if strings.Contains(out[1].Content, "<modified-files>") {
+		t.Errorf("out[1] should not contain <modified-files> when no tools: %q", out[1].Content)
+	}
+	if strings.Contains(out[1].Content, "<read-files>") {
+		t.Errorf("out[1] should not contain <read-files> when no tools: %q", out[1].Content)
+	}
+	if !strings.Contains(out[1].Content, "summary body") {
+		t.Errorf("out[1] missing summary body: %q", out[1].Content)
+	}
+	if strings.Contains(finalText, "<modified-files>") {
+		t.Errorf("finalText should not contain <modified-files> when no tools: %q", finalText)
+	}
+	if strings.Contains(finalText, "<read-files>") {
+		t.Errorf("finalText should not contain <read-files> when no tools: %q", finalText)
+	}
+	if finalText != "summary body" {
+		t.Errorf("finalText = %q, want summary body (no file ops to append)", finalText)
+	}
+}
+
+type streamSummaryStubCore struct {
+	chunks    []string
+	finish    llm.FinishReason
+	returnErr error
+}
+
+func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	if s.returnErr != nil {
+		return nil, s.returnErr
+	}
+	ch := make(chan llm.StreamEvent, len(s.chunks)+1)
+	for _, c := range s.chunks {
+		ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
+			Index: 0,
+			Delta: llm.Message{Content: c},
+		}}}}
+	}
+	ch <- llm.StreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: s.finish}}}}
+	close(ch)
+	return ch, nil
+}
+
+var errFakeLLM = &llm.Error{Kind: llm.ErrorKindServer, Message: "stub failure"}

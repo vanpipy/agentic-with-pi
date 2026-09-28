@@ -74,50 +74,65 @@ func runReactiveCompaction(ctx context.Context, a *Agent, msgs []llm.Message, pr
 	if len(msgs) == 0 {
 		return msgs, nil
 	}
-
 	compactionStart := time.Now()
-
-	systemMsg := msgs[0]
-	restMsgs := msgs[1:]
-	cutPoint := FindCutPoint(restMsgs, a.compaction.KeepRecentTurns)
-
-	if cutPoint >= len(restMsgs) {
+	systemMsg, toSummarize, recent, ok := splitReactiveInputs(msgs, a.compaction.KeepRecentTurns)
+	if !ok {
 		slog.Debug("agent: nothing to compact")
 		return msgs, nil
 	}
-
-	toSummarize := restMsgs[:cutPoint]
-	recent := restMsgs[cutPoint:]
-
 	slog.Debug("agent: compacting", "messages_to_summarize", len(toSummarize), "messages_to_keep", len(recent))
-
-	systemContent := SummarizationPrompt
-	if previousSummary != "" {
-		systemContent = UpdateSummarizationPrompt
+	summaryText, err := StreamSummary(ctx, a.core, BuildSummaryRequest(toSummarize, previousSummary, a.Model.ID))
+	if err != nil {
+		return nil, err
 	}
+	out, summaryText := AppendFileOpsSummary(systemMsg, toSummarize, recent, summaryText)
+	writeReactiveCompactionLog(a, compactionStart, msgs, out, summaryText)
+	return out, nil
+}
 
-	userContent := SerializeForSummary(toSummarize)
-	if previousSummary != "" {
-		userContent = "<previous-summary>\n" + previousSummary + "\n</previous-summary>\n\n" + userContent
+func splitReactiveInputs(msgs []llm.Message, keepRecentTurns int) (systemMsg llm.Message, toSummarize, recent []llm.Message, ok bool) {
+	if len(msgs) == 0 {
+		return llm.Message{}, nil, nil, false
 	}
-
-	summaryReq := &llm.ChatRequest{
-		Model: a.Model.ID,
-		Messages: []llm.Message{
-			{Role: "system", Content: systemContent},
-			{Role: "user", Content: userContent},
-		},
+	systemMsg = msgs[0]
+	restMsgs := msgs[1:]
+	cutPoint := FindCutPoint(restMsgs, keepRecentTurns)
+	if cutPoint >= len(restMsgs) {
+		return systemMsg, nil, nil, false
 	}
+	return systemMsg, restMsgs[:cutPoint], restMsgs[cutPoint:], true
+}
 
+func writeReactiveCompactionLog(a *Agent, compactionStart time.Time, beforeMsgs, afterMsgs []llm.Message, summaryText string) {
+	a.logMu.Lock()
+	defer a.logMu.Unlock()
+	tokensBefore := estimateTotalTokens(beforeMsgs)
+	tokensAfter := estimateTotalTokens(afterMsgs)
+	a.writeCompactionLocked(Event{
+		Category:        EventCompaction,
+		Summary:         summaryText,
+		TokensBefore:    tokensBefore,
+		TokensAfter:     tokensAfter,
+		FirstKeptSeq:    a.logSeq,
+		CompactionModel: a.Model.ID,
+	})
+	durMS := time.Since(compactionStart).Milliseconds()
+	a.writeCompactionV3Locked("reactive_threshold", "", string(StrategyReactive), tokensBefore, tokensAfter, a.logSeq, a.Model.ID, durMS)
+	if a.logBuf != nil {
+		_ = a.logBuf.Flush()
+	}
+}
+
+func StreamSummary(ctx context.Context, core llm.Core, req *llm.ChatRequest) (string, error) {
 	var summaryText strings.Builder
 	var finishReason llm.FinishReason
-	events, err := a.core.StreamChat(ctx, summaryReq)
+	events, err := core.StreamChat(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("summarize: %w", err)
+		return "", fmt.Errorf("summarize: %w", err)
 	}
 	for ev := range events {
 		if ev.Err != nil {
-			return nil, fmt.Errorf("summarize stream: %w", ev.Err)
+			return "", fmt.Errorf("summarize stream: %w", ev.Err)
 		}
 		if ev.Chunk == nil {
 			continue
@@ -129,40 +144,8 @@ func runReactiveCompaction(ctx context.Context, a *Agent, msgs []llm.Message, pr
 			}
 		}
 	}
-
 	if finishReason == llm.FinishReasonLength {
-		return nil, fmt.Errorf("summarize: generation hit the token cap and the summary is incomplete")
+		return "", fmt.Errorf("summarize: generation hit the token cap and the summary is incomplete")
 	}
-
-	fileOps := ExtractFileOps(toSummarize)
-	readOnly, modified := ComputeFileLists(fileOps)
-	summaryText.WriteString(FormatFileOperations(readOnly, modified))
-
-	summaryMsg := llm.Message{
-		Role:    "assistant",
-		Content: "Previous conversation summary:\n" + summaryText.String(),
-	}
-
-	out := make([]llm.Message, 0, 2+len(recent))
-	out = append(out, systemMsg, summaryMsg)
-	out = append(out, recent...)
-
-	a.logMu.Lock()
-	defer a.logMu.Unlock()
-	tokensBefore := estimateTotalTokens(msgs)
-	tokensAfter := estimateTotalTokens(out)
-	a.writeCompactionLocked(Event{
-		Category:        EventCompaction,
-		Summary:         summaryText.String(),
-		TokensBefore:    tokensBefore,
-		TokensAfter:     tokensAfter,
-		FirstKeptSeq:    a.logSeq,
-		CompactionModel: a.Model.ID,
-	})
-	durMS := time.Since(compactionStart).Milliseconds()
-	a.writeCompactionV3Locked("reactive_threshold", "", string(StrategyReactive), tokensBefore, tokensAfter, a.logSeq, a.Model.ID, durMS)
-	if a.logBuf != nil {
-		_ = a.logBuf.Flush()
-	}
-	return out, nil
+	return summaryText.String(), nil
 }
