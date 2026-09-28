@@ -9,6 +9,227 @@ import (
 	"github.com/vanpiyp/awp/internal/llm"
 )
 
+type scriptedCore struct {
+	scripts     [][]llm.StreamEvent
+	connectErrs []error
+	calls       int
+}
+
+func (s *scriptedCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	idx := s.calls
+	s.calls++
+	if idx < len(s.connectErrs) && s.connectErrs[idx] != nil {
+		return nil, s.connectErrs[idx]
+	}
+	var events []llm.StreamEvent
+	if idx < len(s.scripts) {
+		events = s.scripts[idx]
+	}
+	ch := make(chan llm.StreamEvent, len(events)+1)
+	for _, ev := range events {
+		ch <- ev
+	}
+	close(ch)
+	return ch, nil
+}
+
+func collectStreamEvents(events <-chan llm.StreamEvent) []llm.StreamEvent {
+	var out []llm.StreamEvent
+	for ev := range events {
+		out = append(out, ev)
+	}
+	return out
+}
+
+func TestRetryCoreMidStreamErrorRollbackAndRetry(t *testing.T) {
+	inner := &scriptedCore{
+		scripts: [][]llm.StreamEvent{
+			{
+				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "part1"}}}}},
+				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "part2"}}}}},
+				{Err: &llm.Error{Kind: llm.ErrorKindServer, Code: 503, Message: "transport blip"}},
+			},
+			{
+				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "fresh1"}}}}},
+				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "fresh2"}}}}},
+			},
+		},
+	}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err != nil {
+		t.Fatalf("unexpected connect err: %v", err)
+	}
+
+	got := collectStreamEvents(events)
+	if inner.calls != 2 {
+		t.Errorf("calls = %d, want 2", inner.calls)
+	}
+
+	var rollbackCount int
+	var firstErr error
+	var chunkCount int
+	for _, ev := range got {
+		if ev.Rollback {
+			rollbackCount++
+		}
+		if ev.Err != nil && firstErr == nil {
+			firstErr = ev.Err
+		}
+		if ev.Chunk != nil {
+			chunkCount++
+		}
+	}
+	if firstErr != nil {
+		t.Fatalf("unexpected terminal err: %v", firstErr)
+	}
+	if rollbackCount != 1 {
+		t.Errorf("rollbackCount = %d, want 1 (one rollback per mid-stream retry)", rollbackCount)
+	}
+	if chunkCount != 4 {
+		t.Errorf("chunkCount = %d, want 4 (2 partial + 2 fresh)", chunkCount)
+	}
+
+	rollbackIdx := -1
+	for i, ev := range got {
+		if ev.Rollback {
+			rollbackIdx = i
+			break
+		}
+	}
+	if rollbackIdx < 0 {
+		t.Fatal("no Rollback event observed")
+	}
+	if got[0].Rollback {
+		t.Errorf("first event must never be Rollback; got %+v", got[0])
+	}
+	if rollbackIdx == 0 {
+		t.Errorf("Rollback must come after at least one Chunk; got index 0")
+	}
+}
+
+func TestRetryCoreMidStreamErrorNoRetryIfNotRetryable(t *testing.T) {
+	inner := &scriptedCore{
+		scripts: [][]llm.StreamEvent{
+			{
+				{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "x"}}}}},
+				{Err: &llm.Error{Kind: llm.ErrorKindAuth, Code: 401, Message: "bad key"}},
+			},
+		},
+	}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, _ := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+
+	got := collectStreamEvents(events)
+	if inner.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry for non-retryable mid-stream err)", inner.calls)
+	}
+
+	var rollbackCount int
+	var firstErr error
+	for _, ev := range got {
+		if ev.Rollback {
+			rollbackCount++
+		}
+		if ev.Err != nil && firstErr == nil {
+			firstErr = ev.Err
+		}
+	}
+	if rollbackCount != 0 {
+		t.Errorf("rollbackCount = %d, want 0 (non-retryable must not emit Rollback)", rollbackCount)
+	}
+	if firstErr == nil {
+		t.Fatal("expected Err to surface")
+	}
+}
+
+func TestRetryCoreMidStreamErrorMaxRetriesExceeded(t *testing.T) {
+	transient := &llm.Error{Kind: llm.ErrorKindNetwork, Code: 0, Message: "tls bad record"}
+	scripts := make([][]llm.StreamEvent, 4)
+	for i := range scripts {
+		scripts[i] = []llm.StreamEvent{
+			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "p"}}}}},
+			{Err: transient},
+		}
+	}
+	inner := &scriptedCore{scripts: scripts}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err != nil {
+		t.Fatalf("unexpected connect err: %v", err)
+	}
+
+	got := collectStreamEvents(events)
+	if inner.calls != 4 {
+		t.Errorf("calls = %d, want 4 (1 initial + 3 retries)", inner.calls)
+	}
+
+	var rollbackCount int
+	var lastEvent llm.StreamEvent
+	for _, ev := range got {
+		if ev.Rollback {
+			rollbackCount++
+		}
+		lastEvent = ev
+	}
+	if rollbackCount != 3 {
+		t.Errorf("rollbackCount = %d, want 3 (one per failed attempt except final)", rollbackCount)
+	}
+	if lastEvent.Err == nil {
+		t.Errorf("last event must be Err; got %+v", lastEvent)
+	}
+	if lastEvent.Rollback {
+		t.Errorf("last event must not be Rollback (final attempt gave up); got %+v", lastEvent)
+	}
+}
+
+func TestRetryCoreCleanStreamNoRollback(t *testing.T) {
+	inner := &recordingCore{streamEvents: okStream("clean")}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rollbackCount int
+	for ev := range events {
+		if ev.Rollback {
+			rollbackCount++
+		}
+	}
+	if rollbackCount != 0 {
+		t.Errorf("rollbackCount = %d, want 0 on clean stream", rollbackCount)
+	}
+	if inner.streamCalls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry on clean stream)", inner.streamCalls)
+	}
+}
+
+func TestRetryCoreRollbackOnlyAfterFirstEvent(t *testing.T) {
+	inner := &scriptedCore{
+		scripts: [][]llm.StreamEvent{
+			{
+				{Err: &llm.Error{Kind: llm.ErrorKindServer, Code: 503, Message: "boom on first event"}},
+			},
+		},
+	}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+	events, _ := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+
+	got := collectStreamEvents(events)
+	if len(got) != 1 {
+		t.Fatalf("got %d events, want 1 (only the Err; first-event-err must not rollback)", len(got))
+	}
+	if got[0].Rollback {
+		t.Errorf("first event was Rollback; should be the Err (count=1, nothing to discard)")
+	}
+	if got[0].Err == nil {
+		t.Errorf("expected Err; got %+v", got[0])
+	}
+	if inner.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no rollback when nothing to discard)", inner.calls)
+	}
+}
+
 type recordingCore struct {
 	streamCalls  int
 	streamEvents []llm.StreamEvent

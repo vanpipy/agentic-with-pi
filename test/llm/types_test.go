@@ -71,6 +71,19 @@ func TestStreamEventZeroValue(t *testing.T) {
 	if ev.Chunk != nil || ev.Err != nil {
 		t.Errorf("zero StreamEvent = %+v, want both nil", ev)
 	}
+	if ev.Rollback {
+		t.Errorf("zero StreamEvent Rollback = true, want false")
+	}
+}
+
+func TestStreamEventRollbackField(t *testing.T) {
+	ev := llm.StreamEvent{Rollback: true}
+	if !ev.Rollback {
+		t.Errorf("Rollback = false, want true")
+	}
+	if ev.Chunk != nil || ev.Err != nil {
+		t.Errorf("Rollback-only StreamEvent = %+v, want Chunk/Err nil", ev)
+	}
 }
 
 func TestUsageTotalTokens(t *testing.T) {
