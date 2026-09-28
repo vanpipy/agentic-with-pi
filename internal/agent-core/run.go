@@ -80,6 +80,10 @@ func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- 
 }
 
 func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, emptyContinuations *int) ([]llm.Message, bool) {
+	if repaired, count := RepairMissingToolOutputs(msgs); count > 0 {
+		slog.Warn("agent: repaired missing tool outputs before next turn", "count", count)
+		msgs = repaired
+	}
 	msgs = a.initTurnState(msgs, turn)
 	a.logTurnStartLocked(msgs)
 	var ok bool
