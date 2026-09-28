@@ -1996,3 +1996,132 @@ done:
 		t.Errorf("expected EventUserMessage(\"Please continue.\") on wire so TUI can pattern-detect; got none")
 	}
 }
+
+func TestTurnStateFreshAllocation(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	if ts == nil {
+		t.Fatal("TurnStateForTest() returned nil")
+	}
+	if got := agentcore.TurnStateEmptyContinuationsForTest(ts); got != 0 {
+		t.Errorf("fresh emptyContinuations = %d, want 0", got)
+	}
+	if got := agentcore.TurnStateConsecutiveSingleToolTurnsForTest(ts); got != 0 {
+		t.Errorf("fresh consecutiveSingleToolTurns = %d, want 0", got)
+	}
+	if got := agentcore.TurnStateConsecutiveFailedToolTurnsForTest(ts); got != 0 {
+		t.Errorf("fresh consecutiveFailedToolTurns = %d, want 0", got)
+	}
+	if got := agentcore.TurnStatePreflightStreakMapForTest(ts); got == nil {
+		t.Errorf("fresh preflightFailureStreak map is nil, want non-nil empty map")
+	} else if len(got) != 0 {
+		t.Errorf("fresh preflightFailureStreak len = %d, want 0", len(got))
+	}
+}
+
+func TestCheckPreflightStreakEmpty(t *testing.T) {
+	if err := agentcore.CheckPreflightStreakForTest(agentcore.TurnStateForTest()); err != nil {
+		t.Errorf("checkPreflightStreak on empty turnState returned %v, want nil", err)
+	}
+}
+
+func TestCheckPreflightStreakUnderThreshold(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	m := agentcore.TurnStatePreflightStreakMapForTest(ts)
+	under := agentcore.PreflightAbortThreshold - 1
+	m["bash"] = under
+	if err := agentcore.CheckPreflightStreakForTest(ts); err != nil {
+		t.Errorf("checkPreflightStreak at streak %d (below threshold %d) returned %v, want nil", under, agentcore.PreflightAbortThreshold, err)
+	}
+}
+
+func TestCheckPreflightStreakAtThreshold(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	m := agentcore.TurnStatePreflightStreakMapForTest(ts)
+	m["bash"] = agentcore.PreflightAbortThreshold
+	err := agentcore.CheckPreflightStreakForTest(ts)
+	if err == nil {
+		t.Fatalf("checkPreflightStreak at threshold %d returned nil, want error", agentcore.PreflightAbortThreshold)
+	}
+	if !strings.Contains(err.Error(), "bash") {
+		t.Errorf("error should name the failing tool 'bash': %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "invalid arguments") {
+		t.Errorf("error should mention 'invalid arguments': %q", err.Error())
+	}
+}
+
+func TestTurnStateEmptyContinuationsTrackable(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	if got := agentcore.TurnStateEmptyContinuationsForTest(ts); got != 0 {
+		t.Fatalf("baseline emptyContinuations = %d, want 0", got)
+	}
+	ts.IncrementEmptyContinuationsForTest()
+	if got := agentcore.TurnStateEmptyContinuationsForTest(ts); got != 1 {
+		t.Errorf("after one increment emptyContinuations = %d, want 1", got)
+	}
+	ts.IncrementEmptyContinuationsForTest()
+	if got := agentcore.TurnStateEmptyContinuationsForTest(ts); got != 2 {
+		t.Errorf("after two increments emptyContinuations = %d, want 2", got)
+	}
+}
+
+func TestTurnStateConsecutiveSingleToolTurnsTrackable(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	if got := agentcore.TurnStateConsecutiveSingleToolTurnsForTest(ts); got != 0 {
+		t.Fatalf("baseline consecutiveSingleToolTurns = %d, want 0", got)
+	}
+	ts.IncrementConsecutiveSingleToolTurnsForTest()
+	if got := agentcore.TurnStateConsecutiveSingleToolTurnsForTest(ts); got != 1 {
+		t.Errorf("after one increment consecutiveSingleToolTurns = %d, want 1", got)
+	}
+}
+
+func TestTurnStateConsecutiveFailedToolTurnsTrackable(t *testing.T) {
+	ts := agentcore.TurnStateForTest()
+	if got := agentcore.TurnStateConsecutiveFailedToolTurnsForTest(ts); got != 0 {
+		t.Fatalf("baseline consecutiveFailedToolTurns = %d, want 0", got)
+	}
+	ts.SetConsecutiveFailedToolTurnsForTest(5)
+	if got := agentcore.TurnStateConsecutiveFailedToolTurnsForTest(ts); got != 5 {
+		t.Errorf("after set consecutiveFailedToolTurns = %d, want 5", got)
+	}
+}
+
+func TestTurnStatePreflightStreakIsolatedPerLoop(t *testing.T) {
+	ts1 := agentcore.TurnStateForTest()
+	ts2 := agentcore.TurnStateForTest()
+	m1 := agentcore.TurnStatePreflightStreakMapForTest(ts1)
+	m1["alpha"] = 7
+	m1["beta"] = 3
+	m2 := agentcore.TurnStatePreflightStreakMapForTest(ts2)
+	if len(m2) != 0 {
+		t.Errorf("ts2 map has %d entries after ts1 mutations, want 0 (independent maps)", len(m2))
+	}
+	if got := agentcore.TurnStatePreflightStreakForTest(ts1, "alpha"); got != 7 {
+		t.Errorf("ts1[alpha] = %d, want 7", got)
+	}
+	if got := agentcore.TurnStatePreflightStreakForTest(ts2, "alpha"); got != 0 {
+		t.Errorf("ts2[alpha] = %d, want 0 (cross-loop isolation)", got)
+	}
+}
+
+func TestRunOneTurnUsesTurnStateEmptyContinuations(t *testing.T) {
+	emptyStop := []llm.StreamEvent{
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunks: emptyStop}
+	ag := newTestAgent(core, "m")
+	ch := make(chan agentcore.Event, 32)
+	msgs := []llm.Message{
+		{Role: "user", Content: "go"},
+		{Role: "assistant", Content: "", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "noop", Arguments: `{}`}}}},
+		{Role: "tool", ToolCallID: "c1", Content: "ok"},
+	}
+
+	_, _, _, ts := agentcore.AgentRunOneTurnWithTurnStateForTest(ag, context.Background(), msgs, ch, 0)
+
+	if got := agentcore.TurnStateEmptyContinuationsForTest(ts); got != 1 {
+		t.Errorf("after empty-post-tool continuation: emptyContinuations = %d, want 1 (runOneTurn should increment via handleEmptyPostToolContinuation)", got)
+	}
+}

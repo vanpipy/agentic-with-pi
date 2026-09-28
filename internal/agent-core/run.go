@@ -72,32 +72,31 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 
 func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
 	emit := a.bindEmit(ch)
-	emptyContinuations := 0
-	consecutiveSingleToolTurns := 0
+	ts := a.ensureActiveTurnStateForTest()
 	for turn := 0; turn < a.SafetyNet; turn++ {
-		if consecutiveSingleToolTurns >= MaxSingleToolTurnsBeforeNudge && len(a.toolList) >= 2 {
-			slog.Debug("agent: batch nudge injected", "consecutive", consecutiveSingleToolTurns)
-			consecutiveSingleToolTurns = 0
+		if ts.consecutiveSingleToolTurns >= MaxSingleToolTurnsBeforeNudge && len(a.toolList) >= 2 {
+			slog.Debug("agent: batch nudge injected", "consecutive", ts.consecutiveSingleToolTurns)
+			ts.consecutiveSingleToolTurns = 0
 			msgs = append(msgs, llm.Message{Role: "user", Content: systemReminderBatchNudge})
 			a.emit(ctx, ch, Event{Category: EventUserMessage, Content: systemReminderBatchNudge})
 			a.emit(ctx, ch, Event{Category: EventSafetyNudge, Content: "BATCH_NUDGE: consider batching independent tool calls"})
 		}
 		var ok bool
 		var step Step
-		msgs, ok, step = a.runOneTurn(ctx, msgs, ch, emit, turn, &emptyContinuations)
+		msgs, ok, step = a.runOneTurn(ctx, msgs, ch, emit, turn, ts)
 		if !ok {
 			return
 		}
 		if step.Kind == StepContinue && len(step.ToolCalls) == 1 {
-			consecutiveSingleToolTurns++
+			ts.consecutiveSingleToolTurns++
 		} else {
-			consecutiveSingleToolTurns = 0
+			ts.consecutiveSingleToolTurns = 0
 		}
 	}
 	a.emitSafetyNetHalt(ctx, ch)
 }
 
-func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, emptyContinuations *int) ([]llm.Message, bool, Step) {
+func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Event, emit func(context.Context, Event) bool, turn int, ts *turnState) ([]llm.Message, bool, Step) {
 	if repaired, count := RepairMissingToolOutputs(msgs); count > 0 {
 		slog.Warn("agent: repaired missing tool outputs before next turn", "count", count)
 		msgs = repaired
@@ -114,27 +113,27 @@ func (a *Agent) runOneTurn(ctx context.Context, msgs []llm.Message, ch chan<- Ev
 	if !ok {
 		return msgs, false, step
 	}
-	emptyPostTool := step.Kind == StepFinal && step.Content == "" && (lastMessageRoleIsTool(msgs) || *emptyContinuations > 0)
+	emptyPostTool := step.Kind == StepFinal && step.Content == "" && (lastMessageRoleIsTool(msgs) || ts.emptyContinuations > 0)
 	if emptyPostTool {
-		msgs, ok = a.handleEmptyPostToolContinuation(ctx, msgs, ch, step, emptyContinuations)
+		msgs, ok = a.handleEmptyPostToolContinuation(ctx, msgs, ch, step, ts)
 		return msgs, ok, step
 	}
-	*emptyContinuations = 0
+	ts.emptyContinuations = 0
 	if step.Kind == StepFinal {
 		return msgs, false, step
 	}
-	msgs, ok = a.appendAssistantToolsAndAbort(ctx, msgs, ch, step)
+	msgs, ok = a.appendAssistantToolsAndAbort(ctx, msgs, ch, step, ts)
 	return msgs, ok, step
 }
 
-func (a *Agent) handleEmptyPostToolContinuation(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step, emptyContinuations *int) ([]llm.Message, bool) {
-	if *emptyContinuations >= MaxEmptyPostToolContinuations {
+func (a *Agent) handleEmptyPostToolContinuation(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step, ts *turnState) ([]llm.Message, bool) {
+	if ts.emptyContinuations >= MaxEmptyPostToolContinuations {
 		slog.Warn("agent: safety-net reached for empty post-tool continuations", "max", MaxEmptyPostToolContinuations)
 		return msgs, false
 	}
-	*emptyContinuations++
-	slog.Debug("agent: empty post-tool continuation attempt", "attempt", *emptyContinuations, "max", MaxEmptyPostToolContinuations)
-	a.emit(ctx, ch, Event{Category: EventSafetyEmptyContinue, Content: fmt.Sprintf("EMPTY_CONTINUE: attempt %d/%d", *emptyContinuations, MaxEmptyPostToolContinuations)})
+	ts.emptyContinuations++
+	slog.Debug("agent: empty post-tool continuation attempt", "attempt", ts.emptyContinuations, "max", MaxEmptyPostToolContinuations)
+	a.emit(ctx, ch, Event{Category: EventSafetyEmptyContinue, Content: fmt.Sprintf("EMPTY_CONTINUE: attempt %d/%d", ts.emptyContinuations, MaxEmptyPostToolContinuations)})
 	msgs = append(msgs, llm.Message{Role: "assistant", Content: "", Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig})
 	msgs = append(msgs, llm.Message{Role: "user", Content: emptyPostToolContinuationPrompt})
 	a.currentMsgs = msgs
@@ -193,7 +192,7 @@ func (a *Agent) runStrategyStep(ctx context.Context, msgs []llm.Message, emit fu
 	return step, true
 }
 
-func (a *Agent) appendAssistantToolsAndAbort(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step) ([]llm.Message, bool) {
+func (a *Agent) appendAssistantToolsAndAbort(ctx context.Context, msgs []llm.Message, ch chan<- Event, step Step, ts *turnState) ([]llm.Message, bool) {
 	const maxToolsPerTurn = 6
 	toolCalls := step.ToolCalls
 	if len(toolCalls) > maxToolsPerTurn {
@@ -206,7 +205,7 @@ func (a *Agent) appendAssistantToolsAndAbort(ctx context.Context, msgs []llm.Mes
 	msgs = append(msgs, llm.Message{Role: "assistant", Content: step.Content, Reasoning: step.Reasoning, ReasoningSig: step.ReasoningSig, ToolCalls: toolCalls})
 	a.currentMsgs = msgs
 	var ok bool
-	msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch)
+	msgs, ok = a.executeTools(ctx, toolCalls, msgs, ch, ts)
 	if !ok {
 		return msgs, false
 	}
@@ -298,15 +297,26 @@ func AgentRunOneTurnForTest(a *Agent, ctx context.Context, msgs []llm.Message, c
 }
 
 func AgentRunOneTurnWithEmptyContinuationCounterForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int, counter *int) ([]llm.Message, bool) {
+	ts := a.ensureActiveTurnStateForTest()
 	emit := a.bindEmit(ch)
-	msgsOut, ok, _ := a.runOneTurn(ctx, msgs, ch, emit, turn, counter)
+	msgsOut, ok, _ := a.runOneTurn(ctx, msgs, ch, emit, turn, ts)
+	if counter != nil {
+		*counter = ts.emptyContinuations
+	}
 	return msgsOut, ok
 }
 
 func AgentRunOneTurnWithStepForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int) ([]llm.Message, bool, Step) {
-	counter := 0
+	ts := a.ensureActiveTurnStateForTest()
 	emit := a.bindEmit(ch)
-	return a.runOneTurn(ctx, msgs, ch, emit, turn, &counter)
+	return a.runOneTurn(ctx, msgs, ch, emit, turn, ts)
+}
+
+func AgentRunOneTurnWithTurnStateForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event, turn int) ([]llm.Message, bool, Step, *turnState) {
+	ts := a.ensureActiveTurnStateForTest()
+	emit := a.bindEmit(ch)
+	msgsOut, ok, step := a.runOneTurn(ctx, msgs, ch, emit, turn, ts)
+	return msgsOut, ok, step, ts
 }
 
 func AgentLoopWithMsgsForTest(a *Agent, ctx context.Context, msgs []llm.Message, ch chan<- Event) {

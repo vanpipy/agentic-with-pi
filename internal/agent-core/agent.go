@@ -145,7 +145,14 @@ type Agent struct {
 	logFileOpened          bool
 	v3LogWriter            io.Writer
 	v3LogBuf               *bufio.Writer
-	preflightFailureStreak map[string]int
+	activeTurnState        *turnState
+}
+
+type turnState struct {
+	emptyContinuations         int
+	consecutiveSingleToolTurns int
+	consecutiveFailedToolTurns int
+	preflightFailureStreak     map[string]int
 }
 
 type Strategy interface {
@@ -408,7 +415,6 @@ func NewAgent(llmCore llm.Core) *Agent {
 		},
 		repeatedToolErrorLimit: 3,
 		ToolCacheSize:          20,
-		preflightFailureStreak: make(map[string]int),
 	}
 	a.toolResultCache = NewToolResultCache(a.ToolCacheSize)
 	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
@@ -474,21 +480,29 @@ func (a *Agent) WithCompaction(s CompactionSettings) *Agent {
 }
 
 func (a *Agent) ResetForRun() {
-	if a.preflightFailureStreak == nil {
-		a.preflightFailureStreak = make(map[string]int)
+	if a.activeTurnState == nil {
+		a.activeTurnState = &turnState{preflightFailureStreak: make(map[string]int)}
 		return
 	}
-	for k := range a.preflightFailureStreak {
-		delete(a.preflightFailureStreak, k)
+	for k := range a.activeTurnState.preflightFailureStreak {
+		delete(a.activeTurnState.preflightFailureStreak, k)
 	}
 }
 
 func (a *Agent) PreflightFailureStreakForTest() map[string]int {
-	return a.preflightFailureStreak
+	return a.ensureActiveTurnStateForTest().preflightFailureStreak
+}
+
+func (a *Agent) ensureActiveTurnStateForTest() *turnState {
+	if a.activeTurnState == nil {
+		a.activeTurnState = &turnState{preflightFailureStreak: make(map[string]int)}
+	}
+	return a.activeTurnState
 }
 
 func (a *Agent) ShouldAbort(msgs []llm.Message, lastFailedToolError string) error {
-	if err := a.checkPreflightStreak(); err != nil {
+	ts := a.ensureActiveTurnStateForTest()
+	if err := checkPreflightStreak(ts); err != nil {
 		return err
 	}
 	return a.strategy.ShouldAbort(msgs, lastFailedToolError)
@@ -762,4 +776,40 @@ func (a *Agent) emit(ctx context.Context, ch chan<- Event, ev Event) bool {
 
 func isCtxErr(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+func TurnStateForTest() *turnState {
+	return &turnState{preflightFailureStreak: make(map[string]int)}
+}
+
+func TurnStateEmptyContinuationsForTest(ts *turnState) int {
+	return ts.emptyContinuations
+}
+
+func TurnStateConsecutiveSingleToolTurnsForTest(ts *turnState) int {
+	return ts.consecutiveSingleToolTurns
+}
+
+func TurnStateConsecutiveFailedToolTurnsForTest(ts *turnState) int {
+	return ts.consecutiveFailedToolTurns
+}
+
+func TurnStatePreflightStreakForTest(ts *turnState, name string) int {
+	return ts.preflightFailureStreak[name]
+}
+
+func TurnStatePreflightStreakMapForTest(ts *turnState) map[string]int {
+	return ts.preflightFailureStreak
+}
+
+func (ts *turnState) IncrementEmptyContinuationsForTest() {
+	ts.emptyContinuations++
+}
+
+func (ts *turnState) IncrementConsecutiveSingleToolTurnsForTest() {
+	ts.consecutiveSingleToolTurns++
+}
+
+func (ts *turnState) SetConsecutiveFailedToolTurnsForTest(v int) {
+	ts.consecutiveFailedToolTurns = v
 }
