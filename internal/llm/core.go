@@ -39,6 +39,8 @@ type Provider interface {
 	ModelCapabilities(model string) ModelCapabilities
 
 	SupportsNativeCompact(model string) bool
+
+	CompleteSplit(systemPrompt string) ([]ContentBlock, error)
 }
 
 type core struct {

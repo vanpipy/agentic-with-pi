@@ -51,6 +51,9 @@ func (f *fakeProvider) ModelCapabilities(model string) llm.ModelCapabilities {
 	return llm.ModelCapabilities{ID: model}
 }
 func (f *fakeProvider) SupportsNativeCompact(model string) bool { return false }
+func (f *fakeProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
+	return nil, nil
+}
 
 type fakeProtocol struct {
 	streamItems []protocol.StreamItem
