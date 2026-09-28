@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 
 	agentclient "github.com/vanpiyp/awp/internal/agent-client"
 	"github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
@@ -40,6 +41,13 @@ func handleMessageEvent(c *chatModel, data []byte) {
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
+	text := firstTextPart(msg.Message.Content)
+	if msg.Message.Role == "user" {
+		if kind, body, ok := classifySafetyUserText(text); ok {
+			c.appendSafety(kind, body)
+			return
+		}
+	}
 	for _, part := range msg.Message.Content {
 		switch part.Type {
 		case "thinking":
@@ -77,6 +85,28 @@ func handleMessageEvent(c *chatModel, data []byte) {
 			}
 		}
 	}
+}
+
+func firstTextPart(parts []json_rpc.MessageContentPart) string {
+	for _, part := range parts {
+		if part.Type == "text" {
+			return part.Text
+		}
+	}
+	return ""
+}
+
+func classifySafetyUserText(text string) (kind string, body string, ok bool) {
+	if text == "" {
+		return "", "", false
+	}
+	if text == "Please continue." {
+		return "empty_continue", text, true
+	}
+	if strings.HasPrefix(text, "<system-reminder>") {
+		return "nudge", text, true
+	}
+	return "", "", false
 }
 
 func handleCustomEvent(c *chatModel, data []byte) {

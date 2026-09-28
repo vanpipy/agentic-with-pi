@@ -33,6 +33,9 @@ const (
 	EventInvalid
 	EventUserMessage
 	EventCompaction
+	EventSafetyNudge
+	EventSafetyRepair
+	EventSafetyEmptyContinue
 )
 
 type Event struct {
@@ -53,6 +56,8 @@ type Event struct {
 	TokensAfter     int
 	FirstKeptSeq    int
 	CompactionModel string
+
+	SafetyCount int
 }
 
 type Tool interface {
