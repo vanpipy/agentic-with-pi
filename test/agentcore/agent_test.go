@@ -1589,3 +1589,199 @@ func TestRunOneTurnCounterResetsOnNonEmptyContent(t *testing.T) {
 		t.Errorf("after turn 2 (non-empty finish): counter = %d, want 0 (reset on non-empty content)", counter)
 	}
 }
+
+func singleToolChunks(name, args string) []llm.StreamEvent {
+	return []llm.StreamEvent{
+		toolUseStartChunk("c", name),
+		toolUseIDDeltaChunk("c", name, args),
+		messageDeltaStopChunk("tool_use"),
+		messageStopChunk(),
+	}
+}
+
+func multiToolChunks(n int, name string) []llm.StreamEvent {
+	if n <= 0 {
+		return nil
+	}
+	chunks := make([]llm.StreamEvent, 0, n+2)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("c%d", i+1)
+		if i == 0 {
+			chunks = append(chunks, toolUseStartChunk(id, name))
+		} else {
+			chunks = append(chunks, toolUseIDDeltaChunk(id, name, `{"intent":"x"}`))
+		}
+	}
+	chunks = append(chunks, messageDeltaStopChunk("tool_use"), messageStopChunk())
+	return chunks
+}
+
+const systemReminderBatchNudgeMarker = "<system-reminder>"
+
+func requestContainsNudge(req llm.ChatRequest) bool {
+	for _, m := range req.Messages {
+		if m.Role == "user" && strings.Contains(m.Content, systemReminderBatchNudgeMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+func requestHasNudgeAsLastMessage(req llm.ChatRequest) bool {
+	if len(req.Messages) == 0 {
+		return false
+	}
+	last := req.Messages[len(req.Messages)-1]
+	return last.Role == "user" && strings.Contains(last.Content, systemReminderBatchNudgeMarker)
+}
+
+func TestLoopWithMsgsNoNudgeForMultiToolCalls(t *testing.T) {
+	multiTool := multiToolChunks(3, "noop")
+	finalAnswer := []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		multiTool, multiTool, multiTool, finalAnswer,
+	}}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(8)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 256)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+	for range ch {
+	}
+
+	for i, req := range core.requests {
+		if requestContainsNudge(req) {
+			t.Errorf("request[%d] contained unexpected system-reminder nudge; multi-tool turns must never trigger nudge", i)
+		}
+	}
+}
+
+func TestLoopWithMsgsNoNudgeForZeroToolCalls(t *testing.T) {
+	finalAnswer := []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunks: finalAnswer}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(5)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 64)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+	for range ch {
+	}
+
+	if core.streamCalls != 1 {
+		t.Errorf("stream calls = %d, want 1 (final answer terminates loop on first turn)", core.streamCalls)
+	}
+	if len(core.requests) == 0 {
+		t.Fatal("expected at least 1 request")
+	}
+	if requestContainsNudge(core.requests[0]) {
+		t.Errorf("expected no nudge on final-answer path; got msgs=%+v", core.requests[0].Messages)
+	}
+}
+
+func TestLoopWithMsgsNudgeAfterThreeSingleToolTurns(t *testing.T) {
+	chunksList := make([][]llm.StreamEvent, 5)
+	for i := range chunksList {
+		chunksList[i] = singleToolChunks("noop", fmt.Sprintf(`{"intent":"x","t":%d}`, i))
+	}
+	core := &fakeCore{streamChunksList: chunksList}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(5)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 256)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+	for range ch {
+	}
+
+	if core.streamCalls != 5 {
+		t.Fatalf("stream calls = %d, want 5 (SafetyNet=5)", core.streamCalls)
+	}
+	if len(core.requests) < 4 {
+		t.Fatalf("requests = %d, want >= 4", len(core.requests))
+	}
+	if !requestContainsNudge(core.requests[3]) {
+		t.Errorf("expected batch nudge injected before turn 3 (0-indexed); got request[3].Messages = %+v", core.requests[3].Messages)
+	}
+	for i := 0; i < 3; i++ {
+		if requestContainsNudge(core.requests[i]) {
+			t.Errorf("request[%d] contained unexpected nudge; first nudge must wait until turn 3", i)
+		}
+	}
+}
+
+func TestLoopWithMsgsNudgeSingleShot(t *testing.T) {
+	chunksList := make([][]llm.StreamEvent, 6)
+	for i := range chunksList {
+		chunksList[i] = singleToolChunks("noop", fmt.Sprintf(`{"intent":"x","t":%d}`, i))
+	}
+	core := &fakeCore{streamChunksList: chunksList}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(6)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 256)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+	for range ch {
+	}
+
+	var injectedAt []int
+	for i, req := range core.requests {
+		if requestHasNudgeAsLastMessage(req) {
+			injectedAt = append(injectedAt, i)
+		}
+	}
+	if len(injectedAt) != 1 {
+		t.Errorf("nudge injection count = %d (turns=%v), want exactly 1 (counter resets after nudge; next streak at turn 6 doesn't trigger because SafetyNet=6 halts at turn 5)", len(injectedAt), injectedAt)
+	}
+	if len(injectedAt) >= 1 && injectedAt[0] != 3 {
+		t.Errorf("first nudge injection at turn %d, want 3", injectedAt[0])
+	}
+}
+
+func TestLoopWithMsgsCounterResetsOnMultiToolCall(t *testing.T) {
+	singleTurn0 := singleToolChunks("noop", `{"intent":"x","t":0}`)
+	singleTurn3 := singleToolChunks("noop", `{"intent":"x","t":3}`)
+	multiTool := multiToolChunks(3, "noop")
+	finalAnswer := []llm.StreamEvent{
+		textDeltaChunk("done"),
+		messageDeltaStopChunk("end_turn"),
+		messageStopChunk(),
+	}
+	core := &fakeCore{streamChunksList: [][]llm.StreamEvent{
+		singleTurn0, singleTurn0, multiTool, singleTurn3, finalAnswer,
+	}}
+	ag := newTestAgent(core, "test-model").WithSafetyNet(8)
+	ag.WithTool(agentcore.ToolFunc{N: "noop", Fn: func(_ context.Context, _ string) (string, error) { return "ok", nil }})
+	ag.WithTool(agentcore.ToolFunc{N: "noop2", Fn: func(_ context.Context, _ string) (string, error) { return "ok2", nil }})
+
+	ch := make(chan agentcore.Event, 256)
+	msgs := []llm.Message{{Role: "user", Content: "go"}}
+	agentcore.AgentLoopWithMsgsForTest(ag, context.Background(), msgs, ch)
+	close(ch)
+	for range ch {
+	}
+
+	for i, req := range core.requests {
+		if requestContainsNudge(req) {
+			t.Errorf("request[%d] contained unexpected nudge; multi-tool turn at turn 2 must reset the counter before threshold", i)
+		}
+	}
+}
