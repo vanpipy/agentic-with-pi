@@ -236,7 +236,8 @@ struct makes the type-switch enforcement automatic. `StatusOther` is a
 non-matched value that callers may check explicitly (typically for
 forward-compat).
 
-Constants (single source of truth):
+Constants (single source of truth, calibrated against `~/Project/jcode`
+defaults on 2026-09-29 via grep):
 
 ```go
 const (
@@ -247,16 +248,15 @@ const (
     MaxSwarmMembers               = 1000
     MaxTaskLabelChars             = 48
     MaxSharedContextKeyBytes      = 4 * 1024
-    MaxSharedContextKeysPerSwarm = 100
+    MaxSharedContextKeysPerSwarm  = 100
     MaxChannelNameBytes           = 64
     MaxChannelMessageBodyBytes    = 32 * 1024
-    SpawnAdmissionPerSwarm        = 16
-    HeartbeatIntervalSeconds      = 30
-    StaleAfterSeconds             = 300
-    IdleReapAfterSeconds          = 1800
-    AwaitTickIntervalMs           = 500
+    SpawnAdmissionPerSwarm        = 32           // matches jcode `swarm_max_concurrent_agents` default
+    HeartbeatIntervalSeconds      = 10           // matches jcode DEFAULT_SWARM_TASK_HEARTBEAT_SECS
+    StaleAfterSeconds             = 45           // matches jcode DEFAULT_SWARM_TASK_STALE_AFTER_SECS
     AwaitDefaultTimeoutSeconds    = 3600
-    PersistBatchIntervalMs        = 5000
+    // No AwaitTickIntervalMs — see §5.3 and §7.5: awp's await is event-driven
+    // (channel subscribe to swarm_event broadcast), not polling.
 )
 ```
 
@@ -282,7 +282,7 @@ internal/agent-server/swarm/
   persist.go               # Persister (append-only JSONL + snapshot)
   restore.go               # Restore struct + LoadAll on startup
   handle.go                # Method -> handler dispatch table
-  runtime.go               # RuntimeOpts (admission, heartbeat, reap, tick)
+  runtime.go               # RuntimeOpts (admission, heartbeat, reap)
   errors.go                # ErrNoPlan, ErrUnknownNode, ErrNotOwner,
                            # ErrCycleDetected, ErrUnknownDependency, ...
 ```
@@ -363,15 +363,27 @@ internal/agent-server/swarm/
                            v
                        background watcher goroutine
                            |
-                           | every AwaitTickIntervalMs (500ms):
-                           |   snapshot await target states
-                           |   evaluate: all/any reached target_status
+                           | subscribes to state.eventBroadcaster's
+                           | per-member channel. On every swarm_event
+                           | that touches an awaited member's status,
+                           | the watcher re-evaluates immediately.
                            |
-                           +--matched--> deliver EventCommAwaitMembersResponse
-                           |              (and soft-interrupt if wake=true)
-                           +--timeout---> deliver with success=false
-                           +--cancel----> drop silently
+                           +--matched target_status--> deliver EventCommAwaitMembersResponse
+                           |                           (and soft-interrupt if wake=true)
+                           +--deadline reached--------> deliver with completed=false
+                           +--ctx cancel--------------> drop silently
 ```
+
+This is **event-driven**, not polling. jcode's watcher (`comm_await.rs`)
+subscribes to `swarm_event_tx` via `tokio::sync::broadcast` and only
+falls back to `tokio::time::sleep_until(deadline)` for the timeout.
+Awp mirrors that pattern with `chan<- ServerEvent` registered in
+`state.memberSinks[sessionID]`. The watcher's `select` waits on
+`<-sink` vs `<-time.After(deadline)`. No fixed tick interval; on
+status change the watcher reacts within microseconds.
+
+Polling would burn CPU and add up to one tick interval of latency
+to every member-status event; mirror that.
 
 ---
 
@@ -586,23 +598,28 @@ operation that emits the response event later.
 
 ### 7.5 Background watchers
 
-Four long-running goroutines per server (not per swarm):
+Three long-running goroutines per server (not per swarm):
 
-1. **Heartbeat watcher**: every `HeartbeatIntervalSeconds` (30s), scan
-   members in `running`. For each member where
-   `now - lastHeartbeat > StaleAfterSeconds`, set `StatusRunningStale`.
+1. **Heartbeat watcher**: every `HeartbeatIntervalSeconds` (10s, matches
+   jcode `DEFAULT_SWARM_TASK_HEARTBEAT_SECS`), scan members in
+   `running`. For each member where `now - lastHeartbeat >
+   StaleAfterSeconds` (45s, matches jcode), set `StatusRunningStale`.
 2. **Idle reap watcher**: every 60s, scan headless members in
-   `ready` / `running_stale` where `now - lastActivity >
-   IdleReapSeconds`. For each, fire `Server.Stop(member.SessionID,
-   force=true)`.
-3. **Await tick**: per Awaiter, every 500ms evaluate target states. See §5.3.
-4. **Persist batcher**: every `PersistBatchIntervalMs` (5s), flush the
-   pending append queue to disk. On crash, last 5s of mutations may be
-   lost; that's the documented SLA. Crash replay restores state from
-   disk + the optional `.swarm-plans/<swarm_id>.jsonl` snapshot file.
+   `ready` / `running_stale` where `now - lastActivity > IdleReap`.
+   For each, fire `Server.Stop(member.SessionID, force=true)`.
+3. **Persist batcher**: every 5s, flush the pending append queue to disk.
+   On crash, last 5s of mutations may be lost; that's the documented
+   SLA. Crash replay restores state from disk + the optional
+   `.swarm-plans/<swarm_id>.jsonl` snapshot file.
 
-All four goroutines take `ctx.Done()` and a `sync.WaitGroup` so
-`Server.Shutdown` drains them.
+**No await tick goroutine**. Await watchers (§5.3) are spawned per
+request and react to events via the broadcaster's per-member sink.
+They exit on their own when matched / timed out / cancelled.
+
+All three goroutines take `ctx.Done()` and a `sync.WaitGroup` so
+`Server.Shutdown` drains them. Per-await watcher goroutines are
+spawned by the dispatch handler, scoped to the request's context,
+and drain themselves when matched / timed out / cancelled.
 
 ---
 
@@ -672,8 +689,8 @@ swarm_id is loaded; subsequent entries are append-only.
    (default 0 — they'll re-attach on next connect).
 3. Load `~/.local/share/awp/.swarm-plans/<swarm_id>.jsonl` for each
    swarm_id seen in step 1.
-4. Resume background watchers (heartbeat / idle reap / persist batcher /
-   per-awaiter ticks). Awaiters that timed out during the downtime are
+4. Resume background watchers (heartbeat / idle reap / persist batcher).
+   Await watchers that timed out during the downtime are
    delivered immediately with `success: false` and a `crashed` server
    reason.
 
@@ -911,9 +928,10 @@ not tolerate.
 | D7 | CLI in MVP | **yes** | Dogfooding requires CLI. |
 | D8 | TUI in MVP | **no (deferred to S9)** | S2-S8 is reachable entirely through CLI + SDK; TUI is a UX improvement, not a feature gate. |
 | D9 | `// stable:` markers | **yes on `internal/agent-protocol/swarm/`** | Crosses the UDS boundary; clients depend on field names + method names. Server-side internals are not stable. |
-| D10 | Spawn admission | **16 per swarm** | Mirrors jcode. Configurable via RuntimeOpts. |
-| D11 | Channel ACL | **none in MVP** | Phase 2 may add `ChannelInfo.AclMembers`. |
-| D12 | Shared Context quota | **4 KB per key, 100 keys per swarm** | Hard cap; further requests return `swarm.too_large`. |
+| D10 | Spawn admission | **32 per swarm (default)** | Mirrors jcode `agents.swarm_max_concurrent_agents` default (`crates/jcode-base/src/config/default_file.rs:421`). Enforced via per-swarm `sync.Mutex` + member count check. Configurable via env `AWP_SWARM_MAX_CONCURRENT_AGENTS`. |
+| D11 | Await dispatch | **event-driven broadcast, not polling** | Verified 2026-09-29 against `comm_await.rs:223-280`: jcode uses `tokio::sync::broadcast` subscription on `swarm_event_tx` with `sleep_until(deadline)` only for the timeout. Awp mirrors with `chan<- ServerEvent` per-member sink + `select { case <-sink: ... case <-time.After(deadline): ... }`. |
+| D12 | Channel ACL | **none in MVP** | Phase 2 may add `ChannelInfo.AclMembers`. |
+| D13 | Shared Context quota | **4 KB per key, 100 keys per swarm** | Hard cap; further requests return `swarm.too_large`. |
 
 D1, D5, D9 are the architecturally consequential ones; the rest mirror
 jcode defaults and can be amended without restructuring.
