@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -751,10 +752,10 @@ func TestAnthropicProviderConvertRequestHonorsRetryDropFlags(t *testing.T) {
 	// RetryDropOutputConfig on an always-on model: keeps thinking,
 	// drops output_config.
 	req := &llm.ChatRequest{
-		Model:                "claude-opus-5-5",
-		ReasoningEffort:      "medium",
+		Model:                 "claude-opus-5-5",
+		ReasoningEffort:       "medium",
 		RetryDropOutputConfig: true,
-		Messages:             []llm.Message{{Role: "user", Content: "hi"}},
+		Messages:              []llm.Message{{Role: "user", Content: "hi"}},
 	}
 	body, err := p.ConvertRequest(req)
 	if err != nil {
@@ -802,3 +803,112 @@ type providerError struct {
 }
 
 func (e *providerError) Error() string { return e.msg }
+
+func TestAnthropicProviderRecoverRequest_EmptyAndNonClaudeModels(t *testing.T) {
+	p := newAnthropicProvider()
+	cases := []struct {
+		name  string
+		model string
+		err   error
+	}{
+		{"empty_model", "", &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`}},
+		{"unknown_model", "future-claude-9-9", &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`}},
+		{"non_claude", "gpt-5", &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`}},
+		{"anthropic_version", "claude-9-9-future", &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"output_config is not supported"}}`}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &llm.ChatRequest{Model: tc.model}
+			if !p.RecoverRequest(req, tc.err) {
+				t.Fatalf("RecoverRequest(%q) = false, want true (reasoning-not-supported error should always trigger recovery)", tc.model)
+			}
+			if req.RetryDropOutputConfig {
+				t.Errorf("RetryDropOutputConfig = true, want false (non-always-on must drop both)")
+			}
+			if !req.RetryDropThinking {
+				t.Errorf("RetryDropThinking = false, want true")
+			}
+		})
+	}
+}
+
+func TestAnthropicProviderConvertRequest_RetryDropOutputConfigOnManualOnlyModel(t *testing.T) {
+	// Opus-4-5 uses manual thinking (caps.ManualThinking=true,
+	// caps.AdaptiveThinking=false). When self-heal sets
+	// RetryDropOutputConfig on a manual-only model, the switch
+	// branch must not silently inject an adaptive envelope. The
+	// original error targeted output_config; the model never used
+	// it, so the safest retry shape is: no thinking, no
+	// output_config.
+	p := newAnthropicProvider()
+	req := &llm.ChatRequest{
+		Model:                 "claude-opus-4-5",
+		ReasoningEffort:       "high",
+		RetryDropOutputConfig: true,
+		Messages:              []llm.Message{{Role: "user", Content: "hi"}},
+	}
+	body, err := p.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["output_config"] != nil {
+		t.Errorf("output_config present, want omitted: %s", string(body))
+	}
+	if got["thinking"] != nil {
+		t.Errorf("thinking present, want omitted (manual-only model has no adaptive envelope to keep): %s", string(body))
+	}
+}
+
+func TestAnthropicProviderConvertRequest_RetryDropThinkingOnUnknownModel(t *testing.T) {
+	// Future Claude model the classifier has never seen. Self-heal
+	// set RetryDropThinking. The retry must produce a clean body
+	// with no thinking/output_config and no classifier-dependent
+	// logic.
+	p := newAnthropicProvider()
+	req := &llm.ChatRequest{
+		Model:             "claude-future-9-9",
+		ReasoningEffort:   "medium",
+		RetryDropThinking: true,
+		Messages:          []llm.Message{{Role: "user", Content: "hi"}},
+	}
+	body, err := p.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["thinking"] != nil {
+		t.Errorf("thinking present, want omitted: %s", string(body))
+	}
+	if got["output_config"] != nil {
+		t.Errorf("output_config present, want omitted: %s", string(body))
+	}
+}
+
+func TestMiniMaxProviderRecoverRequestAlwaysReturnsFalse(t *testing.T) {
+	// MiniMax uses the legacy manual envelope with no output_config
+	// block. There is no recovery surface — every error must
+	// surface verbatim.
+	p := providers.NewMiniMaxProvider("tk")
+	cases := []error{
+		nil,
+		errors.New("network"),
+		&providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`},
+		&providerError{msg: "401 Unauthorized"},
+	}
+	for _, err := range cases {
+		req := &llm.ChatRequest{Model: "claude-opus-5-5"}
+		if p.RecoverRequest(req, err) {
+			t.Errorf("MiniMax.RecoverRequest(%v) = true, want false", err)
+		}
+		if req.RetryDropThinking || req.RetryDropOutputConfig {
+			t.Errorf("MiniMax.RecoverRequest mutated req for err %v", err)
+		}
+	}
+}

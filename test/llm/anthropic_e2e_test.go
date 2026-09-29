@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vanpiyp/awp/internal/llm"
 	"github.com/vanpiyp/awp/internal/llm/protocol"
@@ -652,5 +653,91 @@ func TestEndToEndAnthropicProviderSelfHealRetryDoesNotRetryOnUnrecoverableError(
 	}
 	if got := calls.Load(); got != 1 {
 		t.Errorf("calls = %d, want 1 (no retry on auth error)", got)
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetrySurfacesRetryError(t *testing.T) {
+	// Both calls return 400 (a recoverable shape). The second
+	// attempt fails too. StreamChat must surface the second
+	// error synchronously and not loop forever.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported on this model"}}`)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-4-7",
+		ReasoningEffort: "high",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		for range events {
+		}
+		t.Fatalf("StreamChat: expected sync error from second attempt, got nil")
+	}
+	if !strings.Contains(err.Error(), "400") || !strings.Contains(err.Error(), "not supported") {
+		t.Errorf("err = %v, want 400 with 'not supported' message", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("calls = %d, want 2 (first fail + retry fail, no infinite loop)", got)
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetryCancelledMidRetry(t *testing.T) {
+	// First call returns 400 (recoverable). Second call hangs.
+	// Caller cancels ctx while the retry is in flight. StreamChat
+	// must not hang; the cancellation must terminate the retry
+	// without producing channel events.
+	var calls atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`)
+			return
+		}
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		events, err := core.StreamChat(ctx, &llm.ChatRequest{
+			Model:    "claude-opus-4-7",
+			Messages: []llm.Message{{Role: "user", Content: "hi"}},
+		})
+		if err != nil {
+			done <- err
+			return
+		}
+		for ev := range events {
+			if ev.Err != nil {
+				done <- ev.Err
+				return
+			}
+		}
+		done <- nil
+	}()
+
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("StreamChat did not return after ctx cancel (calls=%d)", calls.Load())
 	}
 }
