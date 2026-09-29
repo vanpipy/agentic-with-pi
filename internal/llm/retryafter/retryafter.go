@@ -12,10 +12,7 @@ const MaxRetryAfter = 60 * time.Second
 
 var httpDateLayouts = [...]string{
 	time.RFC1123,
-	time.RFC1123Z,
 	time.RFC850,
-	time.RFC1123,
-	"Mon, 02 Jan 2006 15:04:05 GMT",
 }
 
 func ParseRetryAfter(value string, now time.Time) time.Duration {
