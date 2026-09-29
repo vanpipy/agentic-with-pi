@@ -83,7 +83,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyS
 	protoReq := &protocol.Request{
 		URL:     c.provider.BaseURL() + c.provider.Path(),
 		Method:  "POST",
-		Headers: c.provider.Headers(),
+		Headers: c.headersFor(req),
 		Body:    body,
 	}
 
@@ -238,6 +238,20 @@ func (c *core) validateRequest(req *ChatRequest) error {
 		}
 	}
 	return nil
+}
+
+func (c *core) headersFor(req *ChatRequest) map[string]string {
+	h := c.provider.Headers()
+	betas := c.provider.BetaHeaders(req.Model)
+	if len(betas) == 0 {
+		return h
+	}
+	merged := make(map[string]string, len(h)+1)
+	for k, v := range h {
+		merged[k] = v
+	}
+	merged["anthropic-beta"] = strings.Join(betas, ",")
+	return merged
 }
 
 type toolCallAccum struct {

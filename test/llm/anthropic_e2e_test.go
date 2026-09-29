@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +15,57 @@ import (
 	"github.com/vanpiyp/awp/internal/llm/protocol"
 	"github.com/vanpiyp/awp/internal/llm/providers"
 )
+
+// TestEndToEndAnthropicProviderBetaHeaderForOneMContext asserts the
+// anthropic-beta header is sent when the requested model has
+// BetaHeaders configured (claude-opus-4-6[1m]) and absent for
+// standard-context models. Follows the Sprint 4 audit Option 2
+// (BetaHeaders threading into the request path).
+func TestEndToEndAnthropicProviderBetaHeaderForOneMContext(t *testing.T) {
+	var observed sync.Map
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observed.Store(r.Header.Get("anthropic-beta"), true)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	for _, model := range []string{"claude-opus-4-6[1m]", "claude-opus-4-6"} {
+		events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+			Model:    model,
+			Messages: []llm.Message{{Role: "user", Content: "hi"}},
+		})
+		if err != nil {
+			t.Fatalf("StreamChat(%s): %v", model, err)
+		}
+		for range events {
+		}
+	}
+
+	seenBeta, seenNoBeta := false, false
+	observed.Range(func(k, _ any) bool {
+		if k == "context-1m-2025-08-07" {
+			seenBeta = true
+		} else if k == "" {
+			seenNoBeta = true
+		}
+		return true
+	})
+
+	if !seenBeta {
+		t.Errorf("expected at least one request with anthropic-beta: context-1m-2025-08-07, got none")
+	}
+	if !seenNoBeta {
+		t.Errorf("expected at least one request without anthropic-beta header, got none")
+	}
+}
 
 // TestEndToEndAnthropicProviderDrivingRealHTTPRest verifies the full
 // pipeline: AnthropicProvider -> protocol.HTTPRest -> httptest. The

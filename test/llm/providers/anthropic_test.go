@@ -99,10 +99,10 @@ func TestAnthropicProviderMaxOutputTokens(t *testing.T) {
 		model string
 		want  int
 	}{
-		{"claude-opus-4-6", 32000},
-		{"claude-opus-4-6[1m]", 32000},
-		{"claude-sonnet-4-6", 16000},
-		{"claude-haiku-4-5", 8192},
+		{"claude-opus-4-6", 128000},
+		{"claude-opus-4-6[1m]", 128000},
+		{"claude-sonnet-4-6", 64000},
+		{"claude-haiku-4-5", 64000},
 		{"unknown-model", 8192},
 	}
 	for _, tc := range cases {

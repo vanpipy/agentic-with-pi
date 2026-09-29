@@ -59,7 +59,7 @@ func (p *AnthropicProvider) Models() []llm.Model {
 var anthropicModelSpecs = map[string]modelSpec{
 	"claude-opus-4-6": {
 		contextWindow:      200000,
-		maxOutputTokens:    32000,
+		maxOutputTokens:    128000,
 		supportsCache:      true,
 		supportsCacheTTL1h: true,
 		supportsTools:      true,
@@ -69,7 +69,7 @@ var anthropicModelSpecs = map[string]modelSpec{
 	},
 	"claude-opus-4-6[1m]": {
 		contextWindow:      1000000,
-		maxOutputTokens:    32000,
+		maxOutputTokens:    128000,
 		supportsCache:      true,
 		supportsCacheTTL1h: true,
 		supportsTools:      true,
@@ -80,7 +80,7 @@ var anthropicModelSpecs = map[string]modelSpec{
 	},
 	"claude-sonnet-4-6": {
 		contextWindow:      200000,
-		maxOutputTokens:    16000,
+		maxOutputTokens:    64000,
 		supportsCache:      true,
 		supportsCacheTTL1h: true,
 		supportsTools:      true,
@@ -90,7 +90,7 @@ var anthropicModelSpecs = map[string]modelSpec{
 	},
 	"claude-haiku-4-5": {
 		contextWindow:      200000,
-		maxOutputTokens:    8192,
+		maxOutputTokens:    64000,
 		supportsCache:      true,
 		supportsCacheTTL1h: true,
 		supportsTools:      true,
