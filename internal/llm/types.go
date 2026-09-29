@@ -29,14 +29,15 @@ func (tc ToolChoice) Validate() error {
 }
 
 type ChatRequest struct {
-	Model         string      `json:"model"`
-	Messages      []Message   `json:"messages"`
-	Tools         []ToolDef   `json:"tools,omitzero"`
-	ToolChoice    *ToolChoice `json:"tool_choice,omitzero"`
-	StopSequences []string    `json:"stop_sequences,omitzero"`
-	Temperature   float32     `json:"temperature,omitzero"`
-	MaxTokens     int         `json:"max_tokens,omitzero"`
-	Stream        bool        `json:"stream"`
+	Model           string      `json:"model"`
+	Messages        []Message   `json:"messages"`
+	Tools           []ToolDef   `json:"tools,omitzero"`
+	ToolChoice      *ToolChoice `json:"tool_choice,omitzero"`
+	StopSequences   []string    `json:"stop_sequences,omitzero"`
+	Temperature     float32     `json:"temperature,omitzero"`
+	MaxTokens       int         `json:"max_tokens,omitzero"`
+	Stream          bool        `json:"stream"`
+	ReasoningEffort string      `json:"reasoning_effort,omitzero"`
 }
 
 type FinishReason int

@@ -159,8 +159,18 @@ func TestEndToEndAnthropicProviderDrivingRealHTTPRest(t *testing.T) {
 	if !ok {
 		t.Fatalf("body.thinking missing: %+v", body)
 	}
-	if thinking["type"] != "enabled" {
-		t.Errorf("body.thinking.type = %v", thinking["type"])
+	if thinking["type"] != "adaptive" {
+		t.Errorf("body.thinking.type = %v, want adaptive", thinking["type"])
+	}
+	if _, hasBudget := thinking["budget_tokens"]; hasBudget {
+		t.Errorf("adaptive thinking must omit budget_tokens, got %+v", thinking)
+	}
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("body.output_config missing: %+v", body)
+	}
+	if outputConfig["effort"] != "high" {
+		t.Errorf("body.output_config.effort = %v, want high (opus-4-6 default)", outputConfig["effort"])
 	}
 	systemBlocks := body["system"].([]any)
 	if len(systemBlocks) != 1 {

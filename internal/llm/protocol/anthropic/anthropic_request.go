@@ -17,6 +17,7 @@ type AnthropicRequest struct {
 	Tools         []AnthropicTool
 	ToolChoice    *AnthropicToolChoice
 	Thinking      *AnthropicThinking
+	OutputConfig  *AnthropicOutputConfig
 	MaxTokens     int
 	Temperature   *float64
 	Stream        bool
@@ -33,11 +34,23 @@ type AnthropicToolChoice struct {
 	Name string
 }
 
-// AnthropicThinking is the Anthropic extended-thinking budget envelope.
-// Type is always "enabled"; BudgetTokens caps the reasoning budget.
+// AnthropicThinking is the Anthropic extended-thinking envelope.
+// Type is "enabled" (with a BudgetTokens cap) or "adaptive" (the
+// model decides its own budget; BudgetTokens is unused and
+// omitted). Set Type to "adaptive" when the model accepts adaptive
+// thinking per anthropic_caps.ReasoningCaps(model).
 type AnthropicThinking struct {
 	Type         string
 	BudgetTokens int
+}
+
+// AnthropicOutputConfig carries the per-request `output_config` block
+// the modern Messages API uses to control reasoning effort. Effort is
+// one of "none", "low", "medium", "high", "xhigh", "max" — the
+// allowed values are filtered per-model by
+// anthropic_caps.AvailableReasoningEfforts(model).
+type AnthropicOutputConfig struct {
+	Effort string
 }
 
 type AnthropicMessage struct {
@@ -117,6 +130,7 @@ type wireBody struct {
 	Tools         []wireTool        `json:"tools,omitempty"`
 	ToolChoice    *wireToolChoice   `json:"tool_choice,omitempty"`
 	Thinking      *wireThinking     `json:"thinking,omitempty"`
+	OutputConfig  *wireOutputConfig `json:"output_config,omitempty"`
 	MaxTokens     int               `json:"max_tokens"`
 	Temperature   *float64          `json:"temperature,omitempty"`
 	Stream        bool              `json:"stream"`
@@ -130,8 +144,14 @@ type wireToolChoice struct {
 }
 
 type wireThinking struct {
-	Type         string `json:"type"`
-	BudgetTokens int    `json:"budget_tokens"`
+	Type string `json:"type"`
+	// BudgetTokens is only set when Type is "enabled". Adaptive
+	// thinking omits it (the model decides its own budget).
+	BudgetTokens int `json:"budget_tokens,omitempty"`
+}
+
+type wireOutputConfig struct {
+	Effort string `json:"effort"`
 }
 
 func cacheControlToWire(cc *llm.CacheControl) *wireCacheControl {
@@ -281,7 +301,17 @@ func BuildAnthropicRequest(req AnthropicRequest) (json.RawMessage, error) {
 		body.ToolChoice = &wireToolChoice{Type: req.ToolChoice.Mode, Name: req.ToolChoice.Name}
 	}
 	if req.Thinking != nil {
-		body.Thinking = &wireThinking{Type: req.Thinking.Type, BudgetTokens: req.Thinking.BudgetTokens}
+		w := &wireThinking{Type: req.Thinking.Type}
+		// Only emit budget_tokens for the legacy "enabled" envelope;
+		// adaptive thinking leaves the budget up to the model and
+		// the API rejects budget_tokens alongside it.
+		if req.Thinking.Type == "enabled" {
+			w.BudgetTokens = req.Thinking.BudgetTokens
+		}
+		body.Thinking = w
+	}
+	if req.OutputConfig != nil {
+		body.OutputConfig = &wireOutputConfig{Effort: req.OutputConfig.Effort}
 	}
 
 	return json.Marshal(body)

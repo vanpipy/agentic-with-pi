@@ -24,6 +24,9 @@ type ModelCapabilities struct {
 	ServiceTiers          []string
 	BetaHeaders           []string
 	ContextMode           AnthropicContextMode
+	OutputEffort          bool
+	AdaptiveThinking      bool
+	ManualThinking        bool
 }
 
 type RouteSelection struct {

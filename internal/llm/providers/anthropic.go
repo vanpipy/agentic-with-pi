@@ -2,6 +2,7 @@ package providers
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
 	"github.com/vanpiyp/awp/internal/llm/protocol/anthropic"
@@ -75,7 +76,6 @@ var anthropicModelSpecs = map[string]modelSpec{
 		supportsTools:      true,
 		supportsVision:     true,
 		supportsThinking:   true,
-		betaHeaders:        []string{"context-1m-2025-08-07"},
 		contextMode:        llm.ContextOptIn1M,
 	},
 	"claude-sonnet-4-6": {
@@ -114,18 +114,33 @@ func (p *AnthropicProvider) ContextWindow(model string) int {
 	if spec, ok := p.lookupSpec(model); ok {
 		return spec.contextWindow
 	}
+	// Unknown models default to the Anthropic standard 200K. The
+	// classifier (Mode) is the source of truth for capability, but
+	// the spec table is the source of truth for the actual window
+	// size — when no entry matches, follow jcode's
+	// DEFAULT_CONTEXT_LIMIT fallback at
+	// crates/jcode-provider-anthropic-runtime/src/context_window.rs:11.
 	return 200000
 }
 
 func (p *AnthropicProvider) MaxOutputTokens(model string) int {
+	// The per-model spec table carries the canonical physical
+	// budget. The classifier (anthropic.MaxOutputTokens) is the
+	// fallback for unknown generations and matches the LARGE_OUTPUT
+	// / haiku-64K / legacy-32K split jcode uses at
+	// crates/jcode-provider-core/src/anthropic.rs:161-204.
 	if spec, ok := p.lookupSpec(model); ok {
 		return spec.maxOutputTokens
 	}
-	return 8192
+	return anthropic.MaxOutputTokens(model)
 }
 
 func (p *AnthropicProvider) AvailableReasoningEfforts(model string) []string {
-	return nil
+	// Single source of truth: the classifier at
+	// anthropic_caps.AvailableReasoningEfforts walks the model
+	// family/version and returns the ladder filtered by caps. The
+	// spec table is no longer consulted for the effort ladder.
+	return anthropic.AvailableReasoningEfforts(model)
 }
 
 func (p *AnthropicProvider) AvailableServiceTiers(model string) []string {
@@ -133,10 +148,13 @@ func (p *AnthropicProvider) AvailableServiceTiers(model string) []string {
 }
 
 func (p *AnthropicProvider) BetaHeaders(model string) []string {
-	if spec, ok := p.lookupSpec(model); ok {
-		return spec.betaHeaders
-	}
-	return nil
+	// Single source of truth: the classifier at
+	// anthropic_caps.BetaHeaders emits the context-1m beta only
+	// when the explicit `[1m]` suffix is present (jcode's
+	// anthropic_is_1m_model at anthropic.rs:109-113). Native1M
+	// models (opus-4-7+, sonnet-5) and standard 200K models do
+	// not need the beta.
+	return anthropic.BetaHeaders(model)
 }
 
 func (p *AnthropicProvider) SupportsNativeCompact(model string) bool {
@@ -148,12 +166,15 @@ func (p *AnthropicProvider) ModelCapabilities(model string) llm.ModelCapabilitie
 	spec, ok := p.lookupSpec(model)
 	if !ok {
 		return llm.ModelCapabilities{
-			ID:              model,
-			ContextWindow:   200000,
-			MaxOutputTokens: 8192,
-			ContextMode:     llm.ContextStandard,
+			ID:               model,
+			ContextWindow:    200000,
+			MaxOutputTokens:  anthropic.MaxOutputTokens(model),
+			ContextMode:      anthropic.ContextMode(model),
+			ReasoningEfforts: anthropic.AvailableReasoningEfforts(model),
+			BetaHeaders:      anthropic.BetaHeaders(model),
 		}
 	}
+	caps := anthropic.ReasoningCaps(model)
 	return llm.ModelCapabilities{
 		ID:                    model,
 		ContextWindow:         spec.contextWindow,
@@ -164,13 +185,55 @@ func (p *AnthropicProvider) ModelCapabilities(model string) llm.ModelCapabilitie
 		SupportsCacheTTL1h:    spec.supportsCacheTTL1h,
 		SupportsNativeCompact: spec.supportsNativeCompact,
 		SupportsThinking:      spec.supportsThinking,
-		ReasoningEfforts:      spec.reasoningEfforts,
+		ReasoningEfforts:      anthropic.AvailableReasoningEfforts(model),
 		ServiceTiers:          spec.serviceTiers,
-		BetaHeaders:           spec.betaHeaders,
+		BetaHeaders:           anthropic.BetaHeaders(model),
 		ContextMode:           spec.contextMode,
+		OutputEffort:          caps.OutputEffort,
+		AdaptiveThinking:      caps.AdaptiveThinking,
+		ManualThinking:        caps.ManualThinking,
 	}
 }
 
+// DefaultReasoningEffort returns the per-model default reasoning
+// effort the runtime should send when the caller leaves
+// ChatRequest.ReasoningEffort empty. Mirrors jcode's
+// default_reasoning_effort_for_model at
+// crates/jcode-provider-anthropic-runtime/src/lib.rs:788-807. Empty
+// string means "no forced default" — callers that don't opt in keep
+// the model's own reasoning-strength default.
+func (p *AnthropicProvider) DefaultReasoningEffort(model string) string {
+	key := strings.ToLower(model)
+	switch {
+	case strings.Contains(key, "claude-opus-5-5"):
+		return "medium"
+	case strings.Contains(key, "claude-opus-5"):
+		return "low"
+	case strings.Contains(key, "claude-opus"):
+		if anthropic.ReasoningCaps(model).XHighEffort {
+			return "xhigh"
+		}
+		return "high"
+	case strings.Contains(key, "claude-fable-5"):
+		return "high"
+	}
+	return ""
+}
+
+// ConvertRequest emits the modern Anthropic Messages wire payload.
+// For models that support adaptive thinking
+// (caps.AdaptiveThinking) it emits `thinking: {type: adaptive}` and
+// `output_config: {effort}` when the caller requested a non-"none"
+// effort. For manual-thinking generations (caps.ManualThinking) it
+// falls back to the legacy `thinking: {type: enabled, budget_tokens}`
+// envelope. Models that support no reasoning effort at all
+// (caps.SupportsReasoningEffort() == false) emit no thinking block.
+//
+// The `[1m]` suffix is stripped from the wire `model` field —
+// Anthropic's API expects the bare id and infers 1M-mode from the
+// `anthropic-beta: context-1m-2025-08-07` header that the core
+// adds via headersFor. Mirrors jcode's RetrySettings::reshape at
+// crates/jcode-provider-anthropic-runtime/src/reasoning_request.rs:65-89.
 func (p *AnthropicProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error) {
 	if len(req.Messages) == 0 {
 		req.Messages = []llm.Message{{Role: "user", Content: ""}}
@@ -182,19 +245,49 @@ func (p *AnthropicProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error)
 		return nil, err
 	}
 
+	// Strip the [1m] suffix from the wire model; the beta header
+	// carries the opt-in.
+	ar.Model = anthropic.Strip1mSuffix(ar.Model)
+
 	if req.MaxTokens == 0 {
-		ar.MaxTokens = 4096
+		ar.MaxTokens = p.MaxOutputTokens(req.Model)
 	}
 
-	if spec, ok := p.lookupSpec(req.Model); ok && spec.supportsThinking {
-		budget := ar.MaxTokens / 2
-		if budget > 16000 {
-			budget = 16000
+	caps := anthropic.ReasoningCaps(req.Model)
+	effort := req.ReasoningEffort
+	if effort == "" {
+		effort = p.DefaultReasoningEffort(req.Model)
+	}
+
+	if caps.AdaptiveThinking {
+		// Always emit adaptive thinking for supported generations
+		// (the model picks its own budget; we do not pass one).
+		// output_config.effort is sent when the caller asked for
+		// one or the model default is non-empty. The "none" effort
+		// value disables output_config (Claude interprets it as
+		// "no effort override") but keeps the adaptive envelope.
+		ar.Thinking = &anthropic.AnthropicThinking{Type: "adaptive"}
+		if effort != "" && effort != "none" && caps.OutputEffort {
+			ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
 		}
-		if budget < 1024 {
-			budget = 1024
+	} else if caps.ManualThinking && caps.SupportsReasoningEffort() {
+		budgetTokens := manualThinkingBudget(effort, ar.MaxTokens)
+		if budgetTokens > 0 {
+			ar.Thinking = &anthropic.AnthropicThinking{
+				Type:         "enabled",
+				BudgetTokens: budgetTokens,
+			}
 		}
-		ar.Thinking = &anthropic.AnthropicThinking{Type: "enabled", BudgetTokens: budget}
+		if caps.OutputEffort && effort != "" && effort != "none" {
+			ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
+		}
+	}
+
+	// Extended/adaptive thinking is incompatible with temperature;
+	// the API rejects both. Drop temperature when thinking is on so
+	// the wire shape stays valid.
+	if ar.Thinking != nil {
+		ar.Temperature = nil
 	}
 
 	body, err := anthropic.BuildAnthropicRequest(ar)
@@ -202,8 +295,35 @@ func (p *AnthropicProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error)
 		slog.Debug("anthropic: marshal request failed", "model", req.Model, "err", err)
 		return nil, err
 	}
-	slog.Debug("anthropic: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(ar.Messages))
+	slog.Debug("anthropic: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(ar.Messages), "thinking", ar.Thinking != nil, "output_config", ar.OutputConfig != nil)
 	return body, nil
+}
+
+// manualThinkingBudget maps a reasoning-effort string to a
+// budget_tokens value for manual-thinking models. Mirrors jcode's
+// manual_thinking_budget at
+// crates/jcode-provider-anthropic-runtime/src/lib.rs:868-879.
+func manualThinkingBudget(effort string, maxTokens int) int {
+	desired := 0
+	switch effort {
+	case "minimal", "low":
+		desired = 1024
+	case "medium":
+		desired = 4096
+	case "high":
+		desired = 8192
+	case "xhigh", "max":
+		desired = 16384
+	default:
+		return 0
+	}
+	if maxTokens > 0 && desired >= maxTokens {
+		desired = maxTokens - 1
+		if desired < 1024 {
+			return 0
+		}
+	}
+	return desired
 }
 
 func (p *AnthropicProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, error) {

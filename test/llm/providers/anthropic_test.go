@@ -103,7 +103,12 @@ func TestAnthropicProviderMaxOutputTokens(t *testing.T) {
 		{"claude-opus-4-6[1m]", 128000},
 		{"claude-sonnet-4-6", 64000},
 		{"claude-haiku-4-5", 64000},
-		{"unknown-model", 8192},
+		// Unknown Claude generations fall back to the classifier
+		// (anthropic.MaxOutputTokens), which returns the legacy
+		// 32K default for generations the LARGE_OUTPUT_PREFIXES
+		// table does not match.
+		{"claude-future-unknown", 32768},
+		{"claude-opus-7", 32768},
 	}
 	for _, tc := range cases {
 		if got := p.MaxOutputTokens(tc.model); got != tc.want {
@@ -189,12 +194,14 @@ func TestAnthropicProviderConvertRequestDefaultsMaxTokens(t *testing.T) {
 	})
 	var got map[string]any
 	json.Unmarshal(body, &got)
-	if got["max_tokens"].(float64) != 4096 {
-		t.Errorf("default max_tokens = %v, want 4096", got["max_tokens"])
+	// haiku-4-5 max output = 64K per the published limits table
+	// (anthropic.rs:198-200 in jcode).
+	if got["max_tokens"].(float64) != 64000 {
+		t.Errorf("default max_tokens = %v, want 64000 (haiku-4-5)", got["max_tokens"])
 	}
 }
 
-func TestAnthropicProviderConvertRequestThinkingEnabledForReasoningModels(t *testing.T) {
+func TestAnthropicProviderConvertRequestThinkingAdaptiveForReasoningModels(t *testing.T) {
 	p := newAnthropicProvider()
 	body, err := p.ConvertRequest(&llm.ChatRequest{
 		Model:     "claude-opus-4-6",
@@ -210,16 +217,30 @@ func TestAnthropicProviderConvertRequestThinkingEnabledForReasoningModels(t *tes
 	if !ok {
 		t.Fatalf("thinking missing for reasoning model: %+v", got)
 	}
-	if thinking["type"] != "enabled" {
-		t.Errorf("thinking.type = %v", thinking["type"])
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking.type = %v, want adaptive", thinking["type"])
 	}
-	budget := thinking["budget_tokens"].(float64)
-	if budget != 8000 {
-		t.Errorf("thinking.budget_tokens = %v, want 8000 (maxTokens/2)", budget)
+	if _, hasBudget := thinking["budget_tokens"]; hasBudget {
+		t.Errorf("adaptive thinking must omit budget_tokens, got %+v", thinking)
+	}
+	outputConfig, ok := got["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config missing for reasoning model: %+v", got)
+	}
+	// opus-4-6 caps include XHighEffort, so the default is "xhigh".
+	if outputConfig["effort"] != "high" {
+		t.Errorf("output_config.effort = %v, want high (opus-4-6 default; XHighEffort=false)", outputConfig["effort"])
+	}
+	if _, hasTemperature := got["temperature"]; hasTemperature {
+		t.Errorf("temperature must be omitted when thinking is active, got %+v", got["temperature"])
 	}
 }
 
-func TestAnthropicProviderConvertRequestThinkingFloor(t *testing.T) {
+func TestAnthropicProviderConvertRequestThinkingAdaptiveNoBudget(t *testing.T) {
+	// Adaptive thinking does not carry budget_tokens — the model
+	// decides its own budget. This test pins that the wire shape
+	// omits the field even when the caller passes MaxTokens=1
+	// (which would have hit the legacy floor logic).
 	p := newAnthropicProvider()
 	body, err := p.ConvertRequest(&llm.ChatRequest{
 		Model:     "claude-opus-4-6",
@@ -231,9 +252,15 @@ func TestAnthropicProviderConvertRequestThinkingFloor(t *testing.T) {
 	}
 	var got map[string]any
 	json.Unmarshal(body, &got)
-	thinking := got["thinking"].(map[string]any)
-	if thinking["budget_tokens"].(float64) != 1024 {
-		t.Errorf("budget_tokens = %v, want 1024 (floor)", thinking["budget_tokens"])
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking missing: %+v", got)
+	}
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking.type = %v, want adaptive", thinking["type"])
+	}
+	if _, hasBudget := thinking["budget_tokens"]; hasBudget {
+		t.Errorf("adaptive thinking must omit budget_tokens, got %+v", thinking)
 	}
 }
 
@@ -250,6 +277,190 @@ func TestAnthropicProviderConvertRequestThinkingOmittedForNonReasoning(t *testin
 	json.Unmarshal(body, &got)
 	if _, ok := got["thinking"]; ok {
 		t.Errorf("thinking should be omitted for haiku: %+v", got)
+	}
+}
+
+func TestAnthropicProviderConvertRequestHonorsReasoningEffortOverride(t *testing.T) {
+	p := newAnthropicProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:           "claude-opus-4-6",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+		ReasoningEffort: "low",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	thinking := got["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking.type = %v, want adaptive", thinking["type"])
+	}
+	outputConfig := got["output_config"].(map[string]any)
+	if outputConfig["effort"] != "low" {
+		t.Errorf("output_config.effort = %v, want low", outputConfig["effort"])
+	}
+}
+
+func TestAnthropicProviderConvertRequestNoneEffortOmitsOutputConfig(t *testing.T) {
+	// "none" must still emit adaptive thinking but drop
+	// output_config entirely (no point sending an effort block that
+	// asks for no effort).
+	p := newAnthropicProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:           "claude-opus-4-6",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+		ReasoningEffort: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	thinking := got["thinking"].(map[string]any)
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking.type = %v, want adaptive", thinking["type"])
+	}
+	if _, ok := got["output_config"]; ok {
+		t.Errorf("output_config must be omitted when effort=none, got %+v", got["output_config"])
+	}
+}
+
+func TestAnthropicProviderConvertRequestStrips1mSuffix(t *testing.T) {
+	p := newAnthropicProvider()
+	body, err := p.ConvertRequest(&llm.ChatRequest{
+		Model:    "claude-opus-4-6[1m]",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	if got["model"] != "claude-opus-4-6" {
+		t.Errorf("model = %v, want claude-opus-4-6 (suffix stripped)", got["model"])
+	}
+}
+
+func TestAnthropicProviderDefaultReasoningEffort(t *testing.T) {
+	p := newAnthropicProvider()
+	cases := []struct {
+		model string
+		want  string
+	}{
+		{"claude-opus-4-6", "high"},   // no xhigh (caps=NoXhigh), default high
+		{"claude-opus-4-7", "xhigh"},  // caps=Full, default xhigh
+		{"claude-opus-5", "low"},      // opus-5 ladder starts low
+		{"claude-opus-5-5", "medium"}, // opus-5-5 sweet spot
+		{"claude-fable-5", "high"},
+		{"claude-fable-5-1", "high"},
+		{"claude-haiku-4-5", ""},  // haiku is not an opus/fable
+		{"claude-sonnet-4-6", ""}, // sonnet is not an opus/fable
+	}
+	for _, tc := range cases {
+		if got := p.DefaultReasoningEffort(tc.model); got != tc.want {
+			t.Errorf("DefaultReasoningEffort(%s) = %q, want %q", tc.model, got, tc.want)
+		}
+	}
+}
+
+func TestAnthropicProviderConvertRequestManualThinkingFallback(t *testing.T) {
+	// opus-4-5 has capsManualWithEffort (ManualThinking=true,
+	// OutputEffort=true, no AdaptiveThinking). It must emit the
+	// legacy `thinking: {type: enabled, budget_tokens: N}`
+	// envelope with a budget that scales to the requested effort.
+	// exercise the helper at every effort tier.
+	p := newAnthropicProvider()
+	cases := []struct {
+		effort        string
+		wantBudgetMin int
+		wantBudgetMax int
+	}{
+		{"minimal", 1024, 1024},
+		{"low", 1024, 1024},
+		{"medium", 4096, 4096},
+		{"high", 8192, 8192},
+		{"xhigh", 16384, 16384},
+	}
+	for _, tc := range cases {
+		body, err := p.ConvertRequest(&llm.ChatRequest{
+			Model:           "claude-opus-4-5",
+			Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+			MaxTokens:       64000,
+			ReasoningEffort: tc.effort,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got map[string]any
+		json.Unmarshal(body, &got)
+		thinking := got["thinking"].(map[string]any)
+		if thinking["type"] != "enabled" {
+			t.Errorf("opus-4-5 effort=%s: thinking.type = %v, want enabled", tc.effort, thinking["type"])
+		}
+		budget := int(thinking["budget_tokens"].(float64))
+		if budget < tc.wantBudgetMin || budget > tc.wantBudgetMax {
+			t.Errorf("opus-4-5 effort=%s: budget = %d, want [%d, %d]", tc.effort, budget, tc.wantBudgetMin, tc.wantBudgetMax)
+		}
+	}
+}
+
+func TestAnthropicProviderConvertRequestManualThinkingBudgetClamped(t *testing.T) {
+	// The budget is clamped to maxTokens-1 and the manual envelope
+	// is omitted when the resulting budget would drop below the
+	// 1024-token floor. With maxTokens=2000 and effort=high
+	// (desired 8192), the budget is 1999 — still above the floor,
+	// so the thinking block is emitted.
+	p := newAnthropicProvider()
+	body, _ := p.ConvertRequest(&llm.ChatRequest{
+		Model:           "claude-opus-4-5",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+		MaxTokens:       2000,
+		ReasoningEffort: "high",
+	})
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	thinking, ok := got["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking missing: %+v", got)
+	}
+	budget := int(thinking["budget_tokens"].(float64))
+	if budget != 1999 {
+		t.Errorf("budget = %d, want 1999 (maxTokens-1 clamp)", budget)
+	}
+
+	// Now push max_tokens below the floor — thinking must be
+	// omitted entirely.
+	body, _ = p.ConvertRequest(&llm.ChatRequest{
+		Model:           "claude-opus-4-5",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+		MaxTokens:       1024,
+		ReasoningEffort: "high",
+	})
+	got = nil // json.Unmarshal merges into the existing map; reset
+	// to drop stale keys from the previous body.
+	json.Unmarshal(body, &got)
+	if _, ok := got["thinking"]; ok {
+		t.Errorf("thinking must be omitted when budget would be < 1024, got %+v", got["thinking"])
+	}
+}
+
+func TestAnthropicProviderConvertRequestContextWindowViaClassifier(t *testing.T) {
+	p := newAnthropicProvider()
+	// Spec table is the source of truth for known models (1M for
+	// opus-4-6[1m]). Unknown generations fall back to 200K.
+	cases := []struct {
+		model string
+		want  int
+	}{
+		{"claude-opus-4-6", 200000},
+		{"claude-opus-4-6[1m]", 1000000},
+		{"claude-future-9-9", 200000}, // unknown, default
+	}
+	for _, tc := range cases {
+		if got := p.ContextWindow(tc.model); got != tc.want {
+			t.Errorf("ContextWindow(%s) = %d, want %d", tc.model, got, tc.want)
+		}
 	}
 }
 
@@ -448,8 +659,18 @@ func TestAnthropicProviderSupportsNativeCompact(t *testing.T) {
 
 func TestAnthropicProviderAvailableReasoningEfforts(t *testing.T) {
 	p := newAnthropicProvider()
-	if got := p.AvailableReasoningEfforts("claude-opus-4-6"); got != nil {
-		t.Errorf("reasoning efforts = %v, want nil", got)
+	// opus-4-6 caps are EFFORT_NO_XHIGH: output_config effort
+	// ladder excludes "xhigh" but accepts the others. The provider
+	// delegates to anthropic.AvailableReasoningEfforts so this is
+	// also a smoke test for the classifier integration.
+	got := p.AvailableReasoningEfforts("claude-opus-4-6")
+	if len(got) == 0 {
+		t.Fatalf("reasoning efforts = empty, want non-empty for opus-4-6")
+	}
+	for _, e := range got {
+		if e == "xhigh" {
+			t.Errorf("opus-4-6 must not advertise xhigh (caps.XHighEffort=false)")
+		}
 	}
 }
 
