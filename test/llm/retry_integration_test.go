@@ -35,6 +35,34 @@ func (s *scriptedFailingCore) StreamChat(ctx context.Context, req *llm.ChatReque
 	return ch, nil
 }
 
+// scriptedMidStreamCore emits `pre`, then an error event carrying `streamErr`.
+// On the second call it emits `post` cleanly. Exercises forwardWithMidRetry.
+type scriptedMidStreamCore struct {
+	calls     int
+	streamErr error
+	pre       []llm.LegacyStreamEvent
+	post      []llm.LegacyStreamEvent
+}
+
+func (s *scriptedMidStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+	s.calls++
+	var events []llm.LegacyStreamEvent
+	if s.calls == 1 {
+		events = s.pre
+	} else {
+		events = s.post
+	}
+	ch := make(chan llm.LegacyStreamEvent, len(events)+1)
+	for _, ev := range events {
+		ch <- ev
+	}
+	if s.calls == 1 && s.streamErr != nil {
+		ch <- llm.LegacyStreamEvent{Err: s.streamErr}
+	}
+	close(ch)
+	return ch, nil
+}
+
 func TestRetryAfterHTTPErrorCapturesRetryAfterHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "5")
@@ -215,6 +243,46 @@ func TestRetryCoreFallsBackToExponentialWhenNoHint(t *testing.T) {
 	}
 	if elapsed > 500*time.Millisecond {
 		t.Fatalf("elapsed = %v, want fast (no hint, small backoff)", elapsed)
+	}
+}
+
+func TestRetryCoreMidStreamRollbackHonorsRetryAfterHint(t *testing.T) {
+	hint := 100 * time.Millisecond
+	httpErr := &protocol.HTTPError{
+		StatusCode: http.StatusTooManyRequests,
+		Body:       []byte(`rate limit`),
+		RetryAfter: hint,
+	}
+	inner := &scriptedMidStreamCore{
+		streamErr: httpErr,
+		pre: []llm.LegacyStreamEvent{
+			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "partial"}}}}},
+		},
+		post: []llm.LegacyStreamEvent{
+			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "ok"}}}}},
+		},
+	}
+	rc := llm.NewRetryCore(inner, fastConfig(3))
+
+	start := time.Now()
+	events, err := rc.StreamChat(context.Background(), &llm.ChatRequest{})
+	if err != nil {
+		t.Fatalf("StreamChat = %v", err)
+	}
+	var got []llm.LegacyStreamEvent
+	for ev := range events {
+		got = append(got, ev)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed < hint {
+		t.Fatalf("elapsed = %v, want >= %v (mid-stream hint must be honored)", elapsed, hint)
+	}
+	if len(got) < 2 {
+		t.Fatalf("got %d events, want at least 2 (rollback + post-retry content)", len(got))
+	}
+	if !got[1].Rollback {
+		t.Fatalf("got[1].Rollback = false, want true (rollback emitted before retry)")
 	}
 }
 
