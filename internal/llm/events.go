@@ -31,8 +31,7 @@ type EventRetryRollback struct{ Attempt, Max int }
 type EventFinish struct{ Reason FinishReason }
 
 type EventErr struct {
-	Err            error
-	RetryAfterSecs int
+	Err error
 }
 
 type EventSessionID struct{ ID string }

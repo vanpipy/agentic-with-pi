@@ -21,7 +21,7 @@ func TestStreamEventSealedInterface(t *testing.T) {
 	ev = llm.EventCompaction{Trigger: "auto", PreTokens: 50000, Native: false}
 	ev = llm.EventRetryRollback{Attempt: 2, Max: 5}
 	ev = llm.EventFinish{Reason: llm.FinishReasonStop}
-	ev = llm.EventErr{Err: nil, RetryAfterSecs: 0}
+	ev = llm.EventErr{Err: nil}
 	ev = llm.EventSessionID{ID: "sess-1"}
 	_ = ev
 }
@@ -146,10 +146,7 @@ func TestEventFinishPayload(t *testing.T) {
 }
 
 func TestEventErrPayload(t *testing.T) {
-	ev := llm.EventErr{Err: nil, RetryAfterSecs: 30}
-	if ev.RetryAfterSecs != 30 {
-		t.Fatalf("RetryAfterSecs = %d, want 30", ev.RetryAfterSecs)
-	}
+	ev := llm.EventErr{Err: nil}
 	if ev.Err != nil {
 		t.Fatalf("Err = %v, want nil", ev.Err)
 	}
