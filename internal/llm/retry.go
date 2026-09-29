@@ -2,8 +2,11 @@ package llm
 
 import (
 	"context"
+	"log/slog"
 	"math/rand"
 	"time"
+
+	"github.com/vanpiyp/awp/internal/llm/retryafter"
 )
 
 type RetryConfig struct {
@@ -37,7 +40,7 @@ func NewRetryCore(inner Core, config RetryConfig) *RetryCore {
 }
 
 func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
-	backoff := r.config.InitialBackoff
+	baseMs := r.config.InitialBackoff.Milliseconds()
 	var (
 		ch          <-chan LegacyStreamEvent
 		connErr     error
@@ -55,24 +58,31 @@ func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan Le
 		if !IsRetryable(connErr) || attempt == r.config.MaxRetries {
 			return nil, connErr
 		}
-		if sleepErr := r.sleepBackoff(ctx, backoff); sleepErr != nil {
+		hint := RetryAfterFromAny(connErr)
+		delay := r.computeDelay(attempt+1, baseMs, hint)
+		if hint > 0 {
+			slog.Debug("llm: retry-after hint honored",
+				"attempt", attempt, "hint", hint, "delay", delay)
+		}
+		if sleepErr := r.sleep(ctx, delay, hint > 0); sleepErr != nil {
 			return nil, sleepErr
 		}
-		backoff = r.growBackoff(backoff)
 	}
 	out := make(chan LegacyStreamEvent, 32)
-	go r.forwardWithMidRetry(ctx, req, ch, out, lastAttempt, backoff)
+	go r.forwardWithMidRetry(ctx, req, ch, out, lastAttempt, baseMs)
 	return out, nil
 }
 
-func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan LegacyStreamEvent, out chan<- LegacyStreamEvent, attempt int, backoff time.Duration) {
+func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan LegacyStreamEvent, out chan<- LegacyStreamEvent, attempt int, baseMs int64) {
 	defer close(out)
 	for {
 		emittedCount := 0
 		midRetry := false
+		var lastErr error
 		for ev := range ch {
 			emittedCount++
 			if ev.Err != nil {
+				lastErr = ev.Err
 				if emittedCount > 1 && IsRetryable(ev.Err) && attempt < r.config.MaxRetries {
 					select {
 					case out <- LegacyStreamEvent{Rollback: true}:
@@ -98,10 +108,15 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 		if !midRetry {
 			return
 		}
-		if sleepErr := r.sleepBackoff(ctx, backoff); sleepErr != nil {
+		hint := RetryAfterFromAny(lastErr)
+		delay := r.computeDelay(attempt+1, baseMs, hint)
+		if hint > 0 {
+			slog.Debug("llm: mid-retry retry-after hint honored",
+				"attempt", attempt, "hint", hint, "delay", delay)
+		}
+		if sleepErr := r.sleep(ctx, delay, hint > 0); sleepErr != nil {
 			return
 		}
-		backoff = r.growBackoff(backoff)
 		attempt++
 		if attempt > r.config.MaxRetries {
 			return
@@ -121,9 +136,19 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 	}
 }
 
-func (r *RetryCore) sleepBackoff(ctx context.Context, backoff time.Duration) error {
-	sleep := r.jitter(backoff)
-	timer := time.NewTimer(sleep)
+func (r *RetryCore) computeDelay(attempt int, baseMs int64, hint time.Duration) time.Duration {
+	d := retryafter.RetryDelay(attempt, baseMs, hint)
+	if hint <= 0 && d > r.config.MaxBackoff {
+		return r.config.MaxBackoff
+	}
+	return d
+}
+
+func (r *RetryCore) sleep(ctx context.Context, delay time.Duration, noJitter bool) error {
+	if !noJitter {
+		delay = r.jitter(delay)
+	}
+	timer := time.NewTimer(delay)
 	select {
 	case <-timer.C:
 		return nil
@@ -131,14 +156,6 @@ func (r *RetryCore) sleepBackoff(ctx context.Context, backoff time.Duration) err
 		timer.Stop()
 		return ctx.Err()
 	}
-}
-
-func (r *RetryCore) growBackoff(backoff time.Duration) time.Duration {
-	next := time.Duration(float64(backoff) * r.config.Multiplier)
-	if next > r.config.MaxBackoff {
-		return r.config.MaxBackoff
-	}
-	return next
 }
 
 func (r *RetryCore) jitter(d time.Duration) time.Duration {

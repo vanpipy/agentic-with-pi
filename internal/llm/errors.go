@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/vanpiyp/awp/internal/llm/protocol"
 )
@@ -41,10 +42,11 @@ func (k ErrorKind) String() string {
 }
 
 type Error struct {
-	Kind    ErrorKind
-	Code    int
-	Message string
-	Cause   error
+	Kind       ErrorKind
+	Code       int
+	Message    string
+	Cause      error
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string {
@@ -57,6 +59,9 @@ func (e *Error) Error() string {
 	}
 	if e.Cause != nil && e.Cause.Error() != e.Message {
 		s += ": " + e.Cause.Error()
+	}
+	if e.RetryAfter > 0 {
+		s += " (retry-after: " + e.RetryAfter.String() + ")"
 	}
 	return s
 }
@@ -83,10 +88,11 @@ func Classify(err error) *Error {
 	var httpErr *protocol.HTTPError
 	if errors.As(err, &httpErr) {
 		return &Error{
-			Kind:    classifyHTTPStatus(httpErr.StatusCode),
-			Code:    httpErr.StatusCode,
-			Message: string(httpErr.Body),
-			Cause:   err,
+			Kind:       classifyHTTPStatus(httpErr.StatusCode),
+			Code:       httpErr.StatusCode,
+			Message:    string(httpErr.Body),
+			Cause:      err,
+			RetryAfter: httpErr.RetryAfter,
 		}
 	}
 	var netErr net.Error
