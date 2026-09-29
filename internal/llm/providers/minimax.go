@@ -3,9 +3,9 @@ package providers
 import (
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/protocol/anthropic"
 )
 
 type MiniMaxProvider struct {
@@ -271,84 +271,40 @@ type anthropicRequest struct {
 }
 
 func (p *MiniMaxProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error) {
-	var systemParts []string
-	var messages []anthropicMessage
-
-	for _, msg := range req.Messages {
-		switch msg.Role {
-		case "system":
-			systemParts = append(systemParts, msg.Content)
-		case "user", "assistant":
-			content := convertOutboundContent(msg)
-			messages = append(messages, anthropicMessage{Role: msg.Role, Content: content})
-		case "tool":
-			messages = append(messages, anthropicMessage{
-				Role: "user",
-				Content: []anthropicMessageContent{{
-					Type:      "tool_result",
-					ToolUseID: msg.ToolCallID,
-					Content:   msg.Content,
-				}},
-			})
-		}
-	}
-	if len(messages) == 0 {
-		messages = []anthropicMessage{{Role: "user", Content: ""}}
+	if len(req.Messages) == 0 {
+		req.Messages = []llm.Message{{Role: "user", Content: ""}}
 	}
 
-	maxTokens := req.MaxTokens
-	if maxTokens == 0 {
-		maxTokens = 4096
+	ar, err := anthropic.MapToAnthropicRequest(*req)
+	if err != nil {
+		slog.Debug("provider: map request failed", "model", req.Model, "err", err)
+		return nil, err
 	}
 
-	out := anthropicRequest{
-		Model:         req.Model,
-		MaxTokens:     maxTokens,
-		Messages:      messages,
-		StopSequences: req.StopSequences,
-		Stream:        req.Stream,
+	if req.MaxTokens == 0 {
+		ar.MaxTokens = 4096
 	}
-	if len(systemParts) > 0 {
-		out.System = strings.Join(systemParts, "\n\n")
-	}
-	if req.Temperature > 0 {
-		temp := req.Temperature
-		out.Temperature = &temp
-	}
-	if req.ToolChoice != nil {
-		out.ToolChoice = &anthropicToolChoice{
-			Type: req.ToolChoice.Mode,
-			Name: req.ToolChoice.Name,
-		}
-	}
+
 	for _, m := range p.Models() {
 		if m.ID == req.Model && m.SupportsReasoning {
-			budget := out.MaxTokens / 2
+			budget := ar.MaxTokens / 2
 			if budget > 8192 {
 				budget = 8192
 			}
 			if budget < 1 {
 				budget = 1024
 			}
-			out.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: budget}
+			ar.Thinking = &anthropic.AnthropicThinking{Type: "enabled", BudgetTokens: budget}
 			break
 		}
 	}
 
-	for _, tool := range req.Tools {
-		out.Tools = append(out.Tools, anthropicTool{
-			Name:        tool.Function.Name,
-			Description: tool.Function.Description,
-			InputSchema: toSchemaMap(tool.Function.Parameters),
-		})
-	}
-
-	body, err := json.Marshal(out)
+	body, err := anthropic.BuildAnthropicRequest(ar)
 	if err != nil {
 		slog.Debug("provider: marshal request failed", "model", req.Model, "err", err)
 		return nil, err
 	}
-	slog.Debug("provider: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(messages))
+	slog.Debug("provider: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(ar.Messages))
 	return body, nil
 }
 
@@ -558,21 +514,5 @@ func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, 
 }
 
 func (p *MiniMaxProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	if systemPrompt == "" {
-		return nil, nil
-	}
-	midpoint := len(systemPrompt) / 2
-	splitAt := strings.Index(systemPrompt[midpoint:], "\n")
-	if splitAt < 0 {
-		return []llm.ContentBlock{
-			llm.ContentText{Text: systemPrompt, CacheControl: llm.CacheEphemeral1h()},
-		}, nil
-	}
-	splitAt += midpoint
-	prefix := systemPrompt[:splitAt]
-	suffix := systemPrompt[splitAt:]
-	return []llm.ContentBlock{
-		llm.ContentText{Text: prefix, CacheControl: llm.CacheEphemeral1h()},
-		llm.ContentText{Text: suffix},
-	}, nil
+	return anthropic.CompleteAnthropicSystemSplit(systemPrompt)
 }

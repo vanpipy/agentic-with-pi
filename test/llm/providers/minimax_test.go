@@ -78,16 +78,24 @@ func TestConvertRequestBasicChat(t *testing.T) {
 	if got["max_tokens"].(float64) != 1024 {
 		t.Errorf("max_tokens = %v", got["max_tokens"])
 	}
-	if got["temperature"].(float64) != 0.7 {
-		t.Errorf("temperature = %v", got["temperature"])
+	if got["temperature"].(float64) < 0.699 || got["temperature"].(float64) > 0.701 {
+		t.Errorf("temperature = %v, want ~0.7", got["temperature"])
 	}
 	msgs := got["messages"].([]any)
 	if len(msgs) != 1 {
 		t.Fatalf("messages = %v", got["messages"])
 	}
 	msg := msgs[0].(map[string]any)
-	if msg["role"] != "user" || msg["content"] != "hello" {
-		t.Errorf("msg = %v", msg)
+	if msg["role"] != "user" {
+		t.Errorf("msg role = %v", msg["role"])
+	}
+	content := msg["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("content = %v, want single text block", msg["content"])
+	}
+	block := content[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "hello" {
+		t.Errorf("text block = %v", block)
 	}
 }
 
@@ -115,8 +123,13 @@ func TestConvertRequestExtractsSystemPrompt(t *testing.T) {
 	})
 	var got map[string]any
 	json.Unmarshal(body, &got)
-	if got["system"] != "you are a pirate" {
-		t.Errorf("system = %v, want top-level", got["system"])
+	systemBlocks := got["system"].([]any)
+	if len(systemBlocks) != 1 {
+		t.Fatalf("system blocks = %v, want single text block", got["system"])
+	}
+	block := systemBlocks[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "you are a pirate" {
+		t.Errorf("system block = %v, want {type:text, text:...}", block)
 	}
 	msgs := got["messages"].([]any)
 	if len(msgs) != 1 {
@@ -212,9 +225,17 @@ func TestConvertRequestMultipleSystemMessages(t *testing.T) {
 	})
 	var got map[string]any
 	json.Unmarshal(body, &got)
-	want := "be brief\n\nbe friendly"
-	if got["system"] != want {
-		t.Errorf("system = %v, want %q", got["system"], want)
+	systemBlocks := got["system"].([]any)
+	if len(systemBlocks) != 2 {
+		t.Fatalf("system blocks = %v, want 2", got["system"])
+	}
+	b1 := systemBlocks[0].(map[string]any)
+	b2 := systemBlocks[1].(map[string]any)
+	if b1["type"] != "text" || b1["text"] != "be brief" {
+		t.Errorf("first system block = %v, want {type:text, text:be brief}", b1)
+	}
+	if b2["type"] != "text" || b2["text"] != "be friendly" {
+		t.Errorf("second system block = %v, want {type:text, text:be friendly}", b2)
 	}
 }
 
