@@ -442,8 +442,13 @@ func TestConvertRequestPlainAssistantContent(t *testing.T) {
 		t.Fatal(err)
 	}
 	asst := got["messages"].([]any)[1].(map[string]any)
-	if asst["content"] != "reply" {
-		t.Errorf("plain assistant content = %v, want \"reply\"", asst["content"])
+	content := asst["content"].([]any)
+	if len(content) != 1 {
+		t.Fatalf("assistant content = %v, want single text block", asst["content"])
+	}
+	block := content[0].(map[string]any)
+	if block["type"] != "text" || block["text"] != "reply" {
+		t.Errorf("assistant text block = %v, want {type:text, text:reply}", block)
 	}
 }
 
@@ -488,6 +493,13 @@ func TestConvertRequestIgnoresUnknownRoles(t *testing.T) {
 	msgs := got["messages"].([]any)
 	if len(msgs) != 1 || msgs[0].(map[string]any)["role"] != "user" {
 		t.Errorf("unknown role should be ignored: %+v", msgs)
+	}
+	// The dropped function role should not leak into the user message
+	// (it would have produced two blocks {type:text, text:"hi"} plus a
+	// leak block). Verify content is exactly one text block.
+	content := msgs[0].(map[string]any)["content"].([]any)
+	if len(content) != 1 {
+		t.Errorf("user content = %v, want single text block (no leak from dropped role)", content)
 	}
 }
 

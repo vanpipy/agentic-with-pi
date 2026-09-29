@@ -3,6 +3,7 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -14,12 +15,29 @@ type AnthropicRequest struct {
 	Messages      []AnthropicMessage
 	System        []llm.ContentBlock
 	Tools         []AnthropicTool
+	ToolChoice    *AnthropicToolChoice
+	Thinking      *AnthropicThinking
 	MaxTokens     int
 	Temperature   *float64
 	Stream        bool
 	Metadata      map[string]string
 	StopSequences []string
 	CacheControl  *llm.CacheControl
+}
+
+// AnthropicToolChoice mirrors the Anthropic tool_choice field. Mode
+// is "auto" / "any" / "tool"; when Mode == "tool", Name selects the
+// required tool.
+type AnthropicToolChoice struct {
+	Mode string
+	Name string
+}
+
+// AnthropicThinking is the Anthropic extended-thinking budget envelope.
+// Type is always "enabled"; BudgetTokens caps the reasoning budget.
+type AnthropicThinking struct {
+	Type         string
+	BudgetTokens int
 }
 
 type AnthropicMessage struct {
@@ -97,11 +115,23 @@ type wireBody struct {
 	Messages      []wireMessage     `json:"messages"`
 	System        []wireSystemBlock `json:"system,omitempty"`
 	Tools         []wireTool        `json:"tools,omitempty"`
+	ToolChoice    *wireToolChoice   `json:"tool_choice,omitempty"`
+	Thinking      *wireThinking     `json:"thinking,omitempty"`
 	MaxTokens     int               `json:"max_tokens"`
 	Temperature   *float64          `json:"temperature,omitempty"`
 	Stream        bool              `json:"stream"`
 	StopSequences []string          `json:"stop_sequences,omitempty"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+type wireToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
+}
+
+type wireThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 func cacheControlToWire(cc *llm.CacheControl) *wireCacheControl {
@@ -247,6 +277,13 @@ func BuildAnthropicRequest(req AnthropicRequest) (json.RawMessage, error) {
 		}
 	}
 
+	if req.ToolChoice != nil {
+		body.ToolChoice = &wireToolChoice{Type: req.ToolChoice.Mode, Name: req.ToolChoice.Name}
+	}
+	if req.Thinking != nil {
+		body.Thinking = &wireThinking{Type: req.Thinking.Type, BudgetTokens: req.Thinking.BudgetTokens}
+	}
+
 	return json.Marshal(body)
 }
 
@@ -271,6 +308,23 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 	}
 	for _, m := range llmReq.Messages {
 		role := llm.Role(m.Role)
+		if role != "user" && role != "assistant" && role != "system" && role != "tool" {
+			continue
+		}
+		if role == "system" {
+			if m.Content != "" {
+				out.System = append(out.System, llm.ContentText{Text: m.Content})
+			}
+			continue
+		}
+		if role == "tool" {
+			blocks := []llm.ContentBlock{llm.ContentToolResult{
+				ToolUseID: m.ToolCallID,
+				Content:   []llm.ContentBlock{llm.ContentText{Text: m.Content}},
+			}}
+			out.Messages = append(out.Messages, AnthropicMessage{Role: "user", Content: blocks})
+			continue
+		}
 		blocks := make([]llm.ContentBlock, 0, len(m.ToolCalls)+2)
 
 		if m.Reasoning != "" {
@@ -293,6 +347,10 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 		out.Messages = append(out.Messages, AnthropicMessage{Role: role, Content: blocks})
 	}
 
+	if llmReq.ToolChoice != nil {
+		out.ToolChoice = &AnthropicToolChoice{Mode: llmReq.ToolChoice.Mode, Name: llmReq.ToolChoice.Name}
+	}
+
 	if len(llmReq.Tools) > 0 {
 		out.Tools = make([]AnthropicTool, 0, len(llmReq.Tools))
 		for _, td := range llmReq.Tools {
@@ -313,4 +371,30 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 	}
 
 	return out, nil
+}
+
+// CompleteAnthropicSystemSplit turns a flat system prompt string into a
+// two-block content array with the first block carrying an ephemeral-1h
+// cache breakpoint, so Anthropic's prompt caching can cache the prefix.
+// When the prompt is empty, the result is nil. When no newline exists
+// past the midpoint, the entire prompt gets the cache breakpoint.
+// Mirrors MiniMaxProvider::complete_split at providers/minimax.go:560-578.
+func CompleteAnthropicSystemSplit(systemPrompt string) ([]llm.ContentBlock, error) {
+	if systemPrompt == "" {
+		return nil, nil
+	}
+	midpoint := len(systemPrompt) / 2
+	splitAt := strings.Index(systemPrompt[midpoint:], "\n")
+	if splitAt < 0 {
+		return []llm.ContentBlock{
+			llm.ContentText{Text: systemPrompt, CacheControl: llm.CacheEphemeral1h()},
+		}, nil
+	}
+	splitAt += midpoint
+	prefix := systemPrompt[:splitAt]
+	suffix := systemPrompt[splitAt:]
+	return []llm.ContentBlock{
+		llm.ContentText{Text: prefix, CacheControl: llm.CacheEphemeral1h()},
+		llm.ContentText{Text: suffix},
+	}, nil
 }
