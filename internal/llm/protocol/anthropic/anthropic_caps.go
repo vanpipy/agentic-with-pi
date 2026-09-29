@@ -223,6 +223,33 @@ func BetaHeaders(model string) []string {
 	return nil
 }
 
+// ThinkingAlwaysOn reports whether `model` requires thinking on
+// every request (the API rejects calls without it). Mirrors jcode's
+// anthropic_thinking_always_on at
+// crates/jcode-provider-core/src/anthropic.rs:147-159.
+//
+// Opus 5.5 and Fable 5.1 are the verified-always-on generations
+// per the Opus 5.5 migration guide (2026-09-22). The self-heal
+// path uses this to decide whether dropping the `output_config`
+// block alone is enough or whether thinking itself must go too.
+func ThinkingAlwaysOn(model string) bool {
+	base := normalizeClaudeCapsKey(model)
+	if !strings.HasPrefix(base, "claude-") {
+		return false
+	}
+	family, version := parseClaudeFamilyVersion(base)
+	if version == nil {
+		return false
+	}
+	switch family {
+	case "opus":
+		return version.major == 5 && version.minor == 5
+	case "fable":
+		return version.major == 5 && version.minor == 1
+	}
+	return false
+}
+
 // Strip1mSuffix removes the `[1m]` long-context opt-in suffix from
 // `model`, returning the bare id. Idempotent when the suffix is
 // absent.

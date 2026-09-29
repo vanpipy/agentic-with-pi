@@ -38,6 +38,22 @@ type ChatRequest struct {
 	MaxTokens       int         `json:"max_tokens,omitzero"`
 	Stream          bool        `json:"stream"`
 	ReasoningEffort string      `json:"reasoning_effort,omitzero"`
+
+	// RetryDropOutputConfig is set by Provider.RecoverRequest on the
+	// first-attempt rejection of an `output_config` block for an
+	// always-on-thinking model (opus-5-5 / fable-5-1). It tells the
+	// provider to emit `thinking: {type: adaptive}` but omit
+	// `output_config` on the retry attempt. Cleared by the caller;
+	// not part of the wire surface.
+	RetryDropOutputConfig bool `json:"-"`
+
+	// RetryDropThinking is set by Provider.RecoverRequest on the
+	// first-attempt rejection of `thinking` and/or `output_config`
+	// for a model that does not require either (all non-always-on
+	// generations). It tells the provider to emit neither block on
+	// the retry attempt. Cleared by the caller; not part of the
+	// wire surface.
+	RetryDropThinking bool `json:"-"`
 }
 
 type FinishReason int

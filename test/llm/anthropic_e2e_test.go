@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -450,5 +451,206 @@ func TestEndToEndAnthropicProviderToolUseRoundTrip(t *testing.T) {
 	}
 	if stopReason != llm.FinishReasonToolUse {
 		t.Errorf("stop reason = %v, want ToolUse", stopReason)
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetryAlwaysOnModel(t *testing.T) {
+	// Server returns 400 (output_config not supported) on the first
+	// call; 200 on the second call. StreamChat should self-heal:
+	// retry once with thinking kept and output_config dropped. The
+	// second request body must NOT contain `output_config` and MUST
+	// contain `thinking: {type: adaptive}`.
+	var calls atomic.Int32
+	var bodies [2]string
+	var bodiesMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		bodiesMu.Lock()
+		bodies[n-1] = string(body)
+		bodiesMu.Unlock()
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"output_config.effort is not supported on this model"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-5-5",
+		ReasoningEffort: "medium",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+
+	var gotContent string
+	var gotErr error
+	for ev := range events {
+		if ev.Err != nil {
+			gotErr = ev.Err
+			continue
+		}
+		if ev.Chunk != nil && len(ev.Chunk.Choices) > 0 {
+			gotContent += ev.Chunk.Choices[0].Delta.Content
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("consumer saw error after retry: %v", gotErr)
+	}
+	if gotContent != "hi" {
+		t.Errorf("content = %q, want %q (second call should succeed)", gotContent, "hi")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("calls = %d, want 2 (1 fail + 1 self-heal success)", got)
+	}
+
+	bodiesMu.Lock()
+	defer bodiesMu.Unlock()
+
+	var firstBody, secondBody map[string]any
+	if err := json.Unmarshal([]byte(bodies[0]), &firstBody); err != nil {
+		t.Fatalf("unmarshal first body: %v\n%s", err, bodies[0])
+	}
+	if err := json.Unmarshal([]byte(bodies[1]), &secondBody); err != nil {
+		t.Fatalf("unmarshal second body: %v\n%s", err, bodies[1])
+	}
+	if firstBody["output_config"] == nil {
+		t.Errorf("first body missing output_config (expected it; self-heal drops it on retry only):\n%s", bodies[0])
+	}
+	if firstBody["thinking"] == nil {
+		t.Errorf("first body missing thinking envelope:\n%s", bodies[0])
+	}
+	if secondBody["output_config"] != nil {
+		t.Errorf("second body still has output_config, want omitted (self-heal must drop it):\n%s", bodies[1])
+	}
+	if secondBody["thinking"] == nil {
+		t.Errorf("second body missing thinking envelope (always-on must keep thinking on retry):\n%s", bodies[1])
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetryNonAlwaysOnModel(t *testing.T) {
+	// Server returns 400 (thinking is not supported) on the first
+	// call; 200 on the second call. StreamChat must self-heal: retry
+	// once with both `thinking` and `output_config` dropped.
+	var calls atomic.Int32
+	var bodies [2]string
+	var bodiesMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		bodiesMu.Lock()
+		bodies[n-1] = string(body)
+		bodiesMu.Unlock()
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"thinking with extended budget is not supported"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":1,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-4-7",
+		ReasoningEffort: "high",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+
+	var gotContent string
+	for ev := range events {
+		if ev.Err != nil {
+			t.Fatalf("consumer saw error: %v", ev.Err)
+		}
+		if ev.Chunk != nil && len(ev.Chunk.Choices) > 0 {
+			gotContent += ev.Chunk.Choices[0].Delta.Content
+		}
+	}
+	if gotContent != "ok" {
+		t.Errorf("content = %q, want %q", gotContent, "ok")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("calls = %d, want 2", got)
+	}
+
+	bodiesMu.Lock()
+	defer bodiesMu.Unlock()
+
+	var firstBody, secondBody map[string]any
+	if err := json.Unmarshal([]byte(bodies[0]), &firstBody); err != nil {
+		t.Fatalf("unmarshal first body: %v", err)
+	}
+	if err := json.Unmarshal([]byte(bodies[1]), &secondBody); err != nil {
+		t.Fatalf("unmarshal second body: %v", err)
+	}
+	if firstBody["thinking"] == nil {
+		t.Errorf("first body missing thinking envelope:\n%s", bodies[0])
+	}
+	if secondBody["thinking"] != nil {
+		t.Errorf("second body still has thinking, want omitted (non-always-on must drop both on retry):\n%s", bodies[1])
+	}
+	if secondBody["output_config"] != nil {
+		t.Errorf("second body still has output_config, want omitted:\n%s", bodies[1])
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetryDoesNotRetryOnUnrecoverableError(t *testing.T) {
+	// Server returns 401 on every call. StreamChat must NOT retry
+	// (auth errors are not recoverable) and must surface the error
+	// synchronously so the caller sees it before getting the stream
+	// channel.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"type":"error","error":{"type":"authentication_error","message":"invalid api key"}}`)
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-5-5",
+		ReasoningEffort: "medium",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err == nil {
+		// The error must reach the caller synchronously, not via the
+		// channel (auth errors are not self-healable).
+		for range events {
+		}
+		t.Fatalf("StreamChat: expected sync error, got nil")
+	}
+	if !strings.Contains(err.Error(), "401") && !strings.Contains(err.Error(), "invalid api key") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("calls = %d, want 1 (no retry on auth error)", got)
 	}
 }

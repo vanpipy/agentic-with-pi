@@ -261,6 +261,15 @@ func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, 
 	return anthropic.ConvertAnthropicEvent(data)
 }
 
+// RecoverRequest is a no-op. MiniMax uses the legacy
+// `thinking:{type:enabled,budget_tokens:...}` envelope with no
+// `output_config` block, and MiniMax errors are surfaced to the
+// caller verbatim — there is no transition-window recovery surface
+// to apply here.
+func (p *MiniMaxProvider) RecoverRequest(_ *llm.ChatRequest, _ error) bool {
+	return false
+}
+
 func (p *MiniMaxProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
 	return anthropic.CompleteAnthropicSystemSplit(systemPrompt)
 }

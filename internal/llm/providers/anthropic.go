@@ -259,27 +259,43 @@ func (p *AnthropicProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error)
 		effort = p.DefaultReasoningEffort(req.Model)
 	}
 
-	if caps.AdaptiveThinking {
-		// Always emit adaptive thinking for supported generations
-		// (the model picks its own budget; we do not pass one).
-		// output_config.effort is sent when the caller asked for
-		// one or the model default is non-empty. The "none" effort
-		// value disables output_config (Claude interprets it as
-		// "no effort override") but keeps the adaptive envelope.
-		ar.Thinking = &anthropic.AnthropicThinking{Type: "adaptive"}
-		if effort != "" && effort != "none" && caps.OutputEffort {
-			ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
+	// Self-heal retry flags suppress the offending reasoning fields
+	// on the second attempt. RetryDropThinking drops both blocks;
+	// RetryDropOutputConfig drops only the output_config block
+	// (keeps the always-on thinking envelope for opus-5-5 /
+	// fable-5-1).
+	switch {
+	case req.RetryDropThinking:
+		ar.Thinking = nil
+		ar.OutputConfig = nil
+	case req.RetryDropOutputConfig:
+		ar.OutputConfig = nil
+		if caps.AdaptiveThinking {
+			ar.Thinking = &anthropic.AnthropicThinking{Type: "adaptive"}
 		}
-	} else if caps.ManualThinking && caps.SupportsReasoningEffort() {
-		budgetTokens := manualThinkingBudget(effort, ar.MaxTokens)
-		if budgetTokens > 0 {
-			ar.Thinking = &anthropic.AnthropicThinking{
-				Type:         "enabled",
-				BudgetTokens: budgetTokens,
+	default:
+		if caps.AdaptiveThinking {
+			// Always emit adaptive thinking for supported generations
+			// (the model picks its own budget; we do not pass one).
+			// output_config.effort is sent when the caller asked for
+			// one or the model default is non-empty. The "none" effort
+			// value disables output_config (Claude interprets it as
+			// "no effort override") but keeps the adaptive envelope.
+			ar.Thinking = &anthropic.AnthropicThinking{Type: "adaptive"}
+			if effort != "" && effort != "none" && caps.OutputEffort {
+				ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
 			}
-		}
-		if caps.OutputEffort && effort != "" && effort != "none" {
-			ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
+		} else if caps.ManualThinking && caps.SupportsReasoningEffort() {
+			budgetTokens := manualThinkingBudget(effort, ar.MaxTokens)
+			if budgetTokens > 0 {
+				ar.Thinking = &anthropic.AnthropicThinking{
+					Type:         "enabled",
+					BudgetTokens: budgetTokens,
+				}
+			}
+			if caps.OutputEffort && effort != "" && effort != "none" {
+				ar.OutputConfig = &anthropic.AnthropicOutputConfig{Effort: effort}
+			}
 		}
 	}
 
@@ -297,6 +313,54 @@ func (p *AnthropicProvider) ConvertRequest(req *llm.ChatRequest) ([]byte, error)
 	}
 	slog.Debug("anthropic: marshal request ok", "model", req.Model, "bytes", len(body), "messages", len(ar.Messages), "thinking", ar.Thinking != nil, "output_config", ar.OutputConfig != nil)
 	return body, nil
+}
+
+// RecoverRequest inspects `err` from a failed first attempt. When
+// Anthropic rejected a reasoning-related field (the API returned a
+// 400 with `invalid_request_error` + `thinking`/`effort`/
+// `output_config` + `not supported`/`does not support`), it sets
+// one of the ChatRequest retry flags so the next ConvertRequest
+// emits a compatible wire shape.
+//
+// Always-on-thinking generations (opus-5-5 / fable-5-1) drop only
+// `output_config` and keep `thinking: {type: adaptive}`; everything
+// else drops both blocks and lets the model run with the
+// caller-supplied system + tools alone. Mirrors jcode's
+// recover_rejected_reasoning at
+// crates/jcode-provider-anthropic-runtime/src/reasoning_request.rs:95-115.
+func (p *AnthropicProvider) RecoverRequest(req *llm.ChatRequest, err error) bool {
+	if !isReasoningUnsupportedError(err) {
+		return false
+	}
+	if anthropic.ThinkingAlwaysOn(req.Model) {
+		req.RetryDropOutputConfig = true
+	} else {
+		req.RetryDropThinking = true
+	}
+	return true
+}
+
+// isReasoningUnsupportedError matches the Anthropic 400-error shape
+// jcode classifies as recoverable at
+// crates/jcode-provider-anthropic-runtime/src/lib.rs:2296-2305:
+// HTTP 400 (or 4xx with `invalid_request_error`) + body mentions
+// `thinking` / `effort` / `output_config` + body says
+// `not supported` / `does not support`. Other 400s (auth, bad
+// schema, etc.) are surfaced unchanged.
+func isReasoningUnsupportedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "invalid_request_error") && !strings.Contains(msg, "400") {
+		return false
+	}
+	mentionsField := strings.Contains(msg, "thinking") ||
+		strings.Contains(msg, "effort") ||
+		strings.Contains(msg, "output_config")
+	mentionsUnsupported := strings.Contains(msg, "not supported") ||
+		strings.Contains(msg, "does not support")
+	return mentionsField && mentionsUnsupported
 }
 
 // manualThinkingBudget maps a reasoning-effort string to a

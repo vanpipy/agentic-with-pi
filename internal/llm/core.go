@@ -22,6 +22,16 @@ type Provider interface {
 
 	ConvertResponse(data []byte) (*StreamChunk, bool, error)
 
+	// RecoverRequest inspects `err` from a failed first attempt and,
+	// when the error is recoverable (provider-specific 400 with a
+	// known field-rejection signature), mutates `req` so the next
+	// attempt emits a compatible wire shape and returns true. When
+	// the error is not recoverable, it leaves `req` untouched and
+	// returns false. Called by Core.StreamChat at most once per
+	// turn, only before any chunk has been forwarded. Providers with
+	// no recovery surface (e.g. MiniMax) implement this as a no-op.
+	RecoverRequest(req *ChatRequest, err error) bool
+
 	Models() []Model
 
 	SupportsCacheControl(model string) bool
@@ -72,12 +82,39 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyS
 	}
 	slog.Debug("llm: stream start", "model", req.Model, "messages", len(req.Messages), "tools", len(req.Tools))
 
+	rawChan, _, err := c.startStream(ctx, req)
+	if err != nil {
+		if !c.provider.RecoverRequest(req, err) {
+			return nil, err
+		}
+		slog.Warn("llm: provider self-heal, retrying without rejected fields", "model", req.Model, "err", err)
+		var retryErr error
+		rawChan, _, retryErr = c.startStream(ctx, req)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+	}
+
+	events := make(chan LegacyStreamEvent, 32)
+	go func() {
+		defer close(events)
+		c.streamOnce(ctx, rawChan, events)
+	}()
+	return events, nil
+}
+
+// startStream marshals the request and opens a transport-level
+// stream. Returns the raw chunk channel and the built protocol
+// request (so callers can correlate retries) plus any synchronous
+// transport error from the first attempt. Does NOT surface
+// chunk-level errors — those arrive via the returned channel.
+func (c *core) startStream(ctx context.Context, req *ChatRequest) (<-chan protocol.StreamItem, *protocol.Request, error) {
 	streamReq := *req
 	streamReq.Stream = true
 
 	body, err := c.provider.ConvertRequest(&streamReq)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	protoReq := &protocol.Request{
@@ -89,120 +126,123 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyS
 
 	rawChan, err := c.protocol.Stream(ctx, protoReq)
 	if err != nil {
-		return nil, err
+		return nil, protoReq, err
 	}
+	return rawChan, protoReq, nil
+}
 
-	events := make(chan LegacyStreamEvent, 32)
-	go func() {
-		accumulators := make(map[int]*toolCallAccum)
-		var totalContent, totalReasoning int
-		var lastUsage *Usage
-		var eventCount int
-		defer func() {
-			if lastUsage != nil {
-				ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens)
-			} else {
-				ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning)
-			}
-			close(events)
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case item, ok := <-rawChan:
-				if !ok {
-					return
-				}
-				if item.Err != nil {
-					ifaceLogger().Info("llm: transport err", "err", item.Err)
-					select {
-					case events <- LegacyStreamEvent{Err: item.Err}:
-					case <-ctx.Done():
-					}
-					return
-				}
-				chunk, done, err := c.provider.ConvertResponse(item.Data)
-				if err != nil {
-					ifaceLogger().Info("llm: parse err", "err", err)
-					select {
-					case events <- LegacyStreamEvent{Err: err}:
-					case <-ctx.Done():
-					}
-					return
-				}
+// streamOnce runs one streaming attempt and forwards every
+// transport/parse error to the consumer. Self-heal happens at the
+// synchronous transport level (StreamChat intercepts protocol.Stream
+// errors before returning the channel); chunk-level errors after the
+// response has begun are surfaced verbatim.
+func (c *core) streamOnce(ctx context.Context, rawChan <-chan protocol.StreamItem, events chan LegacyStreamEvent) error {
 
-				if chunk != nil {
-					eventCount++
-					for _, choice := range chunk.Choices {
-						totalContent += len(choice.Delta.Content)
-						totalReasoning += len(choice.Delta.Reasoning)
-						for _, tc := range choice.Delta.ToolCalls {
-							acc, exists := accumulators[choice.Index]
-							if !exists {
-								acc = &toolCallAccum{}
-								accumulators[choice.Index] = acc
-							}
-							if tc.ID != "" {
-								acc.ID = tc.ID
-							}
-							if tc.Type != "" {
-								acc.Type = tc.Type
-							}
-							if tc.Function.Name != "" {
-								acc.Name = tc.Function.Name
-							}
-							acc.Args.WriteString(tc.Function.Arguments)
-						}
-					}
-					if chunk.Usage != nil {
-						lastUsage = chunk.Usage
-						select {
-						case events <- LegacyStreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
-						case <-ctx.Done():
-							return
-						}
-					}
-					for _, choice := range chunk.Choices {
-						if choice.Delta.Content == "" && choice.Delta.Reasoning == "" && choice.FinishReason == 0 {
-							continue
-						}
-						select {
-						case events <- LegacyStreamEvent{Chunk: &StreamChunk{
-							Choices: []StreamChoice{{
-								Index:        choice.Index,
-								Delta:        Message{Content: choice.Delta.Content, Reasoning: choice.Delta.Reasoning},
-								FinishReason: choice.FinishReason,
-							}},
-						}}:
-						case <-ctx.Done():
-							return
-						}
-					}
-				}
-
-				if done {
-					assembled := assembleToolCalls(accumulators)
-					if len(assembled) > 0 {
-						final := &StreamChunk{
-							Choices: []StreamChoice{{
-								Index: 0,
-								Delta: Message{ToolCalls: assembled},
-							}},
-						}
-						select {
-						case events <- LegacyStreamEvent{Chunk: final}:
-						case <-ctx.Done():
-							return
-						}
-					}
-					return
-				}
-			}
+	accumulators := make(map[int]*toolCallAccum)
+	var totalContent, totalReasoning int
+	var lastUsage *Usage
+	var eventCount int
+	defer func() {
+		if lastUsage != nil {
+			ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning, "prompt_tokens", lastUsage.PromptTokens, "completion_tokens", lastUsage.CompletionTokens)
+		} else {
+			ifaceLogger().Info("llm: stream done", "events", eventCount, "content_chars", totalContent, "reasoning_chars", totalReasoning)
 		}
 	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case item, ok := <-rawChan:
+			if !ok {
+				return nil
+			}
+			if item.Err != nil {
+				ifaceLogger().Info("llm: transport err", "err", item.Err)
+				select {
+				case events <- LegacyStreamEvent{Err: item.Err}:
+				case <-ctx.Done():
+				}
+				return nil
+			}
+			chunk, done, err := c.provider.ConvertResponse(item.Data)
+			if err != nil {
+				ifaceLogger().Info("llm: parse err", "err", err)
+				select {
+				case events <- LegacyStreamEvent{Err: err}:
+				case <-ctx.Done():
+				}
+				return nil
+			}
 
-	return events, nil
+			if chunk != nil {
+				eventCount++
+				for _, choice := range chunk.Choices {
+					totalContent += len(choice.Delta.Content)
+					totalReasoning += len(choice.Delta.Reasoning)
+					for _, tc := range choice.Delta.ToolCalls {
+						acc, exists := accumulators[choice.Index]
+						if !exists {
+							acc = &toolCallAccum{}
+							accumulators[choice.Index] = acc
+						}
+						if tc.ID != "" {
+							acc.ID = tc.ID
+						}
+						if tc.Type != "" {
+							acc.Type = tc.Type
+						}
+						if tc.Function.Name != "" {
+							acc.Name = tc.Function.Name
+						}
+						acc.Args.WriteString(tc.Function.Arguments)
+					}
+				}
+				if chunk.Usage != nil {
+					lastUsage = chunk.Usage
+					select {
+					case events <- LegacyStreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
+					case <-ctx.Done():
+						return nil
+					}
+				}
+				for _, choice := range chunk.Choices {
+					if choice.Delta.Content == "" && choice.Delta.Reasoning == "" && choice.FinishReason == 0 {
+						continue
+					}
+					select {
+					case events <- LegacyStreamEvent{Chunk: &StreamChunk{
+						Choices: []StreamChoice{{
+							Index:        choice.Index,
+							Delta:        Message{Content: choice.Delta.Content, Reasoning: choice.Delta.Reasoning},
+							FinishReason: choice.FinishReason,
+						}},
+					}}:
+					case <-ctx.Done():
+						return nil
+					}
+				}
+			}
+
+			if done {
+				assembled := assembleToolCalls(accumulators)
+				if len(assembled) > 0 {
+					final := &StreamChunk{
+						Choices: []StreamChoice{{
+							Index: 0,
+							Delta: Message{ToolCalls: assembled},
+						}},
+					}
+					select {
+					case events <- LegacyStreamEvent{Chunk: final}:
+					case <-ctx.Done():
+						return nil
+					}
+				}
+				return nil
+			}
+		}
+	}
 }
 
 func (c *core) validateRequest(req *ChatRequest) error {

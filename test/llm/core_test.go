@@ -18,6 +18,7 @@ type fakeProvider struct {
 	models       []llm.Model
 	convertReq   func(*llm.ChatRequest) ([]byte, error)
 	convertChunk func([]byte) (*llm.StreamChunk, bool, error)
+	recovered    bool
 	mu           sync.Mutex
 }
 
@@ -33,6 +34,9 @@ func (f *fakeProvider) ConvertRequest(r *llm.ChatRequest) ([]byte, error) {
 }
 func (f *fakeProvider) ConvertResponse(d []byte) (*llm.StreamChunk, bool, error) {
 	return f.convertChunk(d)
+}
+func (f *fakeProvider) RecoverRequest(_ *llm.ChatRequest, _ error) bool {
+	return f.recovered
 }
 func (f *fakeProvider) Models() []llm.Model { return f.models }
 func (f *fakeProvider) SupportsCacheControl(model string) bool {

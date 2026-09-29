@@ -102,6 +102,14 @@ These are listed here because the audit's value is partly negative — confirmin
    - F2: `verified` predicate — defer to Sprint 6.
    - F3: `block_binding`/`display` controls — defer to opus-5 series sprint.
 
+## Closeout status (resolved)
+
+The F1+F4+F5 closeout commit landed as `llm(anthropic): self-heal retry + thinking-always-on + mythos tests` (see ship summary for SHA). All three items below are now shipped.
+
+- **F1**: `anthropic.ThinkingAlwaysOn(model) bool` helper added (mirrors jcode `anthropic.rs:147-159`); 25-case table-driven test + 4-case match-classifier test. Resolves with F4's self-heal as the consumer.
+- **F4**: `Provider.RecoverRequest(req, err) bool` method; `AnthropicProvider.RecoverRequest` classifies `is_reasoning_unsupported_error` and sets one of two `ChatRequest` retry flags (`RetryDropOutputConfig` for always-on; `RetryDropThinking` for everything else); `core.StreamChat` intercepts the synchronous `protocol.Stream` error before returning the channel and self-heals once. `MiniMaxProvider.RecoverRequest` is a no-op. Covered by 4 unit tests + 3 e2e httptest scenarios.
+- **F5**: 7-case `ContextMode` mythos test + 4-case `ReasoningCaps` mythos test, pinning `claude-mythos-5*` → `Native1M` + `AdaptiveThinking` + `OutputEffort`.
+
 ## Coverage roll-up
 
 | Surface | jcode LOC | awp LOC | Test LOC | Coverage |

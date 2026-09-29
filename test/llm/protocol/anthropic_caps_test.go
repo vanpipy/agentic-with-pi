@@ -276,6 +276,106 @@ func TestContextMode_NormalisesDottedAndSuffixed(t *testing.T) {
 	}
 }
 
+func TestThinkingAlwaysOn_KnownAlwaysOnGenerations(t *testing.T) {
+	cases := []struct {
+		model string
+		want  bool
+	}{
+		// Always-on adaptive thinking (opus-5-5 / fable-5-1).
+		{"claude-opus-5-5", true},
+		{"claude-opus-5-5-1", true},
+		{"claude-fable-5-1", true},
+		{"Claude-Opus-5-5", true},
+		{"claude-opus-5.5", true},
+		{"claude-opus-5-5-20260101", true},
+		{"claude-opus-5-5[1m]", true},
+		{"claude-fable-5.1", true},
+		// Manual thinking (not always-on).
+		{"claude-opus-4-7", false},
+		{"claude-opus-4-6", false},
+		{"claude-opus-5", false},
+		{"claude-opus-5-1", false},
+		{"claude-opus-5-4", false},
+		{"claude-fable-5", false},
+		{"claude-fable-4", false},
+		{"claude-sonnet-4-6", false},
+		{"claude-haiku-4-5", false},
+		{"claude-haiku-3-5", false},
+		// Unknown / non-claude.
+		{"", false},
+		{"unknown-model", false},
+		{"gpt-5", false},
+		{"MiniMax-M3", false},
+		// Fable non-5-1 is not always-on.
+		{"claude-fable-4-1", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			if got := anthropic.ThinkingAlwaysOn(tc.model); got != tc.want {
+				t.Errorf("ThinkingAlwaysOn(%q) = %v, want %v", tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestThinkingAlwaysOn_MatchesManualDefaults(t *testing.T) {
+	// Always-on generations must not expose budget controls: the
+	// model decides its own budget. The classifier should never
+	// return ManualThinking=true for them.
+	models := []string{"claude-opus-5-5", "claude-opus-5-5-1", "claude-fable-5-1", "claude-fable-5.1"}
+	for _, m := range models {
+		caps := anthropic.ReasoningCaps(m)
+		if !caps.AdaptiveThinking {
+			t.Errorf("%s: AdaptiveThinking = false, want true (always-on must be adaptive)", m)
+		}
+		if caps.ManualThinking {
+			t.Errorf("%s: ManualThinking = true, want false (always-on must be adaptive)", m)
+		}
+	}
+}
+
+func TestContextMode_MythosUsesNative1M(t *testing.T) {
+	cases := []struct {
+		model string
+		want  llm.AnthropicContextMode
+	}{
+		{"claude-mythos-5", llm.ContextNative1M},
+		{"claude-mythos-5-1", llm.ContextNative1M},
+		{"claude-mythos-5[1m]", llm.ContextNative1M},
+		{"claude-mythos-5.1", llm.ContextNative1M},
+		{"Claude-Mythos-5", llm.ContextNative1M},
+		{"claude-mythos-5-20260101", llm.ContextNative1M},
+		{"claude-mythos-5-1-20260101", llm.ContextNative1M},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			if got := anthropic.ContextMode(tc.model); got != tc.want {
+				t.Errorf("ContextMode(%q) = %v, want %v", tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReasoningCaps_Mythos(t *testing.T) {
+	cases := []string{
+		"claude-mythos-5",
+		"claude-mythos-5-1",
+		"claude-mythos-5[1m]",
+		"Claude-Mythos-5",
+	}
+	for _, m := range cases {
+		t.Run(m, func(t *testing.T) {
+			caps := anthropic.ReasoningCaps(m)
+			if !caps.AdaptiveThinking {
+				t.Errorf("%s: AdaptiveThinking = false, want true (mythos uses adaptive)", m)
+			}
+			if !caps.OutputEffort {
+				t.Errorf("%s: OutputEffort = false, want true (mythos supports output_config)", m)
+			}
+		})
+	}
+}
+
 func TestReasoningCaps_NormalisesDottedAndSuffixed(t *testing.T) {
 	probes := []struct {
 		a, b string

@@ -680,3 +680,125 @@ func TestAnthropicProviderAvailableServiceTiers(t *testing.T) {
 		t.Errorf("service tiers = %v, want nil", got)
 	}
 }
+
+func TestAnthropicProviderRecoverRequest_AlwaysOnModel(t *testing.T) {
+	p := newAnthropicProvider()
+	for _, model := range []string{"claude-opus-5-5", "claude-fable-5-1", "Claude-Opus-5-5", "claude-opus-5.5"} {
+		t.Run(model, func(t *testing.T) {
+			req := &llm.ChatRequest{Model: model, ReasoningEffort: "medium"}
+			err := &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"output_config is not supported on this model"}}`}
+			if !p.RecoverRequest(req, err) {
+				t.Fatal("RecoverRequest = false, want true")
+			}
+			if !req.RetryDropOutputConfig {
+				t.Errorf("RetryDropOutputConfig = false, want true (always-on model must keep thinking envelope)")
+			}
+			if req.RetryDropThinking {
+				t.Errorf("RetryDropThinking = true, want false (always-on model must keep thinking envelope)")
+			}
+		})
+	}
+}
+
+func TestAnthropicProviderRecoverRequest_NonAlwaysOnModel(t *testing.T) {
+	p := newAnthropicProvider()
+	for _, model := range []string{"claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"} {
+		t.Run(model, func(t *testing.T) {
+			req := &llm.ChatRequest{Model: model, ReasoningEffort: "high"}
+			err := &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking with extended budget is not supported"}}`}
+			if !p.RecoverRequest(req, err) {
+				t.Fatal("RecoverRequest = false, want true")
+			}
+			if !req.RetryDropThinking {
+				t.Errorf("RetryDropThinking = false, want true (non-always-on must drop both)")
+			}
+			if req.RetryDropOutputConfig {
+				t.Errorf("RetryDropOutputConfig = true, want false (non-always-on should drop both, not keep thinking)")
+			}
+		})
+	}
+}
+
+func TestAnthropicProviderRecoverRequest_NonReasoningError(t *testing.T) {
+	p := newAnthropicProvider()
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{"auth_error", &providerError{msg: "401 Unauthorized: invalid api key"}},
+		{"rate_limit", &providerError{msg: "429 Too Many Requests"}},
+		{"server_500", &providerError{msg: "500 Internal Server Error"}},
+		{"schema_mismatch", &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"messages.0.content.0.type: must be 'text'"}}`}},
+		{"thinking_unsupported_but_not_a_400", &providerError{msg: "thinking field is not supported (network glitch)"}},
+		{"nil_err", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &llm.ChatRequest{Model: "claude-opus-5-5"}
+			if p.RecoverRequest(req, tc.err) {
+				t.Errorf("RecoverRequest = true, want false (non-reasoning error must not trigger recovery)")
+			}
+			if req.RetryDropThinking || req.RetryDropOutputConfig {
+				t.Errorf("req mutated: RetryDropThinking=%v RetryDropOutputConfig=%v", req.RetryDropThinking, req.RetryDropOutputConfig)
+			}
+		})
+	}
+}
+
+func TestAnthropicProviderConvertRequestHonorsRetryDropFlags(t *testing.T) {
+	p := newAnthropicProvider()
+
+	// RetryDropOutputConfig on an always-on model: keeps thinking,
+	// drops output_config.
+	req := &llm.ChatRequest{
+		Model:                "claude-opus-5-5",
+		ReasoningEffort:      "medium",
+		RetryDropOutputConfig: true,
+		Messages:             []llm.Message{{Role: "user", Content: "hi"}},
+	}
+	body, err := p.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["thinking"] == nil {
+		t.Errorf("thinking missing, want adaptive envelope kept: body=%s", string(body))
+	}
+	if got["output_config"] != nil {
+		t.Errorf("output_config present, want omitted: body=%s", string(body))
+	}
+
+	// RetryDropThinking on a non-always-on model: drops both.
+	req = &llm.ChatRequest{
+		Model:             "claude-opus-4-7",
+		ReasoningEffort:   "high",
+		RetryDropThinking: true,
+		Messages:          []llm.Message{{Role: "user", Content: "hi"}},
+	}
+	body, err = p.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["thinking"] != nil {
+		t.Errorf("thinking present, want omitted: body=%s", string(body))
+	}
+	if got["output_config"] != nil {
+		t.Errorf("output_config present, want omitted: body=%s", string(body))
+	}
+}
+
+// providerError is a minimal error type that prints `msg` verbatim
+// (so the substring heuristics in isReasoningUnsupportedError can be
+// tested deterministically).
+type providerError struct {
+	msg string
+}
+
+func (e *providerError) Error() string { return e.msg }

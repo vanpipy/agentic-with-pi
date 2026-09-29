@@ -19,6 +19,9 @@ func (s *stubProvider) ConvertRequest(*llm.ChatRequest) ([]byte, error) { return
 func (s *stubProvider) ConvertResponse([]byte) (*llm.StreamChunk, bool, error) {
 	return nil, false, nil
 }
+func (s *stubProvider) RecoverRequest(*llm.ChatRequest, error) bool {
+	return false
+}
 func (s *stubProvider) Models() []llm.Model { return s.models }
 func (s *stubProvider) SupportsCacheControl(model string) bool {
 	return false
