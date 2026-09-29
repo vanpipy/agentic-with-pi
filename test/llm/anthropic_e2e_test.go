@@ -237,8 +237,157 @@ func TestEndToEndAnthropicProviderHaikuOmitsThinking(t *testing.T) {
 	if _, ok := body["thinking"]; ok {
 		t.Errorf("thinking should be omitted for haiku-4-5: %+v", body)
 	}
-	if body["model"] != "claude-haiku-4-5" {
-		t.Errorf("model = %v", body["model"])
+}
+
+// TestEndToEndAnthropicProviderClassifierDispatch_ManualThinking
+// pins the manual-thinking fallback for opus-4-5
+// (capsManualWithEffort): thinking:{type:enabled,budget_tokens:4096}
+// for effort=medium, plus output_config:{effort:medium}. Exercises
+// the classifier-driven dispatch end-to-end through Core → provider
+// → wire.
+func TestEndToEndAnthropicProviderClassifierDispatch_ManualThinking(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-4-5",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+		MaxTokens:       64000,
+		ReasoningEffort: "medium",
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	var body map[string]any
+	json.Unmarshal(receivedBody, &body)
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking missing for opus-4-5: %+v", body)
+	}
+	if thinking["type"] != "enabled" {
+		t.Errorf("thinking.type = %v, want enabled (caps.ManualThinking)", thinking["type"])
+	}
+	if budget := int(thinking["budget_tokens"].(float64)); budget != 4096 {
+		t.Errorf("budget_tokens = %d, want 4096 (medium)", budget)
+	}
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config missing for opus-4-5: %+v", body)
+	}
+	if outputConfig["effort"] != "medium" {
+		t.Errorf("output_config.effort = %v, want medium", outputConfig["effort"])
+	}
+	if _, hasTemp := body["temperature"]; hasTemp {
+		t.Errorf("temperature must be omitted when thinking is active, got %+v", body["temperature"])
+	}
+}
+
+// TestEndToEndAnthropicProviderClassifierDispatch_XHighDefault
+// pins that opus-4-7 (capsFull, XHighEffort=true) emits the xhigh
+// effort by default even though the caller left ReasoningEffort
+// empty. This is the highest-effort generation; we don't want to
+// under-deliver silently.
+func TestEndToEndAnthropicProviderClassifierDispatch_XHighDefault(t *testing.T) {
+	var receivedBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:    "claude-opus-4-7",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	var body map[string]any
+	json.Unmarshal(receivedBody, &body)
+	thinking, ok := body["thinking"].(map[string]any)
+	if !ok {
+		t.Fatalf("thinking missing for opus-4-7: %+v", body)
+	}
+	if thinking["type"] != "adaptive" {
+		t.Errorf("thinking.type = %v, want adaptive (caps.AdaptiveThinking)", thinking["type"])
+	}
+	if _, hasBudget := thinking["budget_tokens"]; hasBudget {
+		t.Errorf("adaptive envelope must omit budget_tokens, got %+v", thinking)
+	}
+	outputConfig, ok := body["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config missing for opus-4-7: %+v", body)
+	}
+	if outputConfig["effort"] != "xhigh" {
+		t.Errorf("output_config.effort = %v, want xhigh (opus-4-7 default)", outputConfig["effort"])
+	}
+}
+
+// TestEndToEndAnthropicProviderOneMSuffixStripAndBeta verifies
+// that the `[1m]` suffix is stripped from the wire model field and
+// the anthropic-beta header carries the context-1m opt-in. The
+// header is added by core.headersFor from provider.BetaHeaders.
+func TestEndToEndAnthropicProviderOneMSuffixStripAndBeta(t *testing.T) {
+	var receivedBody []byte
+	var receivedHeader string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		receivedHeader = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":5,"output_tokens":1}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:    "claude-opus-4-6[1m]",
+		Messages: []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	var body map[string]any
+	json.Unmarshal(receivedBody, &body)
+	if body["model"] != "claude-opus-4-6" {
+		t.Errorf("wire model = %v, want claude-opus-4-6 (suffix stripped)", body["model"])
+	}
+	if receivedHeader != "context-1m-2025-08-07" {
+		t.Errorf("anthropic-beta header = %q, want context-1m-2025-08-07", receivedHeader)
 	}
 }
 
