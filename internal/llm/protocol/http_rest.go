@@ -45,6 +45,13 @@ func NewHTTPRest() *HTTPRest {
 	}
 }
 
+func NewHTTPRestWithClient(client *http.Client) *HTTPRest {
+	if client == nil {
+		return NewHTTPRest()
+	}
+	return &HTTPRest{client: client}
+}
+
 func applyRequestTimeout(parent context.Context, req *Request) (context.Context, context.CancelFunc) {
 	if req.Timeout > 0 {
 		return context.WithTimeout(parent, req.Timeout)
