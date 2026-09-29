@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/vanpiyp/awp/internal/llm/retryafter"
 )
 
 const maxResponseBodyBytes = 10 * 1024 * 1024
@@ -41,6 +43,13 @@ func NewHTTPRest() *HTTPRest {
 			},
 		},
 	}
+}
+
+func NewHTTPRestWithClient(client *http.Client) *HTTPRest {
+	if client == nil {
+		return NewHTTPRest()
+	}
+	return &HTTPRest{client: client}
 }
 
 func applyRequestTimeout(parent context.Context, req *Request) (context.Context, context.CancelFunc) {
@@ -100,6 +109,7 @@ func (p *HTTPRest) Send(ctx context.Context, req *Request) ([]byte, error) {
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       data,
+			RetryAfter: retryafter.ParseRetryAfterFromHeaders(resp.Header),
 		}
 	}
 
@@ -141,6 +151,7 @@ func (p *HTTPRest) Stream(ctx context.Context, req *Request) (<-chan StreamItem,
 		return nil, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Body:       body,
+			RetryAfter: retryafter.ParseRetryAfterFromHeaders(resp.Header),
 		}
 	}
 	status = resp.StatusCode

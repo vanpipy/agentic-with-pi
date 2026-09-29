@@ -18,10 +18,15 @@ type Request struct {
 type HTTPError struct {
 	StatusCode int
 	Body       []byte
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
-	return "HTTP " + strconv.Itoa(e.StatusCode) + ": " + string(e.Body)
+	msg := "HTTP " + strconv.Itoa(e.StatusCode) + ": " + string(e.Body)
+	if e.RetryAfter > 0 {
+		msg += " (retry-after: " + e.RetryAfter.String() + ")"
+	}
+	return msg
 }
 
 type StreamItem struct {
