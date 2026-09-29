@@ -741,3 +741,121 @@ func TestEndToEndAnthropicProviderSelfHealRetryCancelledMidRetry(t *testing.T) {
 		t.Fatalf("StreamChat did not return after ctx cancel (calls=%d)", calls.Load())
 	}
 }
+
+func TestEndToEndAnthropicProviderSelfHealRetryPreservesBetaHeader(t *testing.T) {
+	// opus-4-6[1m] requires the `anthropic-beta: context-1m-2025-08-07`
+	// header. The retry must still send it; otherwise the second
+	// attempt would be misclassified as a 200K-context model and
+	// rejected for input length.
+	var calls atomic.Int32
+	var observed sync.Map // call# -> header value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		observed.Store(n-1, r.Header.Get("anthropic-beta"))
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"output_config.effort is not supported on this model"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-4-6[1m]",
+		ReasoningEffort: "high",
+		Messages:        []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("calls = %d, want 2", got)
+	}
+	for n := int32(0); n < 2; n++ {
+		v, ok := observed.Load(n)
+		if !ok {
+			t.Errorf("call %d header not captured", n)
+			continue
+		}
+		if v != "context-1m-2025-08-07" {
+			t.Errorf("call %d anthropic-beta = %q, want %q (1m beta must persist through self-heal retry)", n, v, "context-1m-2025-08-07")
+		}
+	}
+}
+
+func TestEndToEndAnthropicProviderSelfHealRetryPreservesTools(t *testing.T) {
+	// Self-heal must NOT silently strip tools from the retry
+	// request. The user's tool definitions must be present on
+	// both attempts.
+	var calls atomic.Int32
+	var bodies [2]string
+	var bodiesMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		bodiesMu.Lock()
+		bodies[n-1] = string(body)
+		bodiesMu.Unlock()
+		if n == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+`+"\n\n"+`data: {"type":"message_stop"}
+`+"\n\n")
+	}))
+	defer srv.Close()
+
+	client := &http.Client{Transport: redirectTransport{target: srv.URL}}
+	core := llm.NewCore(providers.NewAnthropicProvider("tk"), protocol.NewHTTPRestWithClient(client))
+
+	tool := llm.ToolDef{
+		Type: "function",
+		Function: llm.FunctionDef{
+			Name:        "read_file",
+			Description: "read a file from disk",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
+		},
+	}
+	events, err := core.StreamChat(context.Background(), &llm.ChatRequest{
+		Model:           "claude-opus-4-7",
+		ReasoningEffort: "high",
+		Tools:           []llm.ToolDef{tool},
+		Messages:        []llm.Message{{Role: "user", Content: "read foo.txt"}},
+	})
+	if err != nil {
+		t.Fatalf("StreamChat: %v", err)
+	}
+	for range events {
+	}
+
+	bodiesMu.Lock()
+	defer bodiesMu.Unlock()
+	for n := 0; n < 2; n++ {
+		if !strings.Contains(bodies[n], `"read_file"`) {
+			t.Errorf("call %d missing tool definition:\n%s", n, bodies[n])
+		}
+		if !strings.Contains(bodies[n], `"tools"`) {
+			t.Errorf("call %d missing tools key:\n%s", n, bodies[n])
+		}
+	}
+}
+
+// (Was added to test/llm/anthropic_e2e_test.go by mistake; see
+// test/llm/providers/anthropic_test.go for the proper location.)

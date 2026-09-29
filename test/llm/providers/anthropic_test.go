@@ -912,3 +912,86 @@ func TestMiniMaxProviderRecoverRequestAlwaysReturnsFalse(t *testing.T) {
 		}
 	}
 }
+
+func TestAnthropicProviderRecoverRequest_DoesNotMutateModel(t *testing.T) {
+	// The retry path runs ConvertRequest on the mutated request,
+	// which calls Strip1mSuffix on ar.Model but must NOT mutate
+	// req.Model (the caller may still reference it after the
+	// request returns).
+	p := newAnthropicProvider()
+	req := &llm.ChatRequest{
+		Model:           "claude-opus-4-6[1m]",
+		ReasoningEffort: "high",
+	}
+	originalModel := req.Model
+	_ = p.RecoverRequest(req, &providerError{msg: `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`})
+	if req.Model != originalModel {
+		t.Errorf("req.Model mutated: %q -> %q (RecoverRequest must not strip suffix from caller-visible field)", originalModel, req.Model)
+	}
+	if !req.RetryDropThinking {
+		t.Errorf("RetryDropThinking = false, want true")
+	}
+}
+
+func TestRecoverRequest_NegativeErrorMessages(t *testing.T) {
+	// The heuristic must NOT classify the following as
+	// recoverable: they are not about output_config/thinking/
+	// effort rejection.
+	p := newAnthropicProvider()
+	nonRecoverable := []string{
+		"thinking must be enabled for this model",
+		"thinking is required",
+		"thinking is disabled for this model",
+		"output_config value 'high' is invalid",
+		"output_config has wrong type",
+		"missing required field: model",
+		"invalid api key",
+		"context length exceeded",
+		"prompt is too long",
+		"max_tokens too large for this model",
+		// Mixed but not about thinking/effort/output_config rejection:
+		"messages.0.content.0.type: must be 'text'",
+		"tool_choice is invalid",
+	}
+	for _, msg := range nonRecoverable {
+		t.Run(msg, func(t *testing.T) {
+			err := &providerError{msg: msg}
+			req := &llm.ChatRequest{Model: "claude-opus-5-5"}
+			if p.RecoverRequest(req, err) {
+				t.Errorf("RecoverRequest(%q) = true, want false (non-reasoning error must not trigger recovery)", msg)
+			}
+			if req.RetryDropThinking || req.RetryDropOutputConfig {
+				t.Errorf("RecoverRequest mutated req for non-reasoning error %q", msg)
+			}
+		})
+	}
+}
+
+func TestRecoverRequest_RecoverableMixedErrorMessages(t *testing.T) {
+	// Errors that mention a recoverable field + "not supported" /
+	// "does not support" + the Anthropic 400 envelope must trigger
+	// recovery. The heuristic is substring-based and accepts a
+	// loose match.
+	p := newAnthropicProvider()
+	type tc struct {
+		model string
+		body  string
+	}
+	cases := []tc{
+		{"claude-opus-5-5", `{"type":"error","error":{"type":"invalid_request_error","message":"output_config.effort is not supported on this model"}}`},
+		{"claude-opus-4-5", `{"type":"error","error":{"type":"invalid_request_error","message":"thinking is not supported"}}`},
+		{"claude-opus-4-7", `{"type":"error","error":{"type":"invalid_request_error","message":"effort does not support 'xhigh' on this generation"}}`},
+		{"claude-opus-4-5", `{"type":"error","error":{"type":"invalid_request_error","message":"this model does not support thinking"}}`},
+		{"claude-opus-4-7", `{"type":"error","error":{"type":"invalid_request_error","message":"output_config is not supported"}}`},
+		{"claude-opus-4-7", `{"type":"error","error":{"type":"invalid_request_error","message":"tools not supported with output_config on this model"}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			err := &providerError{msg: c.body}
+			req := &llm.ChatRequest{Model: c.model}
+			if !p.RecoverRequest(req, err) {
+				t.Errorf("RecoverRequest(model=%q, body=%q) = false, want true", c.model, c.body)
+			}
+		})
+	}
+}
