@@ -87,3 +87,63 @@ Three atomic commits, like Sprint 2:
 - [ ] User picks one of the four open questions above
 - [ ] New worktree `ws-llm-failover` cut from `main` at `5c8ffbd`
 - [ ] `go.sum` copy hygiene per workspace-gotchas memory
+
+## 7. Appendix: `pick_next_fallback_route_with_options` algorithm detail
+
+Captured from `fallback_pick.rs:108-162` so the Sprint 3 implementer has the full reference inline. The function signature:
+
+```rust
+pub fn pick_next_fallback_route_with_options(
+    routes: &[ModelRoute],
+    current_model: &str,
+    current_provider: &str,
+    current_api_method: &str,
+    options: FallbackPickOptions,
+) -> Option<usize>
+```
+
+Returns the index into `routes` of the best fallback, or `None`.
+
+### Filter stage
+
+For each `route` in `routes` where `route.available`:
+
+1. Skip if `same_model && same_provider && (same_method || unknown_method)` (line 133). The unknown-method case is for remote sessions that didn't track the failed route's auth method — any same-model same-provider route could be the exact failed one, so it's excluded to avoid offering a guaranteed-identical failure.
+
+2. Skip if `options.credential_failure && same_provider && (same_method || unknown_method)` (line 140). A broken OAuth session breaks every model behind it, not just the failed one — exclude all same-credential routes so the offer is one that can plausibly work.
+
+### Score stage
+
+After filtering, score each remaining route as `(tier, prefers_oauth, index)` where:
+
+| `tier` value | Condition | Meaning |
+|---|---|---|
+| `0` | `same_model && !same_method` | Same model, different auth method (least disruptive) |
+| `1` | `same_provider` | Same provider, different model |
+| `2` | else | Different provider (last resort) |
+
+`prefers_oauth = 1` (high) when the route's API method is *not* OAuth; `prefers_oauth = 0` (low) when OAuth. Sorting by `(tier ASC, prefers_oauth ASC, index ASC)` puts OAuth candidates first within a tier, with catalog order preserved as the final tiebreaker.
+
+### Return
+
+The first `(tier, prefers_oauth, index)` after `.min()`. Returns `None` when no route survives the filter.
+
+### Test cases (all in fallback_pick.rs:165-361)
+
+| Test | Validates |
+|---|---|
+| `prefers_same_model_oauth_when_api_key_broken` (line 180) | Tier 0 win: claude-api fails → claude-oauth for same model |
+| `falls_back_to_same_provider_sibling_model` (line 194) | Tier 1 win: opus fails → sonnet on same provider |
+| `falls_back_cross_provider_as_last_resort` (line 208) | Tier 2 win: only cross-provider option available |
+| `skips_unavailable_routes` (line 220) | `route.available == false` is filtered |
+| `returns_none_when_only_current_route_exists` (line 235) | Single-route case → None |
+| `cross_provider_prefers_oauth_over_api_key` (line 241) | Tier 2 + prefers_oauth tiebreaker |
+| `unknown_method_never_offers_same_model_same_provider` (line 255) | Remote-session `current_api_method=""` case |
+| `credential_failure_skips_sibling_models_on_same_credential` (line 269) | `options.credential_failure=true` widens exclusion |
+| `credential_failure_still_offers_other_method_same_provider` (line 293) | OAuth broken → API key for same model still tier 0 |
+| `credential_failure_with_unknown_method_skips_whole_provider` (line 315) | OAuth broken + unknown method → hop provider entirely |
+| `classifies_credential_failures` (line 333) | `error_looks_like_credential_failure` markers ("token refresh failed", "invalid_grant", "401 Unauthorized", "Please log in again", etc.); non-credential failures (`429 rate limit`, `500 internal server error`) return false |
+
+### Algorithm summary for Sprint 3 implementer
+
+The Go port should be a single `func PickNextFallbackRoute(routes []ModelRoute, current ...) (int, bool)` returning `(index, ok)`. The filter stage is a single pass; the score stage can fold into the same pass by emitting `(tier, oauthPenalty, index)` tuples and taking the min. The test cases above translate 1:1 into Go table-driven tests under `test/llm/failover/fallback_pick_test.go`.
