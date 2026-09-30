@@ -10,34 +10,19 @@ import (
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/streamtest"
 )
 
-func streamToolChunk(toolCalls []llm.ToolCall) llm.LegacyStreamEvent {
-	return llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Index:        0,
-		Delta:        llm.Message{ToolCalls: toolCalls},
-		FinishReason: llm.FinishReasonToolUse,
-	}}}}
+func streamPlaceholderToolCall(id, name, args string) llm.StreamEvent {
+	return streamtest.ToolStart(id, name)
 }
 
-func streamPlaceholderToolCall(id, name, args string) llm.LegacyStreamEvent {
-	return streamToolChunk([]llm.ToolCall{{
-		ID:       id,
-		Type:     "function",
-		Function: llm.FunctionCall{Name: name, Arguments: args},
-	}})
-}
-
-func streamDeltaToolCall(id, args string) llm.LegacyStreamEvent {
-	return streamToolChunk([]llm.ToolCall{{
-		ID:       id,
-		Type:     "function",
-		Function: llm.FunctionCall{Arguments: args},
-	}})
+func streamDeltaToolCall(id, args string) llm.StreamEvent {
+	return streamtest.ToolDelta(id, args)
 }
 
 func TestStreamMerge_T1_SingleCallMergesMultipleDeltasIntoOneEntry(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 		streamDeltaToolCall("c1", `{"com`),
 		streamDeltaToolCall("c1", `mand`),
@@ -59,7 +44,7 @@ func TestStreamMerge_T1_SingleCallMergesMultipleDeltasIntoOneEntry(t *testing.T)
 }
 
 func TestStreamMerge_T2_TwoParallelCallsKeepDistinctEntries(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("cA", "bash", ""),
 		streamPlaceholderToolCall("cB", "read", ""),
 		streamDeltaToolCall("cA", `{"com`),
@@ -89,7 +74,7 @@ func TestStreamMerge_T2_TwoParallelCallsKeepDistinctEntries(t *testing.T) {
 func TestStreamMerge_T3_ByteOrderPreservedAcrossDeltas(t *testing.T) {
 	a := `{"command":"echo hi","note":"first part "`
 	b := `,"trailing":"x"}`
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 		streamDeltaToolCall("c1", a),
 		streamDeltaToolCall("c1", b),
@@ -137,7 +122,7 @@ func newBashToolAgent(t *testing.T) *agentcore.Agent {
 }
 
 func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
 	}
 	calls := agentcore.AccumulateStreamToolCallsForTest(events)
@@ -194,9 +179,9 @@ func TestStreamMerge_T4_TruncatedStreamPlaceholderSkippedByExecutor(t *testing.T
 }
 
 func TestStreamMerge_BackwardCompat_TestHelperPlaceholdersThenDelta(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
-		toolUseStartChunk("c1", "read"),
-		toolUseIDDeltaChunk("c1", "read", `{"path":"AGENTS.md"}`),
+	events := []llm.StreamEvent{
+		streamtest.ToolStart("c1", "read"),
+		streamtest.ToolDelta("c1", `{"path":"AGENTS.md"}`),
 	}
 	calls := agentcore.AccumulateStreamToolCallsForTest(events)
 	if len(calls) != 1 {
@@ -211,12 +196,9 @@ func TestStreamMerge_BackwardCompat_TestHelperPlaceholdersThenDelta(t *testing.T
 }
 
 func TestStreamMerge_DeltaWithoutIDAppendsToLastPlaceholder(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("c1", "bash", ""),
-		streamToolChunk([]llm.ToolCall{{
-			Type:     "function",
-			Function: llm.FunctionCall{Arguments: `{"command":"ls"}`},
-		}}),
+		streamtest.ToolDelta("", `{"command":"ls"}`),
 	}
 	calls := agentcore.AccumulateStreamToolCallsForTest(events)
 	if len(calls) != 1 {
@@ -228,7 +210,7 @@ func TestStreamMerge_DeltaWithoutIDAppendsToLastPlaceholder(t *testing.T) {
 }
 
 func TestStreamMerge_NewIDAppendsAndKeepsPriorIntact(t *testing.T) {
-	events := []llm.LegacyStreamEvent{
+	events := []llm.StreamEvent{
 		streamPlaceholderToolCall("cA", "bash", ""),
 		streamDeltaToolCall("cA", `{"command":"ls"}`),
 		streamPlaceholderToolCall("cB", "read", ""),
@@ -291,22 +273,22 @@ func TestStreamMerge_ExecutesMergedCallEndToEnd(t *testing.T) {
 			return "ok:" + parsed.Command, nil
 		},
 	})
-	chunks := [][]llm.LegacyStreamEvent{
+	chunks := [][]llm.StreamEvent{
 		{
 			streamPlaceholderToolCall("c1", "bash", ""),
 			streamDeltaToolCall("c1", `{"command`),
 			streamDeltaToolCall("c1", `":"date`),
 			streamDeltaToolCall("c1", `"}`),
-			llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonToolUse}}}},
-			llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}},
+			streamtest.Finish(llm.FinishReasonToolUse),
+			streamtest.NoOp(),
 		},
 		{
-			textDeltaChunk("done at " + "2026-09-25"),
-			messageDeltaStopChunk("end_turn"),
-			messageStopChunk(),
+			streamtest.Text("done at " + "2026-09-25"),
+			streamtest.Finish(llm.FinishReasonStop),
+			streamtest.NoOp(),
 		},
 	}
-	core := &fakeCore{streamChunksList: chunks}
+	core := &fakeCore{streamEventsList: chunks}
 	ag2 := newTestAgent(core, "test-model")
 	ag2.WithTool(agentcore.ToolFunc{
 		N: "bash",

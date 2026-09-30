@@ -37,16 +37,41 @@ func (p *TypedProcessor) ProcessEvent(ctx context.Context, ev llm.StreamEvent) (
 		p.reasoningSig = e.Signature
 	case llm.EventThinkingEnd:
 	case llm.EventToolStart:
-		p.toolCalls = append(p.toolCalls, llm.ToolCall{
-			ID:       e.ID,
-			Type:     "function",
-			Function: llm.FunctionCall{Name: e.Name, Arguments: ""},
-		})
-		emits = append(emits, EmitEvent{Kind: EmitKindTool, ToolName: e.Name})
-	case llm.EventToolDelta:
+		merged := false
 		for i := range p.toolCalls {
 			if p.toolCalls[i].ID == e.ID {
-				p.toolCalls[i].Function.Arguments += e.JSON
+				if e.Name != "" {
+					p.toolCalls[i].Function.Name = e.Name
+				}
+				if e.ID != "" {
+					p.toolCalls[i].ID = e.ID
+				}
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			p.toolCalls = append(p.toolCalls, llm.ToolCall{
+				ID:       e.ID,
+				Type:     "function",
+				Function: llm.FunctionCall{Name: e.Name, Arguments: ""},
+			})
+		}
+		emits = append(emits, EmitEvent{Kind: EmitKindTool, ToolName: e.Name})
+	case llm.EventToolDelta:
+		if e.ID == "" {
+			if n := len(p.toolCalls); n > 0 {
+				p.toolCalls[n-1].Function.Arguments += e.JSON
+			}
+			break
+		}
+		for i := range p.toolCalls {
+			if p.toolCalls[i].ID == e.ID {
+				if p.toolCalls[i].Function.Arguments == "{}" && e.JSON != "{}" {
+					p.toolCalls[i].Function.Arguments = e.JSON
+				} else {
+					p.toolCalls[i].Function.Arguments += e.JSON
+				}
 				break
 			}
 		}

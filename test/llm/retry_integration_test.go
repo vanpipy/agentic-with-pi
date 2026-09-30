@@ -19,15 +19,15 @@ import (
 type scriptedFailingCore struct {
 	calls    int
 	failOnce error
-	script   []llm.LegacyStreamEvent
+	script   []llm.StreamEvent
 }
 
-func (s *scriptedFailingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (s *scriptedFailingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	s.calls++
 	if s.calls == 1 && s.failOnce != nil {
 		return nil, s.failOnce
 	}
-	ch := make(chan llm.LegacyStreamEvent, len(s.script)+1)
+	ch := make(chan llm.StreamEvent, len(s.script)+1)
 	for _, ev := range s.script {
 		ch <- ev
 	}
@@ -40,24 +40,24 @@ func (s *scriptedFailingCore) StreamChat(ctx context.Context, req *llm.ChatReque
 type scriptedMidStreamCore struct {
 	calls     int
 	streamErr error
-	pre       []llm.LegacyStreamEvent
-	post      []llm.LegacyStreamEvent
+	pre       []llm.StreamEvent
+	post      []llm.StreamEvent
 }
 
-func (s *scriptedMidStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (s *scriptedMidStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	s.calls++
-	var events []llm.LegacyStreamEvent
+	var events []llm.StreamEvent
 	if s.calls == 1 {
 		events = s.pre
 	} else {
 		events = s.post
 	}
-	ch := make(chan llm.LegacyStreamEvent, len(events)+1)
+	ch := make(chan llm.StreamEvent, len(events)+1)
 	for _, ev := range events {
 		ch <- ev
 	}
 	if s.calls == 1 && s.streamErr != nil {
-		ch <- llm.LegacyStreamEvent{Err: s.streamErr}
+		ch <- llm.EventErr{Err: s.streamErr}
 	}
 	close(ch)
 	return ch, nil
@@ -197,8 +197,8 @@ func TestRetryCoreHonorsServerHintInBackoff(t *testing.T) {
 	}
 	inner := &scriptedFailingCore{
 		failOnce: httpErr,
-		script: []llm.LegacyStreamEvent{
-			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "ok"}}}}},
+		script: []llm.StreamEvent{
+			llm.EventTextDelta{Text: "ok"},
 		},
 	}
 	rc := llm.NewRetryCore(inner, fastConfig(3))
@@ -223,8 +223,8 @@ func TestRetryCoreHonorsServerHintInBackoff(t *testing.T) {
 func TestRetryCoreFallsBackToExponentialWhenNoHint(t *testing.T) {
 	inner := &scriptedFailingCore{
 		failOnce: errors.New("connection reset by peer"),
-		script: []llm.LegacyStreamEvent{
-			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "ok"}}}}},
+		script: []llm.StreamEvent{
+			llm.EventTextDelta{Text: "ok"},
 		},
 	}
 	rc := llm.NewRetryCore(inner, fastConfig(3))
@@ -255,11 +255,11 @@ func TestRetryCoreMidStreamRollbackHonorsRetryAfterHint(t *testing.T) {
 	}
 	inner := &scriptedMidStreamCore{
 		streamErr: httpErr,
-		pre: []llm.LegacyStreamEvent{
-			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "partial"}}}}},
+		pre: []llm.StreamEvent{
+			llm.EventTextDelta{Text: "partial"},
 		},
-		post: []llm.LegacyStreamEvent{
-			{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "ok"}}}}},
+		post: []llm.StreamEvent{
+			llm.EventTextDelta{Text: "ok"},
 		},
 	}
 	rc := llm.NewRetryCore(inner, fastConfig(3))
@@ -269,7 +269,7 @@ func TestRetryCoreMidStreamRollbackHonorsRetryAfterHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StreamChat = %v", err)
 	}
-	var got []llm.LegacyStreamEvent
+	var got []llm.StreamEvent
 	for ev := range events {
 		got = append(got, ev)
 	}
@@ -281,8 +281,8 @@ func TestRetryCoreMidStreamRollbackHonorsRetryAfterHint(t *testing.T) {
 	if len(got) < 2 {
 		t.Fatalf("got %d events, want at least 2 (rollback + post-retry content)", len(got))
 	}
-	if !got[1].Rollback {
-		t.Fatalf("got[1].Rollback = false, want true (rollback emitted before retry)")
+	if _, ok := got[1].(llm.EventRetryRollback); !ok {
+		t.Fatalf("got[1] = %T, want llm.EventRetryRollback (rollback emitted before retry)", got[1])
 	}
 }
 

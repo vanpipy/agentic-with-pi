@@ -39,10 +39,10 @@ func NewRetryCore(inner Core, config RetryConfig) *RetryCore {
 	return &RetryCore{inner: inner, config: config}
 }
 
-func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
+func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	baseMs := r.config.InitialBackoff.Milliseconds()
 	var (
-		ch          <-chan LegacyStreamEvent
+		ch          <-chan StreamEvent
 		connErr     error
 		lastAttempt int
 	)
@@ -68,12 +68,12 @@ func (r *RetryCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan Le
 			return nil, sleepErr
 		}
 	}
-	out := make(chan LegacyStreamEvent, 32)
+	out := make(chan StreamEvent, 32)
 	go r.forwardWithMidRetry(ctx, req, ch, out, lastAttempt, baseMs)
 	return out, nil
 }
 
-func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan LegacyStreamEvent, out chan<- LegacyStreamEvent, attempt int, baseMs int64) {
+func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, ch <-chan StreamEvent, out chan<- StreamEvent, attempt int, baseMs int64) {
 	defer close(out)
 	for {
 		emittedCount := 0
@@ -81,18 +81,18 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 		var lastErr error
 		for ev := range ch {
 			emittedCount++
-			if ev.Err != nil {
-				lastErr = ev.Err
-				if emittedCount > 1 && IsRetryable(ev.Err) && attempt < r.config.MaxRetries {
+			if e, ok := ev.(EventErr); ok && e.Err != nil {
+				lastErr = e.Err
+				if emittedCount > 1 && IsRetryable(e.Err) && attempt < r.config.MaxRetries {
 					select {
-					case out <- LegacyStreamEvent{Rollback: true}:
+					case out <- EventRetryRollback{Attempt: attempt + 1, Max: r.config.MaxRetries + 1}:
 					case <-ctx.Done():
 						return
 					}
 					midRetry = true
 				} else {
 					select {
-					case out <- LegacyStreamEvent{Err: ev.Err}:
+					case out <- e:
 					case <-ctx.Done():
 					}
 					return
@@ -128,7 +128,7 @@ func (r *RetryCore) forwardWithMidRetry(ctx context.Context, req *ChatRequest, c
 		ch, connErr = r.inner.StreamChat(ctx, req)
 		if connErr != nil {
 			select {
-			case out <- LegacyStreamEvent{Err: connErr}:
+			case out <- EventErr{Err: connErr}:
 			case <-ctx.Done():
 			}
 			return

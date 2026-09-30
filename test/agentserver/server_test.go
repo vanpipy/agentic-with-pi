@@ -25,8 +25,8 @@ import (
 
 type blockingCore struct{}
 
-func (b *blockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent)
+func (b *blockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent)
 	go func() {
 		<-ctx.Done()
 		close(ch)
@@ -36,24 +36,18 @@ func (b *blockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 
 type fakeCore struct{}
 
-func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 3)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: "hello"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: " world"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonStop,
-	}}}}
+func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- llm.EventTextDelta{Text: "hello"}
+	ch <- llm.EventTextDelta{Text: " world"}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }
 
 type failingCore struct{}
 
-func (failingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (failingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, errors.New("llm provider is down")
 }
 
@@ -590,7 +584,7 @@ type fakeCoreWithSummary struct {
 	fakeCore
 }
 
-func (f *fakeCoreWithSummary) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (f *fakeCoreWithSummary) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	hasSummary := false
 	for _, m := range req.Messages {
 		if m.Role == "assistant" && strings.Contains(m.Content, "Previous conversation summary") {
@@ -602,14 +596,9 @@ func (f *fakeCoreWithSummary) StreamChat(ctx context.Context, req *llm.ChatReque
 	if hasSummary {
 		reply = "saw the compaction"
 	}
-	ch := make(chan llm.LegacyStreamEvent, 3)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: reply},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonStop,
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}}
+	ch := make(chan llm.StreamEvent, 3)
+	ch <- llm.EventTextDelta{Text: reply}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }
@@ -686,7 +675,7 @@ type fakeCoreAccum struct {
 	calls int
 }
 
-func (f *fakeCoreAccum) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (f *fakeCoreAccum) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	f.mu.Lock()
 	f.calls++
 	callNum := f.calls
@@ -713,14 +702,9 @@ func (f *fakeCoreAccum) StreamChat(ctx context.Context, req *llm.ChatRequest) (<
 		reply = "saw prior turn"
 	}
 
-	ch := make(chan llm.LegacyStreamEvent, 3)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: reply},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonStop,
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}}
+	ch := make(chan llm.StreamEvent, 3)
+	ch <- llm.EventTextDelta{Text: reply}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }
@@ -881,14 +865,14 @@ type accumulatingCore struct {
 	lastMsgs []llm.Message
 }
 
-func (a *accumulatingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (a *accumulatingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	a.mu.Lock()
 	a.calls++
 	a.lastMsgs = append([]llm.Message{}, req.Messages...)
 	a.mu.Unlock()
-	ch := make(chan llm.LegacyStreamEvent, 4)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{Delta: llm.Message{Content: "pong"}}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- llm.EventTextDelta{Text: "pong"}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }

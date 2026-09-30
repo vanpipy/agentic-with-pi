@@ -3,7 +3,6 @@ package agentcore
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/vanpiyp/awp/internal/agent-core/cache"
@@ -36,20 +35,6 @@ type Step struct {
 	ToolCalls    []llm.ToolCall
 	Usage        *llm.Usage
 	FinishReason string
-}
-
-type turnResult struct {
-	finishReason llm.FinishReason
-	content      string
-	reasoning    string
-	reasoningSig string
-	toolCalls    []llm.ToolCall
-	aborted      error
-	usage        *llm.Usage
-}
-
-func (r turnResult) toAssistantMessage() llm.Message {
-	return llm.Message{Role: "assistant", Content: r.content, Reasoning: r.reasoning, ReasoningSig: r.reasoningSig, ToolCalls: r.toolCalls}
 }
 
 // =====================================================================
@@ -99,78 +84,74 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 		emit(ctx, Event{Category: EventThoughtEnd})
 		return Step{}, nil
 	}
-	var result turnResult
-	var contentBuf, reasoningBuf strings.Builder
-	contentBuf.Grow(2048)
-	reasoningBuf.Grow(2048)
+	tp := stream.NewTypedProcessor()
+	streamDone := false
 	for ev := range raw {
 		if ctx.Err() != nil {
 			return Step{}, ctx.Err()
 		}
-		if !r.processStreamEvent(ctx, ev, &result, &contentBuf, &reasoningBuf, emit) {
-			return Step{}, ctx.Err()
+		if !r.processStreamEventTyped(ctx, ev, tp, emit) {
+			streamDone = true
+			break
 		}
 	}
-	result.content = contentBuf.String()
-	result.reasoning = reasoningBuf.String()
+	if streamDone {
+		emit(ctx, Event{Category: EventThoughtEnd})
+		return Step{Kind: StepContinue}, nil
+	}
+	result := tp.Result()
 	if !emit(ctx, Event{
 		Category:  EventThoughtEnd,
-		Content:   result.content,
-		Reasoning: result.reasoning,
-		ToolCalls: result.toolCalls,
-		Usage:     result.usage,
+		Content:   result.Content,
+		Reasoning: result.Reasoning,
+		ToolCalls: result.ToolCalls,
+		Usage:     result.Usage,
 	}) {
 		return Step{}, ctx.Err()
 	}
 	switch {
-	case result.finishReason == llm.FinishReasonLength && len(result.toolCalls) > 0:
+	case result.FinishReason == llm.FinishReasonLength && len(result.ToolCalls) > 0:
 		emit(ctx, Event{Category: EventError, ToolError: "response truncated mid tool call, refusing"})
 		return Step{}, nil
-	case result.finishReason == llm.FinishReasonLength && result.content == "":
+	case result.FinishReason == llm.FinishReasonLength && result.Content == "":
 		emit(ctx, Event{Category: EventError, ToolError: "response truncated with no content"})
 		return Step{}, nil
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0 && allToolCallsEmpty(result.toolCalls):
+	case result.FinishReason == llm.FinishReasonToolUse && len(result.ToolCalls) > 0 && allToolCallsEmpty(result.ToolCalls):
 		emit(ctx, Event{Category: EventError, ToolError: "empty tool calls, refusing"})
 		return Step{}, nil
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) > 0:
+	case result.FinishReason == llm.FinishReasonToolUse && len(result.ToolCalls) > 0:
 		return Step{
 			Kind:         StepContinue,
-			Content:      result.content,
-			Reasoning:    result.reasoning,
-			ReasoningSig: result.reasoningSig,
-			ToolCalls:    result.toolCalls,
-			Usage:        result.usage,
-			FinishReason: result.finishReason.String(),
+			Content:      result.Content,
+			Reasoning:    result.Reasoning,
+			ReasoningSig: result.ReasoningSig,
+			ToolCalls:    result.ToolCalls,
+			Usage:        result.Usage,
+			FinishReason: result.FinishReason.String(),
 		}, nil
-	case result.finishReason == llm.FinishReasonToolUse && len(result.toolCalls) == 0:
+	case result.FinishReason == llm.FinishReasonToolUse && len(result.ToolCalls) == 0:
 		emit(ctx, Event{Category: EventError, ToolError: "tool_use finish reason with no tool calls"})
 		return Step{}, nil
-	case (result.finishReason == llm.FinishReasonStop || (result.finishReason == llm.FinishReasonLength && result.content != "")) && len(result.toolCalls) == 0:
-		emit(ctx, Event{Category: EventFinalAnswer, Content: result.content, Usage: result.usage})
+	case (result.FinishReason == llm.FinishReasonStop || (result.FinishReason == llm.FinishReasonLength && result.Content != "")) && len(result.ToolCalls) == 0:
+		emit(ctx, Event{Category: EventFinalAnswer, Content: result.Content, Usage: result.Usage})
 		return Step{
 			Kind:         StepFinal,
-			Content:      result.content,
-			Usage:        result.usage,
-			FinishReason: result.finishReason.String(),
+			Content:      result.Content,
+			Usage:        result.Usage,
+			FinishReason: result.FinishReason.String(),
 		}, nil
 	}
-	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.finishReason, len(result.toolCalls))
+	return Step{}, fmt.Errorf("unreachable: finishReason=%v toolCalls=%d", result.FinishReason, len(result.ToolCalls))
 }
 
 func (r *ReActStrategy) processStreamEventTyped(ctx context.Context, ev llm.StreamEvent, tp *stream.TypedProcessor, emit func(context.Context, Event) bool) bool {
-	continue_, stepDone, emits := tp.ProcessEvent(ctx, ev)
+	continue_, _, emits := tp.ProcessEvent(ctx, ev)
 	for _, e := range emits {
 		if !emitTypedEmit(ctx, e, emit) {
 			return false
 		}
 	}
-	if !continue_ {
-		return false
-	}
-	if stepDone {
-		_ = tp.Result()
-	}
-	return true
+	return continue_
 }
 
 func emitTypedEmit(ctx context.Context, e stream.EmitEvent, emit func(context.Context, Event) bool) bool {
@@ -190,76 +171,6 @@ func emitTypedEmit(ctx context.Context, e stream.EmitEvent, emit func(context.Co
 	default:
 		return true
 	}
-}
-
-func (r *ReActStrategy) processStreamEvent(ctx context.Context, ev llm.LegacyStreamEvent, result *turnResult, contentBuf, reasoningBuf *strings.Builder, emit func(context.Context, Event) bool) bool {
-	if ev.Rollback {
-		contentBuf.Reset()
-		reasoningBuf.Reset()
-		result.content = ""
-		result.reasoning = ""
-		result.reasoningSig = ""
-		result.toolCalls = nil
-		slog.Debug("agent: stream rollback — discarded partial output")
-		return true
-	}
-	if ev.Err != nil {
-		if isCtxErr(ev.Err) {
-			return false
-		}
-		emit(ctx, Event{Category: EventError, ToolError: ev.Err.Error()})
-		emit(ctx, Event{Category: EventThoughtEnd})
-		return false
-	}
-	if ev.Chunk == nil {
-		return true
-	}
-	for _, c := range ev.Chunk.Choices {
-		if c.Delta.Reasoning != "" {
-			reasoningBuf.WriteString(c.Delta.Reasoning)
-			if !emit(ctx, Event{Category: EventThoughtChunk, Reasoning: c.Delta.Reasoning}) {
-				return false
-			}
-		}
-		if c.Delta.ReasoningSig != "" {
-			result.reasoningSig = c.Delta.ReasoningSig
-		}
-		if c.Delta.Content != "" {
-			contentBuf.WriteString(c.Delta.Content)
-			if !emit(ctx, Event{Category: EventThoughtChunk, Content: c.Delta.Content}) {
-				return false
-			}
-		}
-		if c.FinishReason != llm.FinishReasonUnknown {
-			result.finishReason = c.FinishReason
-		}
-		if len(c.Delta.ToolCalls) > 0 {
-			for _, tc := range c.Delta.ToolCalls {
-				if tc.ID != "" {
-					idx := -1
-					for i := range result.toolCalls {
-						if result.toolCalls[i].ID == tc.ID {
-							idx = i
-							break
-						}
-					}
-					if idx >= 0 {
-						mergeToolCallDelta(&result.toolCalls[idx], tc)
-					} else {
-						result.toolCalls = append(result.toolCalls, tc)
-					}
-				} else if n := len(result.toolCalls); n > 0 {
-					mergeToolCallDelta(&result.toolCalls[n-1], tc)
-				} else {
-					result.toolCalls = append(result.toolCalls, tc)
-				}
-			}
-		}
-	}
-	if ev.Chunk.Usage != nil {
-		result.usage = ev.Chunk.Usage
-	}
-	return true
 }
 
 func (r *ReActStrategy) ShouldAbort(msgs []llm.Message, lastFailedToolError string) error {

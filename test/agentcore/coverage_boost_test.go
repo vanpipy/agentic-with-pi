@@ -14,6 +14,7 @@ import (
 	"github.com/vanpiyp/awp/internal/agent-core/compact"
 	"github.com/vanpiyp/awp/internal/agent-core/util"
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/streamtest"
 )
 
 func newCBTestAgent() (*agentcore.Agent, *bytes.Buffer) {
@@ -534,7 +535,7 @@ func TestProactiveActOnAcceptsObservedPointer(t *testing.T) {
 }
 
 func TestWriteHeaderTruncatesLongSystemPrompt(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
+	core := &fakeCore{streamChunks: []llm.StreamChunk{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -575,7 +576,7 @@ func TestWriteHeaderTruncatesLongSystemPrompt(t *testing.T) {
 }
 
 func TestWriteHeaderIncludesToolsWhenRegistered(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
+	core := &fakeCore{streamChunks: []llm.StreamChunk{
 		textDeltaChunk("ok"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
@@ -834,21 +835,16 @@ func TestRunReactiveCompactionLengthFinishReasonFails(t *testing.T) {
 
 type errStreamCore struct{ err error }
 
-func (e errStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (e errStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, e.err
 }
 
 type lengthStopCore struct{}
 
-func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 2)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Index: 0,
-		Delta: llm.Message{Content: "truncated"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonLength,
-	}}}}
+func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 2)
+	ch <- streamtest.Text("truncated")
+	ch <- streamtest.Finish(llm.FinishReasonLength)
 	close(ch)
 	return ch, nil
 }

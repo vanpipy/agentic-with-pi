@@ -15,14 +15,11 @@ import (
 
 type headerRecCore struct{}
 
-func (c *headerRecCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 4)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Index: 0,
-		Delta: llm.Message{Content: "ok"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}}
+func (c *headerRecCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- llm.EventTextDelta{Text: "ok"}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
+	ch <- llm.EventCompaction{}
 	close(ch)
 	return ch, nil
 }

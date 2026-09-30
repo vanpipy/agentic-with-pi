@@ -17,8 +17,8 @@ import (
 
 type handlerFakeCore struct{}
 
-func (f *handlerFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 1)
+func (f *handlerFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 1)
 	close(ch)
 	return ch, nil
 }

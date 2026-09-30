@@ -11,18 +11,15 @@ import (
 
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/streamtest"
 )
 
 type fakeCoreForRecord struct{}
 
-func (f *fakeCoreForRecord) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 3)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: "ok"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonStop,
-	}}}}
+func (f *fakeCoreForRecord) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 3)
+	ch <- streamtest.Text("ok")
+	ch <- streamtest.Finish(llm.FinishReasonStop)
 	close(ch)
 	return ch, nil
 }

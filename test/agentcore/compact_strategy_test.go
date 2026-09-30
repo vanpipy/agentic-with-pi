@@ -8,6 +8,7 @@ import (
 	agentcore "github.com/vanpiyp/awp/internal/agent-core"
 	"github.com/vanpiyp/awp/internal/agent-core/compact"
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/streamtest"
 )
 
 func TestSelectStrategyTableDriven(t *testing.T) {
@@ -227,14 +228,11 @@ func TestReactiveActOnDelegatesToRunReactive(t *testing.T) {
 
 type strategyTestFakeCore struct{}
 
-func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 4)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Index: 0,
-		Delta: llm.Message{Content: "summary text"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: llm.FinishReasonStop}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{}}
+func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- streamtest.Text("summary text")
+	ch <- streamtest.Finish(llm.FinishReasonStop)
+	ch <- streamtest.NoOp()
 	close(ch)
 	return ch, nil
 }
@@ -458,18 +456,15 @@ type streamSummaryStubCore struct {
 	returnErr error
 }
 
-func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
+func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	if s.returnErr != nil {
 		return nil, s.returnErr
 	}
-	ch := make(chan llm.LegacyStreamEvent, len(s.chunks)+1)
+	ch := make(chan llm.StreamEvent, len(s.chunks)+1)
 	for _, c := range s.chunks {
-		ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-			Index: 0,
-			Delta: llm.Message{Content: c},
-		}}}}
+		ch <- streamtest.Text(c)
 	}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{FinishReason: s.finish}}}}
+	ch <- streamtest.Finish(s.finish)
 	close(ch)
 	return ch, nil
 }

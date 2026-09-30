@@ -160,7 +160,7 @@ func TestRepairMissingToolOutputsOrderPreserved(t *testing.T) {
 }
 
 func TestRunOneTurnRepairsBeforeStep(t *testing.T) {
-	chunks := []llm.LegacyStreamEvent{messageDeltaStopChunk("end_turn"), messageStopChunk()}
+	chunks := []llm.StreamChunk{messageDeltaStopChunk("end_turn"), messageStopChunk()}
 	core := &fakeCore{streamChunks: chunks}
 	ag := newTestAgent(core, "test-model")
 	ag.WithCompaction(compact.CompactionSettings{Enabled: false})

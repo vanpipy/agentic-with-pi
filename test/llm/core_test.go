@@ -136,11 +136,11 @@ func TestChatAllowsToolsForSupportedModel(t *testing.T) {
 	}
 	content := ""
 	for ev := range events {
-		if ev.Err != nil {
-			t.Fatal(ev.Err)
+		if e, ok := ev.(llm.EventErr); ok {
+			t.Fatal(e.Err)
 		}
-		for _, c := range ev.Chunk.Choices {
-			content += c.Delta.Content
+		if e, ok := ev.(llm.EventTextDelta); ok {
+			content += e.Text
 		}
 	}
 	if content != "ok" {
@@ -247,13 +247,23 @@ func TestStreamChatAssemblesToolCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	var assembled []llm.ToolCall
+	var current *llm.ToolCall
 	for ev := range events {
-		if ev.Err != nil {
-			t.Fatal(ev.Err)
+		if e, ok := ev.(llm.EventErr); ok {
+			t.Fatal(e.Err)
 		}
-		for _, c := range ev.Chunk.Choices {
-			if len(c.Delta.ToolCalls) > 0 {
-				assembled = append(assembled, c.Delta.ToolCalls...)
+		if e, ok := ev.(llm.EventToolStart); ok {
+			current = &llm.ToolCall{ID: e.ID, Type: "function", Function: llm.FunctionCall{Name: e.Name}}
+		}
+		if e, ok := ev.(llm.EventToolDelta); ok {
+			if current != nil && e.ID == current.ID {
+				current.Function.Arguments += e.JSON
+			}
+		}
+		if e, ok := ev.(llm.EventToolEnd); ok && current != nil {
+			if e.ID == current.ID {
+				assembled = append(assembled, *current)
+				current = nil
 			}
 		}
 	}
@@ -359,13 +369,13 @@ func TestStreamChatPropagatesUsage(t *testing.T) {
 	}
 	var sawUsage bool
 	for ev := range events {
-		if ev.Err != nil {
-			t.Fatal(ev.Err)
+		if e, ok := ev.(llm.EventErr); ok {
+			t.Fatal(e.Err)
 		}
-		if ev.Chunk != nil && ev.Chunk.Usage != nil {
+		if u, ok := ev.(llm.EventUsage); ok {
 			sawUsage = true
-			if ev.Chunk.Usage.CompletionTokens != 50 {
-				t.Errorf("CompletionTokens = %d, want 50", ev.Chunk.Usage.CompletionTokens)
+			if u.OutputTokens != 50 {
+				t.Errorf("OutputTokens = %d, want 50", u.OutputTokens)
 			}
 		}
 	}
@@ -403,13 +413,11 @@ func TestStreamChatPropagatesFinishReason(t *testing.T) {
 	}
 	var sawFinish bool
 	for ev := range events {
-		if ev.Err != nil {
-			t.Fatal(ev.Err)
+		if e, ok := ev.(llm.EventErr); ok {
+			t.Fatal(e.Err)
 		}
-		for _, c := range ev.Chunk.Choices {
-			if c.FinishReason == llm.FinishReasonToolUse {
-				sawFinish = true
-			}
+		if f, ok := ev.(llm.EventFinish); ok && f.Reason == llm.FinishReasonToolUse {
+			sawFinish = true
 		}
 	}
 	if !sawFinish {

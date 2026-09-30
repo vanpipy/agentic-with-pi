@@ -547,17 +547,17 @@ func AgentCurrentTurnForTest(a *Agent) int           { return a.currentTurn }
 func AgentTurnStartAtForTest(a *Agent) time.Time     { return a.turnStartAt }
 func AgentCurrentMsgsForTest(a *Agent) []llm.Message { return a.currentMsgs }
 
-func AccumulateStreamToolCallsForTest(events []llm.LegacyStreamEvent) []llm.ToolCall {
-	rs := &ReActStrategy{}
-	var result turnResult
-	var contentBuf, reasoningBuf strings.Builder
-	emitNoop := func(_ context.Context, _ Event) bool { return true }
+func AccumulateStreamToolCallsForTest(events []llm.StreamEvent) []llm.ToolCall {
+	tp := stream.NewTypedProcessor()
+	ctx := context.Background()
 	for _, ev := range events {
-		if !rs.processStreamEvent(context.Background(), ev, &result, &contentBuf, &reasoningBuf, emitNoop) {
-			break
+		if _, ok := ev.(llm.EventErr); ok {
+			_, _, _ = tp.ProcessEvent(ctx, ev)
+			return tp.ToolCalls()
 		}
+		tp.ProcessEvent(ctx, ev)
 	}
-	return result.toolCalls
+	return tp.ToolCalls()
 }
 
 type ProcessStreamEventsForTestResult struct {
@@ -569,27 +569,28 @@ type ProcessStreamEventsForTestResult struct {
 	Continue     bool
 }
 
-func ProcessStreamEventsForTest(events []llm.LegacyStreamEvent) ProcessStreamEventsForTestResult {
-	rs := &ReActStrategy{}
-	var result turnResult
-	var contentBuf, reasoningBuf strings.Builder
+func ProcessStreamEventsForTest(events []llm.StreamEvent) ProcessStreamEventsForTestResult {
+	tp := stream.NewTypedProcessor()
 	var emitted []Event
 	emit := func(_ context.Context, ev Event) bool {
 		emitted = append(emitted, ev)
 		return true
 	}
+	rs := &ReActStrategy{}
 	ok := true
+	ctx := context.Background()
 	for _, ev := range events {
-		if !rs.processStreamEvent(context.Background(), ev, &result, &contentBuf, &reasoningBuf, emit) {
+		if !rs.processStreamEventTyped(ctx, ev, tp, emit) {
 			ok = false
 			break
 		}
 	}
+	result := tp.Result()
 	return ProcessStreamEventsForTestResult{
-		Content:      contentBuf.String(),
-		Reasoning:    reasoningBuf.String(),
-		ReasoningSig: result.reasoningSig,
-		ToolCalls:    result.toolCalls,
+		Content:      result.Content,
+		Reasoning:    result.Reasoning,
+		ReasoningSig: result.ReasoningSig,
+		ToolCalls:    result.ToolCalls,
 		Emitted:      emitted,
 		Continue:     ok,
 	}

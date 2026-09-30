@@ -19,7 +19,7 @@ import (
 // through real HTTPRest + MiniMaxProvider + httptest: route A returns 429
 // forever, route B returns 200 + a real streaming payload. The test asserts
 // that FailoverCore escalates to route B after route A exhausts retries,
-// and that the synthetic failover prompt is surfaced as a LegacyStreamEvent
+// and that the synthetic failover prompt is surfaced as a stream error
 // error on the output channel before route B's stream drains.
 func TestEndToEndFailoverSwitchesProviderOnRateLimit(t *testing.T) {
 	var callsA, callsB atomic.Int32
@@ -74,12 +74,12 @@ func TestEndToEndFailoverSwitchesProviderOnRateLimit(t *testing.T) {
 	var sawFailoverPrompt bool
 	var sawChunk bool
 	for ev := range events {
-		if ev.Err != nil {
-			if failover.ParseFailoverPromptMessage(ev.Err.Error()) != nil {
+		if e, ok := ev.(llm.EventErr); ok {
+			if failover.ParseFailoverPromptMessage(e.Err.Error()) != nil {
 				sawFailoverPrompt = true
 			}
 		}
-		if ev.Chunk != nil {
+		if _, ok := ev.(llm.EventTextDelta); ok {
 			sawChunk = true
 		}
 	}
@@ -141,8 +141,8 @@ func TestEndToEndFailoverStopsAfterMaxRoutes(t *testing.T) {
 
 	var lastErr error
 	for ev := range events {
-		if ev.Err != nil {
-			lastErr = ev.Err
+		if e, ok := ev.(llm.EventErr); ok {
+			lastErr = e.Err
 		}
 	}
 	if lastErr == nil {

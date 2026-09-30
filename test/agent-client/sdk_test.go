@@ -18,17 +18,11 @@ import (
 
 type fakeCore struct{}
 
-func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.LegacyStreamEvent, error) {
-	ch := make(chan llm.LegacyStreamEvent, 3)
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: "hello"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		Delta: llm.Message{Content: " world"},
-	}}}}
-	ch <- llm.LegacyStreamEvent{Chunk: &llm.StreamChunk{Choices: []llm.StreamChoice{{
-		FinishReason: llm.FinishReasonStop,
-	}}}}
+func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
+	ch := make(chan llm.StreamEvent, 4)
+	ch <- llm.EventTextDelta{Text: "hello"}
+	ch <- llm.EventTextDelta{Text: " world"}
+	ch <- llm.EventFinish{Reason: llm.FinishReasonStop}
 	close(ch)
 	return ch, nil
 }

@@ -134,17 +134,15 @@ func StreamSummary(ctx context.Context, core llm.Core, req *llm.ChatRequest) (st
 		return "", fmt.Errorf("summarize: %w", err)
 	}
 	for ev := range events {
-		if ev.Err != nil {
-			return "", fmt.Errorf("summarize stream: %w", ev.Err)
+		if e, ok := ev.(llm.EventErr); ok && e.Err != nil {
+			return "", fmt.Errorf("summarize stream: %w", e.Err)
 		}
-		if ev.Chunk == nil {
+		if e, ok := ev.(llm.EventTextDelta); ok {
+			summaryText.WriteString(e.Text)
 			continue
 		}
-		for _, c := range ev.Chunk.Choices {
-			summaryText.WriteString(c.Delta.Content)
-			if c.FinishReason != llm.FinishReasonUnknown {
-				finishReason = c.FinishReason
-			}
+		if e, ok := ev.(llm.EventFinish); ok {
+			finishReason = e.Reason
 		}
 	}
 	if finishReason == llm.FinishReasonLength {

@@ -20,6 +20,11 @@ type Provider interface {
 
 	ConvertRequest(req *ChatRequest) ([]byte, error)
 
+	// ConvertResponse decodes one protocol-level wire chunk into the
+	// wire-shape StreamChunk plus a done flag and a parse error. It
+	// is an internal helper used by Core to bridge the transport
+	// protocol to the sealed llm.StreamEvent channel; callers do
+	// not invoke it directly.
 	ConvertResponse(data []byte) (*StreamChunk, bool, error)
 
 	// RecoverRequest inspects `err` from a failed first attempt and,
@@ -62,8 +67,13 @@ type core struct {
 	protocol protocol.Protocol
 }
 
+// Core is the consumer-facing LLM streaming boundary. The returned
+// channel carries sealed llm.StreamEvent values that map 1:1 to the
+// runtime behavior of the strategy layer (and any other sealed-event
+// consumer). Channels are buffered; producers close on terminal
+// event or context cancellation.
 type Core interface {
-	StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error)
+	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
 }
 
 func NewCore(provider Provider, proto protocol.Protocol) Core {
@@ -73,7 +83,7 @@ func NewCore(provider Provider, proto protocol.Protocol) Core {
 	}
 }
 
-func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
+func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
 	if err := c.validateRequest(req); err != nil {
 		return nil, err
 	}
@@ -99,7 +109,7 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyS
 		}
 	}
 
-	events := make(chan LegacyStreamEvent, 32)
+	events := make(chan StreamEvent, 32)
 	go func() {
 		defer close(events)
 		c.streamOnce(ctx, rawChan, events)
@@ -107,11 +117,6 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyS
 	return events, nil
 }
 
-// startStream marshals the request and opens a transport-level
-// stream. Returns the raw chunk channel and the built protocol
-// request (so callers can correlate retries) plus any synchronous
-// transport error from the first attempt. Does NOT surface
-// chunk-level errors — those arrive via the returned channel.
 func (c *core) startStream(ctx context.Context, req *ChatRequest) (<-chan protocol.StreamItem, *protocol.Request, error) {
 	streamReq := *req
 	streamReq.Stream = true
@@ -135,13 +140,11 @@ func (c *core) startStream(ctx context.Context, req *ChatRequest) (<-chan protoc
 	return rawChan, protoReq, nil
 }
 
-// streamOnce runs one streaming attempt and forwards every
-// transport/parse error to the consumer. Self-heal happens at the
-// synchronous transport level (StreamChat intercepts protocol.Stream
-// errors before returning the channel); chunk-level errors after the
-// response has begun are surfaced verbatim.
-func (c *core) streamOnce(ctx context.Context, rawChan <-chan protocol.StreamItem, events chan LegacyStreamEvent) error {
-
+// streamOnce runs one streaming attempt and projects every parsed
+// StreamChunk into one or more sealed StreamEvent values on `events`.
+// Transport-level errors arrive as EventErr; the channel closes when
+// the producer signals done or ctx cancels.
+func (c *core) streamOnce(ctx context.Context, rawChan <-chan protocol.StreamItem, events chan<- StreamEvent) {
 	accumulators := make(map[int]*toolCallAccum)
 	var totalContent, totalReasoning int
 	var lastUsage *Usage
@@ -156,42 +159,93 @@ func (c *core) streamOnce(ctx context.Context, rawChan <-chan protocol.StreamIte
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case item, ok := <-rawChan:
 			if !ok {
-				return nil
+				return
 			}
 			if item.Err != nil {
 				ifaceLogger().Info("llm: transport err", "err", item.Err)
 				select {
-				case events <- LegacyStreamEvent{Err: item.Err}:
+				case events <- EventErr{Err: item.Err}:
 				case <-ctx.Done():
 				}
-				return nil
+				return
 			}
 			chunk, done, err := c.provider.ConvertResponse(item.Data)
 			if err != nil {
 				ifaceLogger().Info("llm: parse err", "err", err)
 				select {
-				case events <- LegacyStreamEvent{Err: err}:
+				case events <- EventErr{Err: err}:
 				case <-ctx.Done():
 				}
-				return nil
+				return
 			}
-
+			if chunk == nil && !done {
+				continue
+			}
+			eventCount++
 			if chunk != nil {
-				eventCount++
+				if chunk.Usage != nil {
+					lastUsage = chunk.Usage
+					select {
+					case events <- EventUsage{
+						InputTokens:         chunk.Usage.PromptTokens,
+						OutputTokens:        chunk.Usage.CompletionTokens,
+						CacheReadTokens:     chunk.Usage.CacheReadTokens,
+						CacheCreationTokens: chunk.Usage.CacheCreationTokens,
+					}:
+					case <-ctx.Done():
+						return
+					}
+				}
 				for _, choice := range chunk.Choices {
 					totalContent += len(choice.Delta.Content)
 					totalReasoning += len(choice.Delta.Reasoning)
+					if choice.Delta.Reasoning != "" {
+						select {
+						case events <- EventThinkingDelta{Text: choice.Delta.Reasoning}:
+						case <-ctx.Done():
+							return
+						}
+					}
+					if choice.Delta.ReasoningSig != "" {
+						select {
+						case events <- EventThinkingSignature{Signature: choice.Delta.ReasoningSig}:
+						case <-ctx.Done():
+							return
+						}
+					}
+					if choice.Delta.Content != "" {
+						select {
+						case events <- EventTextDelta{Text: choice.Delta.Content}:
+						case <-ctx.Done():
+							return
+						}
+					}
 					for _, tc := range choice.Delta.ToolCalls {
 						acc, exists := accumulators[choice.Index]
 						if !exists {
 							acc = &toolCallAccum{}
 							accumulators[choice.Index] = acc
 						}
-						if tc.ID != "" {
+						if tc.ID != "" && tc.ID != acc.ID {
+							if acc.ID != "" {
+								select {
+								case events <- EventToolEnd{ID: acc.ID}:
+								case <-ctx.Done():
+									return
+								}
+							}
 							acc.ID = tc.ID
+							acc.Type = tc.Type
+							acc.Name = tc.Function.Name
+							acc.SeenArgs = false
+							select {
+							case events <- EventToolStart{ID: acc.ID, Name: acc.Name}:
+							case <-ctx.Done():
+								return
+							}
 						}
 						if tc.Type != "" {
 							acc.Type = tc.Type
@@ -199,51 +253,38 @@ func (c *core) streamOnce(ctx context.Context, rawChan <-chan protocol.StreamIte
 						if tc.Function.Name != "" {
 							acc.Name = tc.Function.Name
 						}
-						acc.Args.WriteString(tc.Function.Arguments)
+						if tc.Function.Arguments != "" {
+							acc.SeenArgs = true
+							select {
+							case events <- EventToolDelta{ID: acc.ID, JSON: tc.Function.Arguments}:
+							case <-ctx.Done():
+								return
+							}
+						}
 					}
-				}
-				if chunk.Usage != nil {
-					lastUsage = chunk.Usage
-					select {
-					case events <- LegacyStreamEvent{Chunk: &StreamChunk{Usage: chunk.Usage}}:
-					case <-ctx.Done():
-						return nil
-					}
-				}
-				for _, choice := range chunk.Choices {
-					if choice.Delta.Content == "" && choice.Delta.Reasoning == "" && choice.FinishReason == 0 {
-						continue
-					}
-					select {
-					case events <- LegacyStreamEvent{Chunk: &StreamChunk{
-						Choices: []StreamChoice{{
-							Index:        choice.Index,
-							Delta:        Message{Content: choice.Delta.Content, Reasoning: choice.Delta.Reasoning},
-							FinishReason: choice.FinishReason,
-						}},
-					}}:
-					case <-ctx.Done():
-						return nil
+					if choice.FinishReason != FinishReasonUnknown {
+						select {
+						case events <- EventFinish{Reason: choice.FinishReason}:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
 			}
-
 			if done {
-				assembled := assembleToolCalls(accumulators)
-				if len(assembled) > 0 {
-					final := &StreamChunk{
-						Choices: []StreamChoice{{
-							Index: 0,
-							Delta: Message{ToolCalls: assembled},
-						}},
+				for _, acc := range accumulators {
+					if acc.ID == "" {
+						continue
 					}
-					select {
-					case events <- LegacyStreamEvent{Chunk: final}:
-					case <-ctx.Done():
-						return nil
+					if acc.SeenArgs {
+						select {
+						case events <- EventToolEnd{ID: acc.ID}:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
-				return nil
+				return
 			}
 		}
 	}
@@ -299,40 +340,9 @@ func (c *core) headersFor(req *ChatRequest) map[string]string {
 }
 
 type toolCallAccum struct {
-	ID   string
-	Type string
-	Name string
-	Args strings.Builder
-}
-
-func assembleToolCalls(m map[int]*toolCallAccum) []ToolCall {
-	if len(m) == 0 {
-		return nil
-	}
-	maxIdx := -1
-	for idx := range m {
-		if idx > maxIdx {
-			maxIdx = idx
-		}
-	}
-	out := make([]ToolCall, 0, len(m))
-	for i := 0; i <= maxIdx; i++ {
-		acc, ok := m[i]
-		if !ok {
-			continue
-		}
-		tcType := acc.Type
-		if tcType == "" {
-			tcType = "function"
-		}
-		out = append(out, ToolCall{
-			ID:   acc.ID,
-			Type: tcType,
-			Function: FunctionCall{
-				Name:      acc.Name,
-				Arguments: acc.Args.String(),
-			},
-		})
-	}
-	return out
+	ID        string
+	Type      string
+	Name      string
+	SeenArgs  bool
+	ArgsCount int
 }

@@ -23,7 +23,7 @@ func runAgentCaptureFirstToolError(t *testing.T, ag *agentcore.Agent, msg string
 }
 
 func TestAgentUnknownToolErrorListsAvailableTools(t *testing.T) {
-	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
+	core := &fakeCore{streamChunks: []llm.StreamChunk{
 		toolUseStartChunk("call_1", "boom"),
 		toolUseIDDeltaChunk("call_1", "boom", `{}`),
 		messageDeltaStopChunk("tool_use"),
@@ -54,7 +54,7 @@ func TestAgentUnknownToolErrorListsAvailableTools(t *testing.T) {
 func TestAgentBatchContinuesAfterOneToolFails(t *testing.T) {
 	readCalled := false
 	bashCalled := false
-	core := &fakeCore{streamChunksList: [][]llm.LegacyStreamEvent{
+	core := &fakeCore{streamChunksList: [][]llm.StreamChunk{
 		{
 			toolUseStartChunk("call_r", "read"),
 			toolUseStartChunk("call_b", "bash"),
@@ -95,7 +95,7 @@ func (e *fakeErr) Error() string { return e.msg }
 
 func TestAgentPreflightRejectsMissingRequiredField(t *testing.T) {
 	called := false
-	core := &fakeCore{streamChunks: []llm.LegacyStreamEvent{
+	core := &fakeCore{streamChunks: []llm.StreamChunk{
 		toolUseStartChunk("call_1", "bash"),
 		toolUseIDDeltaChunk("call_1", "bash", `{"intent":"check"}`),
 		messageDeltaStopChunk("tool_use"),

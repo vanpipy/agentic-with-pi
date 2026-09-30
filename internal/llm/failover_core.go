@@ -56,13 +56,13 @@ func NewFailoverCore(routes []FailoverRoute, config FailoverConfig) *FailoverCor
 // StreamChat satisfies Core. The channel emits events from the active
 // route; if the active route fails with a classified failover-worthy
 // error, the next route is tried with the same request.
-func (f *FailoverCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan LegacyStreamEvent, error) {
-	out := make(chan LegacyStreamEvent, 32)
+func (f *FailoverCore) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error) {
+	out := make(chan StreamEvent, 32)
 	go f.run(ctx, req, out)
 	return out, nil
 }
 
-func (f *FailoverCore) run(ctx context.Context, req *ChatRequest, out chan<- LegacyStreamEvent) {
+func (f *FailoverCore) run(ctx context.Context, req *ChatRequest, out chan<- StreamEvent) {
 	defer close(out)
 	if len(f.routes) == 0 {
 		return
@@ -84,7 +84,6 @@ func (f *FailoverCore) run(ctx context.Context, req *ChatRequest, out chan<- Leg
 		if !ok {
 			continue
 		}
-		// Drain the successful stream.
 		for ev := range ch {
 			if !f.send(ctx, out, ev) {
 				return
@@ -94,32 +93,24 @@ func (f *FailoverCore) run(ctx context.Context, req *ChatRequest, out chan<- Leg
 	}
 }
 
-// tryRoute runs RetryCore around the supplied Core and reports whether
-// the stream was opened successfully. On open failure the channel is
-// fully drained via RetryCore's forwarding logic; the surfaced error is
-// forwarded out via the second return value (true = stream opened, false
-// = gave up).
-func (f *FailoverCore) tryRoute(ctx context.Context, core Core, req *ChatRequest) (<-chan LegacyStreamEvent, bool) {
+func (f *FailoverCore) tryRoute(ctx context.Context, core Core, req *ChatRequest) (<-chan StreamEvent, bool) {
 	rc := NewRetryCore(core, f.config.Retry)
 	ch, err := rc.StreamChat(ctx, req)
 	if err != nil {
-		// Connection-stage error: surface as a final error in `out`.
 		return nil, false
 	}
-	// We have to drain the channel to know if a mid-stream error
-	// occurred; buffer it locally and re-emit on `out`.
-	drained := make(chan LegacyStreamEvent, 32)
+	drained := make(chan StreamEvent, 32)
 	var lastErr error
 	for ev := range ch {
-		if ev.Err != nil {
-			lastErr = ev.Err
+		if e, ok := ev.(EventErr); ok && e.Err != nil {
+			lastErr = e.Err
 		}
 		drained <- ev
 	}
 	close(drained)
 	if lastErr != nil {
 		slog.Debug("llm/failover: route gave up", "err", lastErr)
-		_ = lastErr // surfaced by the caller via notifySwitch path
+		_ = lastErr
 		return nil, false
 	}
 	return drained, true
@@ -170,7 +161,7 @@ func (f *FailoverCore) pickNext(currentIdx int, alreadyTried []int) int {
 func (f *FailoverCore) notifySwitch(
 	ctx context.Context,
 	fromIdx, toIdx int,
-	out chan<- LegacyStreamEvent,
+	out chan<- StreamEvent,
 ) bool {
 	from := f.routes[fromIdx].Route
 	to := f.routes[toIdx].Route
@@ -184,7 +175,7 @@ func (f *FailoverCore) notifySwitch(
 	if f.config.OnDecision != nil {
 		f.config.OnDecision(fromIdx, toIdx, failover.DecisionRetryAndMarkUnavailable, nil)
 	}
-	return f.send(ctx, out, LegacyStreamEvent{Err: &failoverFailoverError{prompt: prompt}})
+	return f.send(ctx, out, EventErr{Err: &failoverFailoverError{prompt: prompt}})
 }
 
 // failoverFailoverError is a synthetic error whose Error() embeds the
@@ -197,7 +188,7 @@ func (e *failoverFailoverError) Error() string {
 	return e.prompt.ErrorMessage()
 }
 
-func (f *FailoverCore) send(ctx context.Context, out chan<- LegacyStreamEvent, ev LegacyStreamEvent) bool {
+func (f *FailoverCore) send(ctx context.Context, out chan<- StreamEvent, ev StreamEvent) bool {
 	select {
 	case out <- ev:
 		return true
