@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 	jsonrpc "github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
+	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 )
 
 func TestNewSwarmStateDefaults(t *testing.T) {

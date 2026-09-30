@@ -1,4 +1,4 @@
-// Package swarm — message routing.
+// Package swarm: message routing.
 //
 // SendMessage routes a comm.message call to either a single
 // recipient (toSessionID set) or a channel (channelName set). Direct
@@ -124,10 +124,15 @@ func (s *SwarmState) SendMessage(opts MessageOptions) (string, error) {
 		ch.LastActivity = s.now()
 		ch.mu.Unlock()
 
+		data, err := marshalChannelEvent(msg)
+		if err != nil {
+			s.mu.Unlock()
+			return "", ErrInvalidRequest
+		}
 		ev := jsonrpc.Response{
 			JSONRPC: "2.0",
 			Event:   swarmproto.EventSwarmChannelMessage,
-			Data:    mustMarshalChannelEvent(msg),
+			Data:    data,
 		}
 		s.broadcaster.Publish(ev)
 		for _, sub := range subs {
@@ -164,17 +169,22 @@ func (s *SwarmState) SendMessage(opts MessageOptions) (string, error) {
 		Timestamp: nowStr,
 		InReplyTo: opts.InReplyTo,
 	}
+	data, err := marshalChannelEvent(msg)
+	if err != nil {
+		s.mu.Unlock()
+		return "", ErrInvalidRequest
+	}
 	ev := jsonrpc.Response{
 		JSONRPC: "2.0",
 		Event:   swarmproto.EventCommMessageResponse,
-		Data:    mustMarshalChannelEvent(msg),
+		Data:    data,
 	}
 	to.mu.Lock()
 	// Try to deliver to the recipient's per-member sink (non-blocking).
 	select {
 	case to.Sink <- ev:
 	default:
-		// Sink full — drop. The Broadcaster will catch up when the
+		// Sink full. Drop. The Broadcaster will catch up when the
 		// subscriber reconnects.
 	}
 	to.LastActivity = s.now()

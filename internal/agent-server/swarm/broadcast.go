@@ -1,4 +1,4 @@
-// Package swarm — Broadcaster.
+// Package swarm: Broadcaster.
 //
 // The Broadcaster is the package-internal fan-out primitive that delivers
 // server-pushed events to every live connection that has subscribed to
@@ -124,7 +124,7 @@ func (b *defaultBroadcaster) Subscribe(sessionID string) (Sink, func()) {
 // Holds b.mu for the duration of the fan-out so concurrent
 // Unsubscribe calls cannot race with a send on a closed channel
 // (golden rule: never close a channel you didn't send on). The
-// critical section is short — N non-blocking sends — so the lock is
+// critical section is short. N non-blocking sends inside the writer lock, so the lock is held for a bounded time.
 // not held across any blocking operation.
 func (b *defaultBroadcaster) Publish(ev jsonrpc.Response) {
 	b.mu.Lock()

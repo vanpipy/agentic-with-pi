@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 	swarmproto "github.com/vanpiyp/awp/internal/agent-protocol/swarm"
+	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 )
 
 func newRecord(id, swarmID string) swarmproto.MemberRecord {

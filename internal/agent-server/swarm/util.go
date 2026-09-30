@@ -1,8 +1,9 @@
-// Package swarm — small helpers shared by register / channel / message.
+// Package swarm: small helpers shared by register / channel / message.
 package swarm
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 
 	jsonrpc "github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
@@ -19,16 +20,16 @@ func newMessageID() string {
 }
 
 // marshalAny is the package-internal helper that JSON-encodes v into
-// a RawMessage for the jsonrpc.Response Data field. It panics on
-// marshal failure: the only callers marshal wire-shape structs that
-// are validated by the swarmproto package at construction time, so a
-// marshal failure indicates a programmer error in swarmproto.
-func marshalAny(v any) json.RawMessage {
+// a RawMessage for the jsonrpc.Response Data field. Callers pass wire-shape
+// structs validated at construction time by swarmproto, so a marshal failure
+// is propagated as an error rather than panicked: callers convert it to
+// their own sentinel (typically ErrInvalidRequest) at the API boundary.
+func marshalAny(v any) (json.RawMessage, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
-		panic("swarm: marshal " + err.Error())
+		return nil, fmt.Errorf("swarm: marshal %w", err)
 	}
-	return b
+	return b, nil
 }
 
 // sortChannelInfos sorts ChannelInfos in place by channel name.

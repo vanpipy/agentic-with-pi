@@ -1,4 +1,4 @@
-// Package swarm — channel index.
+// Package swarm: channel index.
 //
 // Channels are per-swarm named pub/sub lanes. Membership is tracked
 // in SwarmState.channels[swarmID][channelName].Subscribers. The
@@ -135,10 +135,14 @@ func (s *SwarmState) Publish(swarmID, channelName string, msg swarmproto.Channel
 	ch.LastActivity = s.now()
 	ch.mu.Unlock()
 
+	data, err := marshalChannelEvent(msg)
+	if err != nil {
+		return ErrInvalidRequest
+	}
 	ev := jsonrpc.Response{
 		JSONRPC: "2.0",
 		Event:   swarmproto.EventSwarmChannelMessage,
-		Data:    mustMarshalChannelEvent(msg),
+		Data:    data,
 	}
 	s.broadcaster.Publish(ev)
 
@@ -224,11 +228,12 @@ func (s *SwarmState) RemoveSessionLocked(sessionID string) {
 	}
 }
 
-// mustMarshalChannelEvent is a small helper that re-marshals a
-// ChannelMessage into the ChannelMessageEvent payload shape. The two
-// types share all fields today; if they diverge in the future the
-// dispatcher converts explicitly.
-func mustMarshalChannelEvent(msg swarmproto.ChannelMessage) json.RawMessage {
+// marshalChannelEvent re-marshals a ChannelMessage into the
+// ChannelMessageEvent payload shape. The two types share all fields
+// today; if they diverge in the future the dispatcher converts
+// explicitly. A marshal failure here is a programmer error in
+// swarmproto and is propagated so the caller returns ErrInvalidRequest.
+func marshalChannelEvent(msg swarmproto.ChannelMessage) (json.RawMessage, error) {
 	ev := swarmproto.ChannelMessageEvent{
 		MessageID: msg.MessageID,
 		SwarmID:   msg.SwarmID,

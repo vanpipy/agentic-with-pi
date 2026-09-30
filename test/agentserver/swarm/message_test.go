@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 	jsonrpc "github.com/vanpiyp/awp/internal/agent-protocol/json_rpc"
 	swarmproto "github.com/vanpiyp/awp/internal/agent-protocol/swarm"
+	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 )
 
 // childSink retrieves the per-member Sink of sessionID. Direct delivery

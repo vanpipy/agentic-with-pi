@@ -1,4 +1,4 @@
-// Package swarm — member registration: Register / Unregister / Spawn /
+// Package swarm: member registration: Register / Unregister / Spawn /
 // Stop / AssignRole / List.
 //
 // Mirrors jcode crates/jcode-app-core/src/server/swarm_mutation_state.rs

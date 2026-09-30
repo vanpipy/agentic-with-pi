@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 	swarmproto "github.com/vanpiyp/awp/internal/agent-protocol/swarm"
+	"github.com/vanpiyp/awp/internal/agent-server/swarm"
 )
 
 func TestSubscribeCreatesChannel(t *testing.T) {
