@@ -290,6 +290,57 @@ func TestAwaiterShape(t *testing.T) {
 	}
 }
 
+func TestValidateEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		mutate func(o *swarm.RuntimeOpts)
+		want   bool // true = Validate must return error
+	}{
+		{"negative Heartbeat", func(o *swarm.RuntimeOpts) { o.HeartbeatInterval = -1 * time.Second }, true},
+		{"very large Heartbeat", func(o *swarm.RuntimeOpts) { o.HeartbeatInterval = 1 << 62 }, true}, // >> default StaleAfter
+		{"negative PersistBatch", func(o *swarm.RuntimeOpts) { o.PersistBatchInterval = -1 * time.Second }, true},
+		{"negative AwaitDefault", func(o *swarm.RuntimeOpts) { o.AwaitDefaultTimeout = -1 * time.Second }, true},
+		{"negative AwaitMax", func(o *swarm.RuntimeOpts) {
+			o.AwaitMaxTimeout = -1 * time.Second
+		}, true}, // -1 < positive default
+		{"huge MaxMembers", func(o *swarm.RuntimeOpts) {
+			o.MaxMembersPerSwarm = 1 << 30
+		}, true}, // > MaxSwarmMembers
+		{"MaxInt32 MaxMembers", func(o *swarm.RuntimeOpts) {
+			o.MaxMembersPerSwarm = 1<<31 - 1
+		}, true}, // > MaxSwarmMembers
+		{"AwaitMax exactly equals Default", func(o *swarm.RuntimeOpts) {
+			o.AwaitMaxTimeout = o.AwaitDefaultTimeout
+		}, false},
+		{"AwaitMax below Default by 1ns", func(o *swarm.RuntimeOpts) {
+			o.AwaitMaxTimeout = o.AwaitDefaultTimeout - 1
+		}, true},
+		{"StaleAfter exactly equals Heartbeat", func(o *swarm.RuntimeOpts) {
+			o.StaleAfter = o.HeartbeatInterval
+		}, false},
+		{"StaleAfter below Heartbeat by 1ns", func(o *swarm.RuntimeOpts) {
+			o.StaleAfter = o.HeartbeatInterval - 1
+		}, true},
+		{"zero AdmissionPolicy", func(o *swarm.RuntimeOpts) {
+			o.AdmissionPolicy = nil
+		}, false}, // nil is allowed (default admission)
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			o := swarm.DefaultRuntimeOpts()
+			c.mutate(&o)
+			err := o.Validate()
+			got := err != nil
+			if got != c.want {
+				t.Errorf("Validate() error = %v, wantErr = %v", err, c.want)
+			}
+		})
+	}
+}
+
 func TestAwaitResultShape(t *testing.T) {
 	t.Parallel()
 	r := swarm.AwaitResult{
