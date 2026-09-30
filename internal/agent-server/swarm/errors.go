@@ -71,4 +71,10 @@ var (
 	// (TLDR length, channel body, shared context entry, ...). Wire
 	// code: swarm.too_large.
 	ErrTooLarge = errors.New("swarm: too large")
+
+	// ErrInvalidRequest indicates a malformed request that doesn't
+	// fit any more specific bucket (both route fields set, neither
+	// set, mutually exclusive flag combinations). Wire code:
+	// swarm.invalid_request.
+	ErrInvalidRequest = errors.New("swarm: invalid request")
 )
