@@ -36,7 +36,7 @@ func (a *Agent) RunStream(ctx context.Context, userMsg string) <-chan Event {
 			a.emit(ctx, ch, Event{Category: EventError, ToolError: "Model not set, call WithModel before RunStream"})
 			return
 		}
-		msgs := preSizedHistory(a, userMsg)
+		msgs := preSizedHistoryWithSplit(a, userMsg)
 		a.loopWithMsgs(ctx, msgs, ch)
 	}()
 	return ch
@@ -65,7 +65,7 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 		}
 		msgs := make([]llm.Message, 0, len(history)+2)
 		if len(history) == 0 || history[0].Role != "system" {
-			msgs = append(msgs, llm.Message{Role: "system", Content: a.SystemPrompts})
+			msgs = append(msgs, a.systemPromptMessages()...)
 		}
 		msgs = append(msgs, history...)
 		msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
@@ -75,6 +75,39 @@ func (a *Agent) runStreamResumedImpl(ctx context.Context, userMsg string, histor
 		}
 	}()
 	return ch
+}
+
+// systemPromptMessages converts a.SystemPrompts into one Message per
+// ContentBlock returned by llm.Core.CompleteSplit. When split is a no-op
+// (provider has no cache support, or prompt is empty / has no mid-point
+// newline), this returns a single Message identical to the pre-split
+// behaviour so existing assertions stay green.
+//
+// The static prefix carries CacheControl when the provider attaches one;
+// the dynamic suffix is plain text. Each Message uses the same role
+// "system" so MapToAnthropicRequest routes them through the system-block
+// path that honours CacheControl on the wire.
+func (a *Agent) systemPromptMessages() []llm.Message {
+	blocks := a.core.CompleteSplit(a.SystemPrompts, a.Model.ID)
+	if len(blocks) == 0 {
+		return []llm.Message{{Role: "system", Content: a.SystemPrompts}}
+	}
+	out := make([]llm.Message, 0, len(blocks))
+	for _, b := range blocks {
+		tb, ok := b.(llm.ContentText)
+		if !ok {
+			continue
+		}
+		msg := llm.Message{Role: "system", Content: tb.Text}
+		if tb.CacheControl != nil {
+			msg.CacheControl = tb.CacheControl
+		}
+		out = append(out, msg)
+	}
+	if len(out) == 0 {
+		return []llm.Message{{Role: "system", Content: a.SystemPrompts}}
+	}
+	return out
 }
 
 func (a *Agent) loopWithMsgs(ctx context.Context, msgs []llm.Message, ch chan<- Event) {
@@ -321,6 +354,18 @@ func preSizedHistory(a *Agent, userMsg string) []llm.Message {
 	msgs := make([]llm.Message, 2, 2+a.SafetyNet*4)
 	msgs[0] = llm.Message{Role: "system", Content: a.SystemPrompts}
 	msgs[1] = llm.Message{Role: "user", Content: userMsg}
+	return msgs
+}
+
+// preSizedHistoryWithSplit is the cache-aware variant of preSizedHistory.
+// It calls CompleteSplit so the static prefix of a.SystemPrompts carries
+// CacheControl when the model supports it. Returned slice is sized for
+// the split block count plus one user slot.
+func preSizedHistoryWithSplit(a *Agent, userMsg string) []llm.Message {
+	systemMsgs := a.systemPromptMessages()
+	msgs := make([]llm.Message, 0, len(systemMsgs)+1)
+	msgs = append(msgs, systemMsgs...)
+	msgs = append(msgs, llm.Message{Role: "user", Content: userMsg})
 	return msgs
 }
 

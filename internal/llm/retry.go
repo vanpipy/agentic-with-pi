@@ -170,3 +170,10 @@ func (r *RetryCore) jitter(d time.Duration) time.Duration {
 	}
 	return result
 }
+
+// CompleteSplit is a non-streaming prompt-construction helper that does not
+// need retry, failover, or rate-limit semantics. Pass-through to the inner
+// Core is sufficient and keeps RetryCore a transparent decorator for split.
+func (r *RetryCore) CompleteSplit(systemPrompt string, model string) []ContentBlock {
+	return r.inner.CompleteSplit(systemPrompt, model)
+}

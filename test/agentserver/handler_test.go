@@ -23,6 +23,12 @@ func (f *handlerFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) 
 	return ch, nil
 }
 
+func (f *handlerFakeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestHandleCompactNoSession(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "c.sock")

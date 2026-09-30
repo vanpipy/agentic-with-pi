@@ -27,6 +27,12 @@ func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan
 	return ch, nil
 }
 
+func (f *fakeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func setupTestServer(t *testing.T) (*agentserver.Server, string) {
 	t.Helper()
 	dir := t.TempDir()

@@ -33,6 +33,12 @@ func (s *scriptedCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 	return ch, nil
 }
 
+func (s *scriptedCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func collectStreamEvents(events <-chan llm.StreamEvent) []llm.StreamEvent {
 	var out []llm.StreamEvent
 	for ev := range events {
@@ -249,6 +255,12 @@ func (r *recordingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<
 	return ch, nil
 }
 
+func (r *recordingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func fastConfig(maxRetries int) llm.RetryConfig {
 	return llm.RetryConfig{
 		MaxRetries:     maxRetries,
@@ -351,6 +363,12 @@ func (f *flakyCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-cha
 	return okStreamChannel("recovered"), nil
 }
 
+func (f *flakyCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func okStreamChannel(content string) <-chan llm.StreamEvent {
 	ch := make(chan llm.StreamEvent, 1)
 	ch <- llm.EventTextDelta{Text: content}
@@ -409,6 +427,12 @@ type timingCore struct {
 func (t *timingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	t.calls = append(t.calls, time.Now())
 	return okStreamChannel("ok"), nil
+}
+
+func (t *timingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestRateLimitedCoreThrottlesBursts(t *testing.T) {
@@ -475,6 +499,12 @@ type probeCore struct {
 func (p *probeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	p.calls++
 	return okStreamChannel("ok"), nil
+}
+
+func (p *probeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestRateLimitedCoreZeroConfigUsesDefaults(t *testing.T) {

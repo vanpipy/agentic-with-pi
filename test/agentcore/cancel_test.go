@@ -28,6 +28,12 @@ func (f *fakeBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest)
 	return out, nil
 }
 
+func (f *fakeBlockingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestAgentRunStreamRespectsContextCancel(t *testing.T) {
 	core := &fakeBlockingCore{}
 	ag := agentcore.NewAgent(core).WithModel(llm.Model{ID: "test", SupportsStreaming: true})

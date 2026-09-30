@@ -63,6 +63,12 @@ func (f *fakeProvider) NativeCompact(ctx context.Context, model string, msgs []l
 	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
+func (f *fakeProvider) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 type fakeProtocol struct {
 	streamItems []protocol.StreamItem
 	streamErr   error

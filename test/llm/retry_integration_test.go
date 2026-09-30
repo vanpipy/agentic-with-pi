@@ -35,6 +35,12 @@ func (s *scriptedFailingCore) StreamChat(ctx context.Context, req *llm.ChatReque
 	return ch, nil
 }
 
+func (s *scriptedFailingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 // scriptedMidStreamCore emits `pre`, then an error event carrying `streamErr`.
 // On the second call it emits `post` cleanly. Exercises forwardWithMidRetry.
 type scriptedMidStreamCore struct {
@@ -61,6 +67,12 @@ func (s *scriptedMidStreamCore) StreamChat(ctx context.Context, req *llm.ChatReq
 	}
 	close(ch)
 	return ch, nil
+}
+
+func (s *scriptedMidStreamCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestRetryAfterHTTPErrorCapturesRetryAfterHeader(t *testing.T) {

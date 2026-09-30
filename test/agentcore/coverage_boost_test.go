@@ -839,6 +839,12 @@ func (e errStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 	return nil, e.err
 }
 
+func (e errStreamCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 type lengthStopCore struct{}
 
 func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
@@ -847,6 +853,12 @@ func (lengthStopCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-c
 	ch <- streamtest.Finish(llm.FinishReasonLength)
 	close(ch)
 	return ch, nil
+}
+
+func (lengthStopCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestExtractPreviousSummaryReturnsFirstMatch(t *testing.T) {

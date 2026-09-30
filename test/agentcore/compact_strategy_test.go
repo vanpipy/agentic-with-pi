@@ -237,6 +237,12 @@ func (strategyTestFakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest
 	return ch, nil
 }
 
+func (strategyTestFakeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestStrategyEnumsAreDistinct(t *testing.T) {
 	all := []compact.CompactionStrategy{compact.StrategyReactive, compact.StrategyProactive, compact.StrategySemantic, compact.StrategyEmergency}
 	seen := map[compact.CompactionStrategy]bool{}
@@ -467,6 +473,12 @@ func (s streamSummaryStubCore) StreamChat(ctx context.Context, req *llm.ChatRequ
 	ch <- streamtest.Finish(s.finish)
 	close(ch)
 	return ch, nil
+}
+
+func (s streamSummaryStubCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 var errFakeLLM = &llm.Error{Kind: llm.ErrorKindServer, Message: "stub failure"}

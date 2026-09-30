@@ -37,3 +37,7 @@ func (c *rateLimitedCore) StreamChat(ctx context.Context, req *ChatRequest) (<-c
 	}
 	return c.inner.StreamChat(ctx, req)
 }
+
+func (c *rateLimitedCore) CompleteSplit(systemPrompt string, model string) []ContentBlock {
+	return c.inner.CompleteSplit(systemPrompt, model)
+}

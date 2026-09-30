@@ -581,6 +581,12 @@ func (c *concurrentBlockingCore) StreamChat(ctx context.Context, req *llm.ChatRe
 	return ch, nil
 }
 
+func (c *concurrentBlockingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestHandleCancelMultipleCancelsForSameIDOnlyOneWins(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "test.sock")

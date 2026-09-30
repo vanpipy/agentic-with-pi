@@ -48,6 +48,12 @@ func (s *stubProvider) NativeCompact(ctx context.Context, model string, msgs []l
 	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
+func (s *stubProvider) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestRegisterAndGet(t *testing.T) {
 	r := llm.NewRegistry()
 	p := &stubProvider{name: "foo"}

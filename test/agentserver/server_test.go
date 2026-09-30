@@ -34,6 +34,12 @@ func (b *blockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 	return ch, nil
 }
 
+func (b *blockingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 type fakeCore struct{}
 
 func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
@@ -45,10 +51,22 @@ func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan
 	return ch, nil
 }
 
+func (f *fakeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 type failingCore struct{}
 
 func (failingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, errors.New("llm provider is down")
+}
+
+func (failingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func setupTest(t *testing.T) (*agentserver.Server, string) {
@@ -709,6 +727,12 @@ func (f *fakeCoreAccum) StreamChat(ctx context.Context, req *llm.ChatRequest) (<
 	return ch, nil
 }
 
+func (f *fakeCoreAccum) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestServerKeepsSessionFileWhenLLMFails(t *testing.T) {
 	dir := t.TempDir()
 	socketPath := filepath.Join(dir, "test.sock")
@@ -887,6 +911,12 @@ func (a *accumulatingCore) lastRequestMessages() []llm.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.lastMsgs
+}
+
+func (a *accumulatingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestSessionStateAccumulatesAcrossPrompts(t *testing.T) {

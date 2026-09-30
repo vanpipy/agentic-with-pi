@@ -204,6 +204,14 @@ func (p *MiniMaxProvider) NativeCompact(ctx context.Context, model string, msgs 
 	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
+// CompleteSplit delegates to the shared llm.SplitSystemPrompt helper. The
+// cache_control attachment is decided by SupportsCacheControl(model), so
+// MiniMax models configured with cache support emit CacheEphemeral on the
+// static prefix and plain text on the dynamic suffix.
+func (p *MiniMaxProvider) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	return llm.SplitSystemPrompt(systemPrompt, p.SupportsCacheControl(model))
+}
+
 func (p *MiniMaxProvider) ModelCapabilities(model string) llm.ModelCapabilities {
 	spec, ok := p.lookupSpec(model)
 	if !ok {

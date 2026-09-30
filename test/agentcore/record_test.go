@@ -24,6 +24,12 @@ func (f *fakeCoreForRecord) StreamChat(ctx context.Context, req *llm.ChatRequest
 	return ch, nil
 }
 
+func (f *fakeCoreForRecord) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestNewAgentOpensDefaultSessionLog(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AWP_HOME", tmp)

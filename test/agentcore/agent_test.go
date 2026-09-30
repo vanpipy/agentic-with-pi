@@ -67,6 +67,12 @@ func (f *fakeCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-chan
 	return streamtest.Chunks(chunks), nil
 }
 
+func (f *fakeCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func textDeltaChunk(text string) llm.StreamChunk {
 	return llm.StreamChunk{Choices: []llm.StreamChoice{{
 		Index: 0,
@@ -669,6 +675,12 @@ func (b *blockingCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<-
 	}()
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+func (b *blockingCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestAgentNoModelSetEmitsError(t *testing.T) {
@@ -2233,6 +2245,12 @@ func (s *slowStreamCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (
 		}
 	}()
 	return out, nil
+}
+
+func (s *slowStreamCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestSoftInterruptHaltsRunWithinBudget(t *testing.T) {

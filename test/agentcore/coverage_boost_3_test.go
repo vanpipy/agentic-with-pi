@@ -1258,6 +1258,12 @@ func (s *streamErrCore) StreamChat(_ context.Context, _ *llm.ChatRequest) (<-cha
 	return s.ch, nil
 }
 
+func (s *streamErrCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestAgentExecuteToolsErrorOnEmptyArgsStopsCurrentTurn(t *testing.T) {
 	ag := agentcore.NewAgent(&fakeCore{}).WithModel(llm.Model{ID: "m"})
 	ag.WithTool(agentcore.ToolFunc{N: "ok", Fn: func(context.Context, string) (string, error) { return "ok", nil }})

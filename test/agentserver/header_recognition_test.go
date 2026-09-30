@@ -24,6 +24,12 @@ func (c *headerRecCore) StreamChat(ctx context.Context, req *llm.ChatRequest) (<
 	return ch, nil
 }
 
+func (c *headerRecCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestAgentHeaderRecognizableByServerLoad(t *testing.T) {
 	sessionID := "115845c05e9754f4f3664bc71be621e6"
 	core := &headerRecCore{}

@@ -93,3 +93,7 @@ func (c *interruptAwareCore) StreamChat(ctx context.Context, req *llm.ChatReques
 	}()
 	return c.inner.StreamChat(innerCtx, req)
 }
+
+func (c *interruptAwareCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	return c.inner.CompleteSplit(systemPrompt, model)
+}

@@ -336,6 +336,12 @@ func (errCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.S
 	return nil, errors.New("simulated provider failure")
 }
 
+func (errCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 func TestReActStrategyStepNonCtxStreamErrEmitsErrorEvents(t *testing.T) {
 	strat := agentcore.NewReActStrategy(errCore{}, llm.Model{ID: "m"}, nil, nil)
 	var sawError, sawThoughtEnd bool
@@ -367,6 +373,12 @@ type ctxErrCore struct{}
 
 func (ctxErrCore) StreamChat(_ context.Context, _ *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, context.Canceled
+}
+
+func (ctxErrCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestReActStrategyStepCtxErrReturnsCtxErr(t *testing.T) {
@@ -979,6 +991,12 @@ type errReturningCore struct {
 
 func (e *errReturningCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.StreamEvent, error) {
 	return nil, e.err
+}
+
+func (e *errReturningCore) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
 }
 
 func TestAgentRunStreamStreamChatCoreErrorNotCtxEmitsAndReturnsNilError(t *testing.T) {

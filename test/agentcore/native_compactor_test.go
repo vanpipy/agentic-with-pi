@@ -51,6 +51,12 @@ func (f *fakeProvider) NativeCompact(ctx context.Context, model string, msgs []l
 	return f.result, f.err
 }
 
+func (f *fakeProvider) CompleteSplit(systemPrompt string, model string) []llm.ContentBlock {
+	_ = systemPrompt
+	_ = model
+	return nil
+}
+
 var _ llm.Provider = (*fakeProvider)(nil)
 
 type fakeRunner struct {

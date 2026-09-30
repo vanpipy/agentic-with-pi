@@ -60,6 +60,13 @@ type Provider interface {
 	NativeCompactCapabilities(model string) NativeCompactionCapabilities
 
 	NativeCompact(ctx context.Context, model string, msgs []Message, summaryText, encryptedContent string) (NativeCompactionResult, error)
+
+	// CompleteSplit divides a system prompt into a cacheable static prefix
+	// and a dynamic suffix. When the target model supports prompt-cache, the
+	// static prefix carries CacheEphemeral; otherwise the blocks are plain
+	// ContentText. The split point is the first newline at or after the byte
+	// midpoint. Empty prompt returns nil.
+	CompleteSplit(systemPrompt string, model string) []ContentBlock
 }
 
 type core struct {
@@ -74,6 +81,7 @@ type core struct {
 // event or context cancellation.
 type Core interface {
 	StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamEvent, error)
+	CompleteSplit(systemPrompt string, model string) []ContentBlock
 }
 
 func NewCore(provider Provider, proto protocol.Protocol) Core {
@@ -115,6 +123,13 @@ func (c *core) StreamChat(ctx context.Context, req *ChatRequest) (<-chan StreamE
 		c.streamOnce(ctx, rawChan, events)
 	}()
 	return events, nil
+}
+
+// CompleteSplit delegates to the wrapped Provider. It exists on Core so
+// agent-core can call the splitter without holding a direct Provider
+// reference (Core is the boundary it actually owns).
+func (c *core) CompleteSplit(systemPrompt string, model string) []ContentBlock {
+	return c.provider.CompleteSplit(systemPrompt, model)
 }
 
 func (c *core) startStream(ctx context.Context, req *ChatRequest) (<-chan protocol.StreamItem, *protocol.Request, error) {
