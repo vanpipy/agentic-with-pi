@@ -52,12 +52,112 @@ func TestStreamTranslatorEventThoughtStartCreatesBuffer(t *testing.T) {
 	}
 }
 
-func TestStreamTranslatorEventThoughtChunkNoEmit(t *testing.T) {
+func TestStreamTranslatorEventThoughtChunkEmitsInterimMessage(t *testing.T) {
 	tr := newStreamTranslator()
 	tr.Translate(agentcore.Event{Category: agentcore.EventThoughtStart})
 	emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "reasoning-1"})
-	if len(emits) != 0 {
-		t.Errorf("emits len = %d, want 0 (buffered)", len(emits))
+	if len(emits) != 1 {
+		t.Fatalf("emits len = %d, want 1 (interim message)", len(emits))
+	}
+	if emits[0].EventName != json_rpc.EventMessage {
+		t.Errorf("eventName = %q, want %q", emits[0].EventName, json_rpc.EventMessage)
+	}
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
+	if !ok {
+		t.Fatalf("payload type = %T, want MessageEvent", emits[0].Payload)
+	}
+	if msg.Message.Role != "assistant" {
+		t.Errorf("role = %q, want assistant", msg.Message.Role)
+	}
+	if msg.StopReason != "streaming" {
+		t.Errorf("stopReason = %q, want streaming", msg.StopReason)
+	}
+	if len(msg.Message.Content) != 1 || msg.Message.Content[0].Type != "thinking" || msg.Message.Content[0].Thinking != "reasoning-1" {
+		t.Errorf("content = %+v, want one thinking part", msg.Message.Content)
+	}
+}
+
+func TestStreamTranslatorEventThoughtChunkContentPart(t *testing.T) {
+	tr := newStreamTranslator()
+	tr.Translate(agentcore.Event{Category: agentcore.EventThoughtStart})
+	emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Content: "hello world"})
+	if len(emits) != 1 {
+		t.Fatalf("emits len = %d, want 1 (interim message)", len(emits))
+	}
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
+	if !ok {
+		t.Fatalf("payload type = %T, want MessageEvent", emits[0].Payload)
+	}
+	if len(msg.Message.Content) != 1 || msg.Message.Content[0].Type != "text" || msg.Message.Content[0].Text != "hello world" {
+		t.Errorf("content = %+v, want one text part", msg.Message.Content)
+	}
+	if tr.StreamBufForTest() == nil {
+		t.Fatal("streamBuf should still be active after chunk")
+	}
+}
+
+func TestStreamTranslatorEventThoughtChunkReasoningAndContent(t *testing.T) {
+	tr := newStreamTranslator()
+	tr.Translate(agentcore.Event{Category: agentcore.EventThoughtStart})
+	emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "r", Content: "c"})
+	if len(emits) != 1 {
+		t.Fatalf("emits len = %d, want 1", len(emits))
+	}
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
+	if !ok {
+		t.Fatalf("payload type = %T, want MessageEvent", emits[0].Payload)
+	}
+	if len(msg.Message.Content) != 2 {
+		t.Fatalf("content len = %d, want 2 (thinking + text)", len(msg.Message.Content))
+	}
+	if msg.Message.Content[0].Type != "thinking" || msg.Message.Content[0].Thinking != "r" {
+		t.Errorf("first part = %+v, want thinking", msg.Message.Content[0])
+	}
+	if msg.Message.Content[1].Type != "text" || msg.Message.Content[1].Text != "c" {
+		t.Errorf("second part = %+v, want text", msg.Message.Content[1])
+	}
+}
+
+func TestStreamTranslatorEventThoughtChunkEmptyNoEmit(t *testing.T) {
+	tr := newStreamTranslator()
+	tr.Translate(agentcore.Event{Category: agentcore.EventThoughtStart})
+	if emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk}); len(emits) != 0 {
+		t.Errorf("empty chunk emits len = %d, want 0", len(emits))
+	}
+}
+
+func TestStreamTranslatorInterimIDStableAcrossChunksAndRegenOnBufferReset(t *testing.T) {
+	tr := newStreamTranslator()
+	tr.Translate(agentcore.Event{Category: agentcore.EventThoughtStart})
+	firstID := tr.InterimIDForTest()
+	if firstID == "" {
+		t.Fatal("interimID should be set after ThoughtStart")
+	}
+	for i := 0; i < 3; i++ {
+		emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "x"})
+		if len(emits) != 1 {
+			t.Fatalf("chunk[%d] emits = %d", i, len(emits))
+		}
+		msg := emits[0].Payload.(json_rpc.MessageEvent)
+		if msg.ID != firstID {
+			t.Errorf("chunk[%d] id = %q, want stable %q", i, msg.ID, firstID)
+		}
+	}
+	toolEmits := tr.Translate(agentcore.Event{Category: agentcore.EventTool, ToolName: "ls", ToolArgs: `{}`})
+	if len(toolEmits) == 0 {
+		t.Fatal("tool emit must produce at least one message")
+	}
+	if tr.InterimIDForTest() == firstID {
+		t.Errorf("interimID must regenerate after tool re-creates buffer; still %q", firstID)
+	}
+	secondID := tr.InterimIDForTest()
+	emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "y"})
+	if len(emits) != 1 {
+		t.Fatalf("post-tool chunk emits = %d", len(emits))
+	}
+	msg := emits[0].Payload.(json_rpc.MessageEvent)
+	if msg.ID != secondID {
+		t.Errorf("post-tool chunk id = %q, want regenerated %q", msg.ID, secondID)
 	}
 }
 
@@ -384,8 +484,9 @@ func TestStreamTranslatorStateAcrossEvents(t *testing.T) {
 	}
 
 	for i := 0; i < 3; i++ {
-		if emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "x"}); len(emits) != 0 {
-			t.Errorf("thoughtChunk[%d] emits = %d", i, len(emits))
+		emits := tr.Translate(agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "x"})
+		if len(emits) != 1 {
+			t.Errorf("thoughtChunk[%d] emits = %d, want 1 (interim message)", i, len(emits))
 		}
 	}
 

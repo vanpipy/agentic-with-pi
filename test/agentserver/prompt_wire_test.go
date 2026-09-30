@@ -41,22 +41,32 @@ func TestMarshalAgentEventForWireUserMessageEmitsUserRoleMessage(t *testing.T) {
 	}
 }
 
-func TestMarshalAgentEventForWireThoughtChunkAccumulatesNoEmit(t *testing.T) {
+func TestMarshalAgentEventForWireThoughtChunkAccumulatesAndEmitsInterim(t *testing.T) {
 	var parentID string
 	var buf *stream.StreamBuffer = stream.NewStreamBuffer("")
-	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
+	first := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "hello ",
 	}, &parentID, &buf)
-	if len(emits) != 0 {
-		t.Errorf("expected 0 emits during chunk, got %d", len(emits))
+	if len(first) != 1 {
+		t.Errorf("first chunk emits = %d, want 1 (interim message)", len(first))
 	}
-	emits = agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
+	if firstMsg, ok := first[0].Payload.(json_rpc.MessageEvent); ok {
+		if firstMsg.Message.Content[0].Thinking != "hello " {
+			t.Errorf("first chunk delta = %q, want %q", firstMsg.Message.Content[0].Thinking, "hello ")
+		}
+	}
+	second := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "world",
 	}, &parentID, &buf)
-	if len(emits) != 0 {
-		t.Errorf("expected 0 emits during chunk, got %d", len(emits))
+	if len(second) != 1 {
+		t.Errorf("second chunk emits = %d, want 1 (interim message)", len(second))
+	}
+	if secondMsg, ok := second[0].Payload.(json_rpc.MessageEvent); ok {
+		if secondMsg.Message.Content[0].Thinking != "world" {
+			t.Errorf("second chunk delta = %q, want %q", secondMsg.Message.Content[0].Thinking, "world")
+		}
 	}
 }
 
@@ -66,6 +76,11 @@ func TestMarshalAgentEventForWireFinalAnswerEmitsAssistantMessage(t *testing.T) 
 	agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category:  agentcore.EventThoughtChunk,
 		Reasoning: "I should answer",
+		Content:   "It's ",
+	}, &parentID, &buf)
+	agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
+		Category: agentcore.EventThoughtChunk,
+		Content:  "2 PM",
 	}, &parentID, &buf)
 	emits := agentserver.MarshalAgentEventForWireForTest(agentcore.Event{
 		Category: agentcore.EventFinalAnswer,

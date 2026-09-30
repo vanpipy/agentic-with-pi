@@ -94,8 +94,24 @@ func TestMarshalAgentEventForWireThoughtChunkWithStreamBuf(t *testing.T) {
 		agentcore.Event{Category: agentcore.EventThoughtChunk, Reasoning: "thinking"},
 		&parentID, &streamBuf,
 	)
-	if len(emits) != 0 {
-		t.Errorf("emits len = %d, want 0 (thought_chunk is buffered)", len(emits))
+	if len(emits) != 1 {
+		t.Fatalf("emits len = %d, want 1 (interim message for live streaming)", len(emits))
+	}
+	if emits[0].EventName != json_rpc.EventMessage {
+		t.Errorf("eventName = %q, want %q", emits[0].EventName, json_rpc.EventMessage)
+	}
+	msg, ok := emits[0].Payload.(json_rpc.MessageEvent)
+	if !ok {
+		t.Fatalf("payload type = %T, want MessageEvent", emits[0].Payload)
+	}
+	if msg.StopReason != "streaming" {
+		t.Errorf("stopReason = %q, want streaming (must not commit prematurely)", msg.StopReason)
+	}
+	if msg.Message.Role != "assistant" {
+		t.Errorf("role = %q, want assistant", msg.Message.Role)
+	}
+	if len(msg.Message.Content) != 1 || msg.Message.Content[0].Type != "thinking" || msg.Message.Content[0].Thinking != "thinking" {
+		t.Errorf("content = %+v, want one thinking part", msg.Message.Content)
 	}
 }
 

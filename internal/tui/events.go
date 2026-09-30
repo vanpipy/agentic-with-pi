@@ -51,8 +51,8 @@ func handleMessageEvent(c *chatModel, data []byte) {
 	for _, part := range msg.Message.Content {
 		switch part.Type {
 		case "thinking":
-			if part.Text != "" {
-				c.appendReasoning(part.Text)
+			if part.Thinking != "" {
+				c.appendReasoning(part.Thinking)
 			}
 		case "text":
 			if part.Text != "" {

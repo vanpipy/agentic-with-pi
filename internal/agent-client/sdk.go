@@ -116,7 +116,13 @@ func isStreamEnd(resp *json_rpc.Response) bool {
 		if err := json.Unmarshal(resp.Data, &msg); err != nil {
 			return false
 		}
-		return msg.Message.Role == "assistant" && msg.StopReason != "toolUse"
+		if msg.Message.Role != "assistant" {
+			return false
+		}
+		if msg.StopReason == "" || msg.StopReason == "streaming" {
+			return false
+		}
+		return msg.StopReason != "toolUse"
 	}
 	return false
 }

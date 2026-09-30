@@ -101,6 +101,25 @@ func collectAssistantText(data []byte) (string, bool) {
 	return b.String(), true
 }
 
+// collectFinalAssistantText only succeeds for end-of-turn messages; interim
+// "streaming" deltas are ignored so the caller waits for the final answer.
+func collectFinalAssistantText(data []byte) (string, bool) {
+	var msg json_rpc.MessageEvent
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return "", false
+	}
+	if msg.Message.Role != "assistant" || msg.StopReason != "end_turn" {
+		return "", false
+	}
+	var b strings.Builder
+	for _, part := range msg.Message.Content {
+		if part.Type == "text" {
+			b.WriteString(part.Text)
+		}
+	}
+	return b.String(), true
+}
+
 func TestServerSocketPath(t *testing.T) {
 	s, _ := setupTest(t)
 	defer s.Shutdown(context.Background())
@@ -245,7 +264,7 @@ func TestServerPrompt(t *testing.T) {
 		}
 		events = append(events, resp.Event)
 		if resp.Event == json_rpc.EventMessage {
-			if text, ok := collectAssistantText(resp.Data); ok {
+			if text, ok := collectFinalAssistantText(resp.Data); ok {
 				finalContent = text
 				break
 			}
@@ -365,7 +384,7 @@ func TestServerCancelDoesNotTearDownServer(t *testing.T) {
 			break
 		}
 		if resp.Event == json_rpc.EventMessage {
-			if text, ok := collectAssistantText(resp.Data); ok {
+			if text, ok := collectFinalAssistantText(resp.Data); ok {
 				finalContent = text
 				break
 			}

@@ -848,6 +848,12 @@ func (c *chatModel) submit(text string) {
 }
 
 func (c *chatModel) appendStream(text string) {
+	if text == "" {
+		return
+	}
+	if text == c.streaming.String() {
+		return
+	}
 	c.streaming.WriteString(text)
 	c.refresh()
 }

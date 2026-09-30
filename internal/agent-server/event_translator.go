@@ -13,6 +13,10 @@ import (
 type streamTranslator struct {
 	parentID  string
 	streamBuf *stream.StreamBuffer
+	// Stable id for the interim (streaming) Message event produced by
+	// onThoughtChunk. Regenerated whenever the underlying buffer is reset so
+	// that downstream consumers can recognise per-step streams.
+	interimID string
 }
 
 // StreamTranslator is the exported alias of streamTranslator so external
@@ -21,7 +25,7 @@ type streamTranslator struct {
 type StreamTranslator = streamTranslator
 
 func newStreamTranslator() *streamTranslator {
-	return &streamTranslator{}
+	return &streamTranslator{interimID: json_rpc.NewV7()}
 }
 
 // NewStreamTranslator is the exported constructor. It exists for
@@ -36,6 +40,14 @@ func (t *streamTranslator) ParentIDForTest() string {
 
 func (t *streamTranslator) StreamBufForTest() *stream.StreamBuffer {
 	return t.streamBuf
+}
+
+func (t *streamTranslator) InterimIDForTest() string {
+	return t.interimID
+}
+
+func (t *streamTranslator) resetInterimID() {
+	t.interimID = json_rpc.NewV7()
 }
 
 func (t *streamTranslator) Translate(ev agentcore.Event) []WireEmit {
@@ -76,14 +88,38 @@ func (t *streamTranslator) onUserMessage(ev agentcore.Event) []WireEmit {
 
 func (t *streamTranslator) onThoughtStart(ev agentcore.Event) []WireEmit {
 	t.streamBuf = stream.NewStreamBuffer(t.parentID)
+	t.resetInterimID()
 	return nil
 }
 
+// interimStopReason is the sentinel stop reason emitted on interim Message
+// events during streaming. It is neither "end_turn" nor empty so the TUI's
+// handleMessageEvent will not commit the streaming buffers prematurely.
+const interimStopReason = "streaming"
+
 func (t *streamTranslator) onThoughtChunk(ev agentcore.Event) []WireEmit {
-	if t.streamBuf != nil {
-		t.streamBuf.AppendThinking(ev.Reasoning, "")
+	if t.streamBuf == nil {
+		return nil
 	}
-	return nil
+	var parts []json_rpc.MessageContentPart
+	if ev.Reasoning != "" {
+		t.streamBuf.AppendThinking(ev.Reasoning, "")
+		parts = append(parts, json_rpc.MessageContentPart{Type: "thinking", Thinking: ev.Reasoning})
+	}
+	if ev.Content != "" {
+		t.streamBuf.AppendText(ev.Content)
+		parts = append(parts, json_rpc.MessageContentPart{Type: "text", Text: ev.Content})
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	return []WireEmit{{EventName: json_rpc.EventMessage, Payload: json_rpc.MessageEvent{
+		ID:         t.interimID,
+		ParentID:   t.parentID,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		Message:    json_rpc.Message{Role: "assistant", Content: parts},
+		StopReason: interimStopReason,
+	}}}
 }
 
 func (t *streamTranslator) onThoughtEnd(ev agentcore.Event) []WireEmit {
@@ -133,6 +169,7 @@ func (t *streamTranslator) onTool(ev agentcore.Event) []WireEmit {
 	t.parentID = toolResultMsg.ID
 	emits = append(emits, WireEmit{EventName: json_rpc.EventMessage, Payload: toolResultMsg})
 	t.streamBuf = stream.NewStreamBuffer(toolResultMsg.ID)
+	t.resetInterimID()
 	return emits
 }
 
@@ -144,6 +181,7 @@ func (t *streamTranslator) onObserve(ev agentcore.Event) []WireEmit {
 	msg := t.streamBuf.Finalize()
 	t.parentID = msg.ID
 	t.streamBuf = stream.NewStreamBuffer(msg.ID)
+	t.resetInterimID()
 	return []WireEmit{{EventName: json_rpc.EventMessage, Payload: msg}}
 }
 
@@ -152,7 +190,6 @@ func (t *streamTranslator) onFinalAnswer(ev agentcore.Event) []WireEmit {
 		return nil
 	}
 	t.streamBuf.SetRole("assistant")
-	t.streamBuf.AppendText(ev.Content)
 	if ev.Usage != nil {
 		t.streamBuf.SetUsage(json_rpc.UsageStats{
 			PromptTokens:     ev.Usage.PromptTokens,

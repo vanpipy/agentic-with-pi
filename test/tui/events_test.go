@@ -3,6 +3,7 @@ package tui_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -388,5 +389,145 @@ func TestRenderMsgRoleSafetyUsesSafetyGlyphPrefix(t *testing.T) {
 	}
 	if nudgeGlyph == userGlyph {
 		t.Errorf("RoleSafety glyph (%q) must differ from RoleUser glyph (%q) so safety indicators are visually distinct", nudgeGlyph, userGlyph)
+	}
+}
+
+func TestHandleServerEventMessageThinkingPartEchoesReasoning(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000020",
+		"timestamp":"2026-09-30T00:00:00.000Z",
+		"message":{
+			"role":"assistant",
+			"content":[{"type":"thinking","thinking":"scratch pad reasoning"}]
+		},
+		"stopReason":"end_turn"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	msgs := c.MessagesForTest()
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 finalized message (thinking), got %d", len(msgs))
+	}
+	if msgs[0].Role != tui.RoleThinking {
+		t.Errorf("finalized message role = %v, want %v", msgs[0].Role, tui.RoleThinking)
+	}
+	if msgs[0].Text != "scratch pad reasoning" {
+		t.Errorf("finalized thinking text = %q, want %q", msgs[0].Text, "scratch pad reasoning")
+	}
+}
+
+func TestHandleServerEventMessageThinkingPartLiveStreamsBeforeCommit(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000022",
+		"timestamp":"2026-09-30T00:00:00.000Z",
+		"message":{
+			"role":"assistant",
+			"content":[{"type":"thinking","thinking":"live reasoning"}]
+		},
+		"stopReason":"toolUse"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	if got := c.ReasoningLenForTest(); got != len("live reasoning") {
+		t.Errorf("reasoning buffer length before commit = %d, want %d", got, len("live reasoning"))
+	}
+	msgs := c.MessagesForTest()
+	if len(msgs) != 0 {
+		t.Errorf("stopReason != end_turn must not commit, got %d finalized messages", len(msgs))
+	}
+}
+
+func TestHandleServerEventMessageThinkingAndTextBothRouted(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	data := []byte(`{
+		"id":"0190a3b7-0001-7c8a-9000-000000000021",
+		"timestamp":"2026-09-30T00:00:00.000Z",
+		"message":{
+			"role":"assistant",
+			"content":[
+				{"type":"thinking","thinking":"plan: greet, then answer"},
+				{"type":"text","text":"hi!"}
+			]
+		},
+		"stopReason":"end_turn"
+	}`)
+	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+
+	msgs := c.MessagesForTest()
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 finalized messages (thinking + assistant), got %d", len(msgs))
+	}
+	if msgs[0].Role != tui.RoleThinking || msgs[0].Text != "plan: greet, then answer" {
+		t.Errorf("first msg = %+v, want RoleThinking with the reasoning text", msgs[0])
+	}
+	if msgs[1].Role != tui.RoleAssistant || msgs[1].Text != "hi!" {
+		t.Errorf("second msg = %+v, want RoleAssistant with %q", msgs[1], "hi!")
+	}
+}
+
+func TestHandleServerEventInterimMessageStreamsThinkingDeltas(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	deliver := func(id, thinking, content string) {
+		data := []byte(fmt.Sprintf(`{
+			"id":%q,
+			"timestamp":"2026-09-30T00:00:00.000Z",
+			"message":{
+				"role":"assistant",
+				"content":[
+					{"type":"thinking","thinking":%q},
+					{"type":"text","text":%q}
+				]
+			},
+			"stopReason":"streaming"
+		}`, id, thinking, content))
+		tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	}
+	deliver("0190a3b7-0001-7c8a-9000-000000000030", "Hello, ", "")
+	deliver("0190a3b7-0001-7c8a-9000-000000000030", "I should greet.", "")
+	deliver("0190a3b7-0001-7c8a-9000-000000000030", "", "Hi!")
+
+	if got := c.ReasoningLenForTest(); got != len("Hello, I should greet.") {
+		t.Errorf("reasoning buffer length = %d, want %d", got, len("Hello, I should greet."))
+	}
+	if got := c.StreamingLenForTest(); got != len("Hi!") {
+		t.Errorf("streaming buffer length = %d, want %d", got, len("Hi!"))
+	}
+	msgs := c.MessagesForTest()
+	if len(msgs) != 0 {
+		t.Errorf("interim messages must not commit; got %d finalized messages", len(msgs))
+	}
+}
+
+func TestHandleServerEventFinalMessageDoesNotDoubleAppendStreamedText(t *testing.T) {
+	c := tui.NewChatModelForTest()
+	deliver := func(id, thinking, content, stop string) {
+		data := []byte(fmt.Sprintf(`{
+			"id":%q,
+			"timestamp":"2026-09-30T00:00:00.000Z",
+			"message":{
+				"role":"assistant",
+				"content":[
+					{"type":"thinking","thinking":%q},
+					{"type":"text","text":%q}
+				]
+			},
+			"stopReason":%q
+		}`, id, thinking, content, stop))
+		tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
+	}
+	deliver("0190a3b7-0001-7c8a-9000-000000000031", "plan", "Hello", "streaming")
+	deliver("0190a3b7-0001-7c8a-9000-000000000031", "plan", "Hello", "end_turn")
+
+	if got := c.StreamingLenForTest(); got != 0 {
+		t.Errorf("after commit streaming buffer = %d, want 0 (commit flushed)", got)
+	}
+	msgs := c.MessagesForTest()
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 finalized messages, got %d", len(msgs))
+	}
+	if msgs[1].Role != tui.RoleAssistant || msgs[1].Text != "Hello" {
+		t.Errorf("assistant msg = %+v, want RoleAssistant text=Hello", msgs[1])
 	}
 }
