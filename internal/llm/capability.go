@@ -49,11 +49,6 @@ const (
 	// KindNative: the provider offers a server-side compaction API; the
 	// runtime may call Provider.NativeCompact directly.
 	KindNative
-	// KindClient: the provider explicitly opts into client-side
-	// compaction (e.g. Anthropic, which has no server-side compact
-	// endpoint); the runtime skips NativeCompact and routes to the
-	// fallback CompactRunner.
-	KindClient
 )
 
 // NativeCompactionCapabilities reports how a provider wants the runtime

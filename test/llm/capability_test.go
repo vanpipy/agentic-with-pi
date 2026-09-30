@@ -157,9 +157,6 @@ func TestNativeCompactionKindValues(t *testing.T) {
 	if llm.KindNative != 1 {
 		t.Fatalf("KindNative = %d, want 1", llm.KindNative)
 	}
-	if llm.KindClient != 2 {
-		t.Fatalf("KindClient = %d, want 2", llm.KindClient)
-	}
 }
 
 func TestNativeCompactionCapabilitiesPayload(t *testing.T) {

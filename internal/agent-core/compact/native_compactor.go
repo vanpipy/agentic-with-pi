@@ -17,9 +17,6 @@ import (
 //	                  error, fall through to the fallback runner so a
 //	                  transient native-compaction failure never blocks
 //	                  the chat.
-//	KindClient     -> skip the provider entirely and route to fallback.
-//	                  Anthropic uses this today; the chat continues
-//	                  even when no server-side compaction exists.
 //	KindUnsupported -> route to fallback. Returning the unsupported
 //	                   sentinel from NativeCompact would be a
 //	                   programmer error here, since the decision tree
@@ -48,7 +45,7 @@ func (n *NativeCompactor) Compact(ctx context.Context, msgs []llm.Message) ([]ll
 			Content: result.Summary,
 		}
 		return []llm.Message{summary}, true, nil
-	case llm.KindClient, llm.KindUnsupported:
+	case llm.KindUnsupported:
 		return n.applyFallback(ctx, msgs)
 	}
 	return msgs, false, nil

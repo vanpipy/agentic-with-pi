@@ -112,30 +112,6 @@ func TestNativeCompactor_KindUnsupported_RoutesToFallback(t *testing.T) {
 	}
 }
 
-func TestNativeCompactor_KindClient_RoutesToFallbackWithoutCallingProvider(t *testing.T) {
-	p := &fakeProvider{caps: llm.NativeCompactionCapabilities{Kind: llm.KindClient}}
-	runner := &fakeRunner{
-		out: []llm.Message{{Role: "system", Content: "client-summary"}},
-		ok:  true,
-	}
-	n := &compact.NativeCompactor{
-		Provider: p,
-		Model:    "m",
-		Fallback: runner,
-		Logger:   newDiscardLogger(),
-	}
-	out, ok, err := n.Compact(context.Background(), sampleMessages())
-	if err != nil {
-		t.Fatalf("Compact err = %v", err)
-	}
-	if !ok || len(out) != 1 || out[0].Content != "client-summary" {
-		t.Errorf("out = %+v, want single client-summary message", out)
-	}
-	if p.called {
-		t.Error("provider.NativeCompact called for KindClient, want skipped")
-	}
-}
-
 func TestNativeCompactor_KindNative_CallsProviderAndReturnsSummary(t *testing.T) {
 	p := &fakeProvider{
 		caps:   llm.NativeCompactionCapabilities{Kind: llm.KindNative, Mode: "auto", Threshold: 1000},
@@ -200,26 +176,6 @@ func TestNativeCompactor_NilProviderReturnsInputUnchanged(t *testing.T) {
 	}
 	if ok {
 		t.Error("ok = true, want false for nil receiver")
-	}
-	if len(out) != len(msgs) {
-		t.Errorf("out len = %d, want %d (unchanged)", len(out), len(msgs))
-	}
-}
-
-func TestNativeCompactor_KindClient_NilFallbackReturnsInputUnchanged(t *testing.T) {
-	p := &fakeProvider{caps: llm.NativeCompactionCapabilities{Kind: llm.KindClient}}
-	n := &compact.NativeCompactor{
-		Provider: p,
-		Model:    "m",
-		Logger:   newDiscardLogger(),
-	}
-	msgs := sampleMessages()
-	out, ok, err := n.Compact(context.Background(), msgs)
-	if err != nil {
-		t.Fatalf("Compact err = %v", err)
-	}
-	if ok {
-		t.Error("ok = true, want false (no fallback to consult)")
 	}
 	if len(out) != len(msgs) {
 		t.Errorf("out len = %d, want %d (unchanged)", len(out), len(msgs))
