@@ -59,6 +59,7 @@ func handleMessageEvent(c *chatModel, data []byte) {
 				c.appendStream(part.Text)
 			}
 		case "toolCall":
+			c.commitStream()
 			c.appendTool(part)
 		}
 	}

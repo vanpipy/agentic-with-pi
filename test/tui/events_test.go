@@ -12,6 +12,14 @@ import (
 	"github.com/vanpiyp/awp/internal/tui"
 )
 
+func rolesOfMsgs(msgs []tui.ChatMsg) []tui.Role {
+	out := make([]tui.Role, len(msgs))
+	for i, m := range msgs {
+		out[i] = m.Role
+	}
+	return out
+}
+
 func TestHandleServerEventMessageWithThinkingAndTextAndToolCall(t *testing.T) {
 	c := tui.NewChatModelForTest()
 	data := []byte(`{
@@ -29,11 +37,17 @@ func TestHandleServerEventMessageWithThinkingAndTextAndToolCall(t *testing.T) {
 	}`)
 	tui.HandleServerEventForTest(c, new(string), agentclient.Event{Kind: "message", Data: data})
 	msgs := c.MessagesForTest()
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 message (tool call), got %d", len(msgs))
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages (committed reasoning, committed text, tool call) — a toolCall part commits any pending reasoning/text buffers so cross-step reasoning does not bleed into the next step, got %d: %+v", len(msgs), rolesOfMsgs(msgs))
 	}
-	if msgs[0].Role != tui.RoleTool {
-		t.Errorf("expected RoleTool, got %v", msgs[0].Role)
+	if msgs[0].Role != tui.RoleThinking {
+		t.Errorf("msgs[0].Role = %v, want RoleThinking (committed before tool)", msgs[0].Role)
+	}
+	if msgs[1].Role != tui.RoleAssistant {
+		t.Errorf("msgs[1].Role = %v, want RoleAssistant (committed before tool)", msgs[1].Role)
+	}
+	if msgs[2].Role != tui.RoleTool {
+		t.Errorf("msgs[2].Role = %v, want RoleTool", msgs[2].Role)
 	}
 }
 
