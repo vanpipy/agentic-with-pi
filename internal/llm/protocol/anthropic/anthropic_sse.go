@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/vanpiyp/awp/internal/llm"
+	"github.com/vanpiyp/awp/internal/llm/protocol/sse"
 )
 
 const (
@@ -89,10 +90,14 @@ type streamState struct {
 	hasCacheRd   bool
 	hasCacheCrt  bool
 	usageEmitted bool
+	utf8Decoder  *sse.Utf8StreamDecoder
 }
 
 func newStreamState() *streamState {
-	return &streamState{blocks: make(map[int]blockInfo)}
+	return &streamState{
+		blocks:      make(map[int]blockInfo),
+		utf8Decoder: sse.NewUtf8StreamDecoder(),
+	}
 }
 
 func (s *streamState) setBlock(index int, kind, id string) {
@@ -163,14 +168,6 @@ func scanAnthropicSSE(ctx context.Context, body io.Reader, out chan<- llm.Stream
 
 	var eventName string
 	var dataBuf []byte
-	emit := func(ev llm.StreamEvent) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		case out <- ev:
-			return true
-		}
-	}
 
 	for {
 		select {
@@ -183,24 +180,7 @@ func scanAnthropicSSE(ctx context.Context, body io.Reader, out chan<- llm.Stream
 		}
 		line := scanner.Bytes()
 		if len(line) == 0 {
-			if eventName != "" && len(dataBuf) > 0 {
-				payload := append([]byte(nil), dataBuf...)
-				evs, parseErr := decodeAnthropicEvent(eventName, payload, state)
-				if parseErr != nil {
-					if !emit(llm.EventErr{Err: fmt.Errorf("anthropic SSE decode %q: %w", eventName, parseErr)}) {
-						return
-					}
-				} else {
-					for _, ev := range evs {
-						if ev == nil {
-							continue
-						}
-						if !emit(ev) {
-							return
-						}
-					}
-				}
-			}
+			flushPendingEvent(ctx, eventName, dataBuf, out, state)
 			eventName = ""
 			dataBuf = dataBuf[:0]
 			continue
@@ -211,20 +191,84 @@ func scanAnthropicSSE(ctx context.Context, body io.Reader, out chan<- llm.Stream
 		}
 		switch field.name {
 		case "event":
-			eventName = string(field.value)
+			eventName = state.utf8Decoder.Decode(field.value)
 		case "data":
+			decoded := state.utf8Decoder.Decode(field.value)
 			if len(dataBuf) > 0 {
 				dataBuf = append(dataBuf, '\n')
 			}
-			dataBuf = append(dataBuf, field.value...)
+			dataBuf = append(dataBuf, decoded...)
 		}
 	}
+
+	// EOF or scanner error: flush any pending event so the last
+	// message_stop / message_delta is not silently dropped. Some
+	// Anthropic responses omit the trailing blank line, so the
+	// in-loop flush never fires.
+	flushPendingEvent(ctx, eventName, dataBuf, out, state)
 
 	if err := scanner.Err(); err != nil {
 		if ctx.Err() == nil {
 			select {
 			case errCh <- fmt.Errorf("anthropic SSE scanner: %w", err):
 			default:
+			}
+		}
+	}
+}
+
+// flushPendingEvent emits one parsed event from the buffered name + data.
+// When the data field is several JSON objects concatenated without a
+// separator (proxy stripped the SSE event terminator), each object is
+// emitted individually; concatenated JSON that fails to parse emits an
+// EventErr so the caller sees the corruption instead of silently dropping
+// content.
+func flushPendingEvent(ctx context.Context, eventName string, dataBuf []byte, out chan<- llm.StreamEvent, state *streamState) {
+	if eventName == "" || len(dataBuf) == 0 {
+		return
+	}
+	emit := func(ev llm.StreamEvent) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		case out <- ev:
+			return true
+		}
+	}
+	payload := append([]byte(nil), dataBuf...)
+	evs, parseErr := decodeAnthropicEvent(eventName, payload, state)
+	if parseErr == nil {
+		for _, ev := range evs {
+			if ev == nil {
+				continue
+			}
+			if !emit(ev) {
+				return
+			}
+		}
+		return
+	}
+	split := sse.SplitConcatenatedJSON(string(payload))
+	if split == nil {
+		if !emit(llm.EventErr{Err: fmt.Errorf("anthropic SSE decode %q: %w", eventName, parseErr)}) {
+			return
+		}
+		return
+	}
+	for _, obj := range split.Objects {
+		objEvs, objErr := decodeAnthropicEvent(eventName, []byte(obj), state)
+		if objErr != nil {
+			if !emit(llm.EventErr{Err: fmt.Errorf("anthropic SSE decode %q (split): %w", eventName, objErr)}) {
+				return
+			}
+			continue
+		}
+		for _, ev := range objEvs {
+			if ev == nil {
+				continue
+			}
+			if !emit(ev) {
+				return
 			}
 		}
 	}

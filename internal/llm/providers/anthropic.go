@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -157,9 +158,24 @@ func (p *AnthropicProvider) BetaHeaders(model string) []string {
 	return anthropic.BetaHeaders(model)
 }
 
-func (p *AnthropicProvider) SupportsNativeCompact(model string) bool {
-	spec, ok := p.lookupSpec(model)
-	return ok && spec.supportsNativeCompact
+func (p *AnthropicProvider) NativeCompactMode(model string) string {
+	return ""
+}
+
+func (p *AnthropicProvider) NativeCompactThreshold(model string) int {
+	return 0
+}
+
+func (p *AnthropicProvider) NativeCompactCapabilities(model string) llm.NativeCompactionCapabilities {
+	return llm.NativeCompactionCapabilities{Kind: llm.KindClient}
+}
+
+func (p *AnthropicProvider) NativeCompact(ctx context.Context, model string, msgs []llm.Message, summaryText, encryptedContent string) (llm.NativeCompactionResult, error) {
+	// Anthropic has no server-side compaction endpoint; the decision
+	// tree in NativeCompactor routes KindClient through the fallback
+	// CompactRunner and never reaches this method. Return the
+	// unsupported sentinel so any direct caller fails loudly.
+	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
 func (p *AnthropicProvider) ModelCapabilities(model string) llm.ModelCapabilities {
@@ -176,22 +192,21 @@ func (p *AnthropicProvider) ModelCapabilities(model string) llm.ModelCapabilitie
 	}
 	caps := anthropic.ReasoningCaps(model)
 	return llm.ModelCapabilities{
-		ID:                    model,
-		ContextWindow:         spec.contextWindow,
-		MaxOutputTokens:       spec.maxOutputTokens,
-		SupportsTools:         spec.supportsTools,
-		SupportsVision:        spec.supportsVision,
-		SupportsCache:         spec.supportsCache,
-		SupportsCacheTTL1h:    spec.supportsCacheTTL1h,
-		SupportsNativeCompact: spec.supportsNativeCompact,
-		SupportsThinking:      spec.supportsThinking,
-		ReasoningEfforts:      anthropic.AvailableReasoningEfforts(model),
-		ServiceTiers:          spec.serviceTiers,
-		BetaHeaders:           anthropic.BetaHeaders(model),
-		ContextMode:           spec.contextMode,
-		OutputEffort:          caps.OutputEffort,
-		AdaptiveThinking:      caps.AdaptiveThinking,
-		ManualThinking:        caps.ManualThinking,
+		ID:                 model,
+		ContextWindow:      spec.contextWindow,
+		MaxOutputTokens:    spec.maxOutputTokens,
+		SupportsTools:      spec.supportsTools,
+		SupportsVision:     spec.supportsVision,
+		SupportsCache:      spec.supportsCache,
+		SupportsCacheTTL1h: spec.supportsCacheTTL1h,
+		SupportsThinking:   spec.supportsThinking,
+		ReasoningEfforts:   anthropic.AvailableReasoningEfforts(model),
+		ServiceTiers:       spec.serviceTiers,
+		BetaHeaders:        anthropic.BetaHeaders(model),
+		ContextMode:        spec.contextMode,
+		OutputEffort:       caps.OutputEffort,
+		AdaptiveThinking:   caps.AdaptiveThinking,
+		ManualThinking:     caps.ManualThinking,
 	}
 }
 
@@ -392,8 +407,4 @@ func manualThinkingBudget(effort string, maxTokens int) int {
 
 func (p *AnthropicProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, error) {
 	return anthropic.ConvertAnthropicEvent(data)
-}
-
-func (p *AnthropicProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	return anthropic.CompleteAnthropicSystemSplit(systemPrompt)
 }

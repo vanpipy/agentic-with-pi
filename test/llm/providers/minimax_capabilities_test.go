@@ -122,9 +122,6 @@ func TestModelCapabilities(t *testing.T) {
 	if !got.SupportsCacheTTL1h {
 		t.Errorf("SupportsCacheTTL1h = false, want true")
 	}
-	if got.SupportsNativeCompact {
-		t.Errorf("SupportsNativeCompact = true, want false")
-	}
 	if !got.SupportsThinking {
 		t.Errorf("SupportsThinking = false, want true")
 	}
@@ -164,8 +161,8 @@ func TestUnknownModelReturnsDefaults(t *testing.T) {
 	if got := p.BetaHeaders(unknown); len(got) != 0 {
 		t.Errorf("BetaHeaders(%q) = %v, want empty", unknown, got)
 	}
-	if p.SupportsNativeCompact(unknown) {
-		t.Errorf("SupportsNativeCompact(%q) = true, want false default", unknown)
+	if got := p.NativeCompactCapabilities(unknown); got.Kind != llm.KindUnsupported {
+		t.Errorf("NativeCompactCapabilities(%q).Kind = %d, want %d (KindUnsupported)", unknown, got.Kind, llm.KindUnsupported)
 	}
 
 	caps := p.ModelCapabilities(unknown)
@@ -189,9 +186,6 @@ func TestUnknownModelReturnsDefaults(t *testing.T) {
 	}
 	if caps.SupportsCacheTTL1h {
 		t.Errorf("ModelCapabilities.SupportsCacheTTL1h = true, want false default")
-	}
-	if caps.SupportsNativeCompact {
-		t.Errorf("ModelCapabilities.SupportsNativeCompact = true, want false default")
 	}
 	if caps.SupportsThinking {
 		t.Errorf("ModelCapabilities.SupportsThinking = true, want false default")

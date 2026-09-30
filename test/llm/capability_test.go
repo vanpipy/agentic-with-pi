@@ -21,19 +21,18 @@ func TestAnthropicContextModeValues(t *testing.T) {
 
 func TestModelCapabilitiesPayload(t *testing.T) {
 	caps := llm.ModelCapabilities{
-		ID:                    "claude-opus-4-7",
-		ContextWindow:         200000,
-		MaxOutputTokens:       8192,
-		SupportsTools:         true,
-		SupportsVision:        true,
-		SupportsCache:         true,
-		SupportsCacheTTL1h:    true,
-		SupportsNativeCompact: true,
-		SupportsThinking:      true,
-		ReasoningEfforts:      []string{"low", "medium", "high"},
-		ServiceTiers:          []string{"standard", "priority"},
-		BetaHeaders:           []string{"prompt-caching-2024-07-31"},
-		ContextMode:           llm.ContextNative1M,
+		ID:                 "claude-opus-4-7",
+		ContextWindow:      200000,
+		MaxOutputTokens:    8192,
+		SupportsTools:      true,
+		SupportsVision:     true,
+		SupportsCache:      true,
+		SupportsCacheTTL1h: true,
+		SupportsThinking:   true,
+		ReasoningEfforts:   []string{"low", "medium", "high"},
+		ServiceTiers:       []string{"standard", "priority"},
+		BetaHeaders:        []string{"prompt-caching-2024-07-31"},
+		ContextMode:        llm.ContextNative1M,
 	}
 	if caps.ID != "claude-opus-4-7" {
 		t.Fatalf("ID = %q, want %q", caps.ID, "claude-opus-4-7")
@@ -55,9 +54,6 @@ func TestModelCapabilitiesPayload(t *testing.T) {
 	}
 	if !caps.SupportsCacheTTL1h {
 		t.Fatalf("SupportsCacheTTL1h = false, want true")
-	}
-	if !caps.SupportsNativeCompact {
-		t.Fatalf("SupportsNativeCompact = false, want true")
 	}
 	if !caps.SupportsThinking {
 		t.Fatalf("SupportsThinking = false, want true")
@@ -151,5 +147,40 @@ func TestAnthropicContextModeDistinct(t *testing.T) {
 	}
 	if len(seen) != 3 {
 		t.Fatalf("distinct mode count = %d, want 3", len(seen))
+	}
+}
+
+func TestNativeCompactionKindValues(t *testing.T) {
+	if llm.KindUnsupported != 0 {
+		t.Fatalf("KindUnsupported = %d, want 0", llm.KindUnsupported)
+	}
+	if llm.KindNative != 1 {
+		t.Fatalf("KindNative = %d, want 1", llm.KindNative)
+	}
+	if llm.KindClient != 2 {
+		t.Fatalf("KindClient = %d, want 2", llm.KindClient)
+	}
+}
+
+func TestNativeCompactionCapabilitiesPayload(t *testing.T) {
+	caps := llm.NativeCompactionCapabilities{
+		Kind:      llm.KindNative,
+		Mode:      "auto",
+		Threshold: 1000,
+	}
+	if caps.Kind != llm.KindNative {
+		t.Fatalf("Kind = %d, want %d", caps.Kind, llm.KindNative)
+	}
+	if caps.Mode != "auto" {
+		t.Fatalf("Mode = %q, want %q", caps.Mode, "auto")
+	}
+	if caps.Threshold != 1000 {
+		t.Fatalf("Threshold = %d, want 1000", caps.Threshold)
+	}
+}
+
+func TestNativeCompactionUnsupportedSentinel(t *testing.T) {
+	if llm.ErrNativeCompactionUnsupported == nil {
+		t.Fatal("ErrNativeCompactionUnsupported is nil")
 	}
 }

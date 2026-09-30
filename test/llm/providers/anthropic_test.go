@@ -1,6 +1,7 @@
 package providers_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -629,12 +630,12 @@ func TestAnthropicProviderConvertResponseMessageStopDelegates(t *testing.T) {
 
 func TestAnthropicProviderCompleteSplitDelegates(t *testing.T) {
 	p := newAnthropicProvider()
-	blocks, err := p.CompleteSplit("part1\npart2")
-	if err != nil {
-		t.Fatal(err)
+	if p.NativeCompactMode("claude-opus-4-6") != "" {
+		t.Errorf("NativeCompactMode = %q, want empty (KindClient — no server endpoint)", p.NativeCompactMode("claude-opus-4-6"))
 	}
-	if len(blocks) != 2 {
-		t.Fatalf("len(blocks) = %d, want 2", len(blocks))
+	caps := p.NativeCompactCapabilities("claude-opus-4-6")
+	if caps.Kind != llm.KindClient {
+		t.Errorf("NativeCompactCapabilities.Kind = %d, want %d (KindClient)", caps.Kind, llm.KindClient)
 	}
 }
 
@@ -651,10 +652,19 @@ func TestAnthropicProviderSupportsCacheControl(t *testing.T) {
 	}
 }
 
-func TestAnthropicProviderSupportsNativeCompact(t *testing.T) {
+func TestAnthropicProviderNativeCompactCapabilities(t *testing.T) {
 	p := newAnthropicProvider()
-	if p.SupportsNativeCompact("claude-opus-4-6") {
-		t.Error("native compact should be false (no modelSpec supports it)")
+	caps := p.NativeCompactCapabilities("claude-opus-4-6")
+	if caps.Kind == llm.KindNative {
+		t.Errorf("NativeCompactCapabilities.Kind = KindNative, want non-native (no server endpoint exposed)")
+	}
+}
+
+func TestAnthropicProviderNativeCompactReturnsUnsupportedError(t *testing.T) {
+	p := newAnthropicProvider()
+	_, err := p.NativeCompact(context.Background(), "claude-opus-4-6", nil, "", "")
+	if !errors.Is(err, llm.ErrNativeCompactionUnsupported) {
+		t.Fatalf("err = %v, want ErrNativeCompactionUnsupported", err)
 	}
 }
 

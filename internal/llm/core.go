@@ -48,9 +48,13 @@ type Provider interface {
 
 	ModelCapabilities(model string) ModelCapabilities
 
-	SupportsNativeCompact(model string) bool
+	NativeCompactMode(model string) string
 
-	CompleteSplit(systemPrompt string) ([]ContentBlock, error)
+	NativeCompactThreshold(model string) int
+
+	NativeCompactCapabilities(model string) NativeCompactionCapabilities
+
+	NativeCompact(ctx context.Context, model string, msgs []Message, summaryText, encryptedContent string) (NativeCompactionResult, error)
 }
 
 type core struct {

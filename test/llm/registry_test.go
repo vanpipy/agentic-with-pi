@@ -1,6 +1,7 @@
 package llm_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -38,9 +39,13 @@ func (s *stubProvider) BetaHeaders(model string) []string { return nil }
 func (s *stubProvider) ModelCapabilities(model string) llm.ModelCapabilities {
 	return llm.ModelCapabilities{ID: model}
 }
-func (s *stubProvider) SupportsNativeCompact(model string) bool { return false }
-func (s *stubProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	return nil, nil
+func (s *stubProvider) NativeCompactMode(model string) string   { return "" }
+func (s *stubProvider) NativeCompactThreshold(model string) int { return 0 }
+func (s *stubProvider) NativeCompactCapabilities(model string) llm.NativeCompactionCapabilities {
+	return llm.NativeCompactionCapabilities{Kind: llm.KindUnsupported}
+}
+func (s *stubProvider) NativeCompact(ctx context.Context, model string, msgs []llm.Message, summaryText, encryptedContent string) (llm.NativeCompactionResult, error) {
+	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
 func TestRegisterAndGet(t *testing.T) {

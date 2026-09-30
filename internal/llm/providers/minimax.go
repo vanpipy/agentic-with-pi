@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/vanpiyp/awp/internal/llm"
@@ -187,9 +188,20 @@ func (p *MiniMaxProvider) BetaHeaders(model string) []string {
 	return nil
 }
 
-func (p *MiniMaxProvider) SupportsNativeCompact(model string) bool {
-	spec, ok := p.lookupSpec(model)
-	return ok && spec.supportsNativeCompact
+func (p *MiniMaxProvider) NativeCompactMode(model string) string {
+	return ""
+}
+
+func (p *MiniMaxProvider) NativeCompactThreshold(model string) int {
+	return 0
+}
+
+func (p *MiniMaxProvider) NativeCompactCapabilities(model string) llm.NativeCompactionCapabilities {
+	return llm.NativeCompactionCapabilities{Kind: llm.KindUnsupported}
+}
+
+func (p *MiniMaxProvider) NativeCompact(ctx context.Context, model string, msgs []llm.Message, summaryText, encryptedContent string) (llm.NativeCompactionResult, error) {
+	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
 func (p *MiniMaxProvider) ModelCapabilities(model string) llm.ModelCapabilities {
@@ -203,19 +215,18 @@ func (p *MiniMaxProvider) ModelCapabilities(model string) llm.ModelCapabilities 
 		}
 	}
 	return llm.ModelCapabilities{
-		ID:                    model,
-		ContextWindow:         spec.contextWindow,
-		MaxOutputTokens:       spec.maxOutputTokens,
-		SupportsTools:         spec.supportsTools,
-		SupportsVision:        spec.supportsVision,
-		SupportsCache:         spec.supportsCache,
-		SupportsCacheTTL1h:    spec.supportsCacheTTL1h,
-		SupportsNativeCompact: spec.supportsNativeCompact,
-		SupportsThinking:      spec.supportsThinking,
-		ReasoningEfforts:      spec.reasoningEfforts,
-		ServiceTiers:          spec.serviceTiers,
-		BetaHeaders:           spec.betaHeaders,
-		ContextMode:           spec.contextMode,
+		ID:                 model,
+		ContextWindow:      spec.contextWindow,
+		MaxOutputTokens:    spec.maxOutputTokens,
+		SupportsTools:      spec.supportsTools,
+		SupportsVision:     spec.supportsVision,
+		SupportsCache:      spec.supportsCache,
+		SupportsCacheTTL1h: spec.supportsCacheTTL1h,
+		SupportsThinking:   spec.supportsThinking,
+		ReasoningEfforts:   spec.reasoningEfforts,
+		ServiceTiers:       spec.serviceTiers,
+		BetaHeaders:        spec.betaHeaders,
+		ContextMode:        spec.contextMode,
 	}
 }
 
@@ -268,8 +279,4 @@ func (p *MiniMaxProvider) ConvertResponse(data []byte) (*llm.StreamChunk, bool, 
 // to apply here.
 func (p *MiniMaxProvider) RecoverRequest(_ *llm.ChatRequest, _ error) bool {
 	return false
-}
-
-func (p *MiniMaxProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	return anthropic.CompleteAnthropicSystemSplit(systemPrompt)
 }

@@ -54,9 +54,13 @@ func (f *fakeProvider) BetaHeaders(model string) []string { return nil }
 func (f *fakeProvider) ModelCapabilities(model string) llm.ModelCapabilities {
 	return llm.ModelCapabilities{ID: model}
 }
-func (f *fakeProvider) SupportsNativeCompact(model string) bool { return false }
-func (f *fakeProvider) CompleteSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	return nil, nil
+func (f *fakeProvider) NativeCompactMode(model string) string   { return "" }
+func (f *fakeProvider) NativeCompactThreshold(model string) int { return 0 }
+func (f *fakeProvider) NativeCompactCapabilities(model string) llm.NativeCompactionCapabilities {
+	return llm.NativeCompactionCapabilities{Kind: llm.KindUnsupported}
+}
+func (f *fakeProvider) NativeCompact(ctx context.Context, model string, msgs []llm.Message, summaryText, encryptedContent string) (llm.NativeCompactionResult, error) {
+	return llm.NativeCompactionResult{}, llm.ErrNativeCompactionUnsupported
 }
 
 type fakeProtocol struct {

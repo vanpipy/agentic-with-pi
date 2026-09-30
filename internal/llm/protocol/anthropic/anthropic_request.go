@@ -3,7 +3,6 @@ package anthropic
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -401,30 +400,4 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 	}
 
 	return out, nil
-}
-
-// CompleteAnthropicSystemSplit turns a flat system prompt string into a
-// two-block content array with the first block carrying an ephemeral-1h
-// cache breakpoint, so Anthropic's prompt caching can cache the prefix.
-// When the prompt is empty, the result is nil. When no newline exists
-// past the midpoint, the entire prompt gets the cache breakpoint.
-// Mirrors MiniMaxProvider::complete_split at providers/minimax.go:560-578.
-func CompleteAnthropicSystemSplit(systemPrompt string) ([]llm.ContentBlock, error) {
-	if systemPrompt == "" {
-		return nil, nil
-	}
-	midpoint := len(systemPrompt) / 2
-	splitAt := strings.Index(systemPrompt[midpoint:], "\n")
-	if splitAt < 0 {
-		return []llm.ContentBlock{
-			llm.ContentText{Text: systemPrompt, CacheControl: llm.CacheEphemeral1h()},
-		}, nil
-	}
-	splitAt += midpoint
-	prefix := systemPrompt[:splitAt]
-	suffix := systemPrompt[splitAt:]
-	return []llm.ContentBlock{
-		llm.ContentText{Text: prefix, CacheControl: llm.CacheEphemeral1h()},
-		llm.ContentText{Text: suffix},
-	}, nil
 }
