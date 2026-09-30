@@ -128,6 +128,47 @@ func TestSendMessageBodyTooLarge(t *testing.T) {
 	}
 }
 
+func TestSendMessageAcceptsBodyAtThreshold(t *testing.T) {
+	t.Parallel()
+	s := newState()
+	if _, err := s.Spawn(swarm.SpawnOptions{FromSessionID: "self", NewSessionID: "self"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := s.Spawn(swarm.SpawnOptions{FromSessionID: "self", NewSessionID: "peer"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	body := strings.Repeat("x", swarmproto.MaxChannelMessageBodyBytes)
+	if _, err := s.SendMessage(swarm.MessageOptions{
+		FromSessionID: "self",
+		SwarmID:       "self",
+		ToSessionID:   "peer",
+		Body:          body,
+		TLDR:          "big",
+	}); err != nil {
+		t.Errorf("err = %v, want nil (body at threshold should be accepted)", err)
+	}
+}
+
+func TestSendMessageAcceptsBodyAtTLDRThreshold(t *testing.T) {
+	t.Parallel()
+	s := newState()
+	if _, err := s.Spawn(swarm.SpawnOptions{FromSessionID: "self", NewSessionID: "self"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if _, err := s.Spawn(swarm.SpawnOptions{FromSessionID: "self", NewSessionID: "peer"}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	body := strings.Repeat("x", swarmproto.TLDRRequiredOverChars)
+	if _, err := s.SendMessage(swarm.MessageOptions{
+		FromSessionID: "self",
+		SwarmID:       "self",
+		ToSessionID:   "peer",
+		Body:          body,
+	}); err != nil {
+		t.Errorf("err = %v, want nil (body at TLDR threshold should not require TLDR)", err)
+	}
+}
+
 func TestSendMessageRequiresTLDRForLongBody(t *testing.T) {
 	t.Parallel()
 	s := newState()

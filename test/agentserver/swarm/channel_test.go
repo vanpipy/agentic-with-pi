@@ -253,6 +253,36 @@ func TestPublishRequiresTLDRForLongBody(t *testing.T) {
 	}
 }
 
+func TestPublishAcceptsBodyAtThreshold(t *testing.T) {
+	t.Parallel()
+	s := newState()
+	if _, err := s.Register(newRecord("s1", "swarm-A")); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := s.Subscribe("swarm-A", "general", "s1"); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	body := strings.Repeat("x", swarmproto.MaxChannelMessageBodyBytes)
+	if err := s.Publish("swarm-A", "general", swarmproto.ChannelMessage{FromID: "s1", Body: body, TLDR: "big"}); err != nil {
+		t.Errorf("err = %v, want nil (body at threshold should be accepted)", err)
+	}
+}
+
+func TestPublishAcceptsBodyAtTLDRThreshold(t *testing.T) {
+	t.Parallel()
+	s := newState()
+	if _, err := s.Register(newRecord("s1", "swarm-A")); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := s.Subscribe("swarm-A", "general", "s1"); err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	body := strings.Repeat("x", swarmproto.TLDRRequiredOverChars)
+	if err := s.Publish("swarm-A", "general", swarmproto.ChannelMessage{FromID: "s1", Body: body}); err != nil {
+		t.Errorf("err = %v, want nil (body at TLDR threshold should not require TLDR)", err)
+	}
+}
+
 func TestPublishRejectsDuringShutdown(t *testing.T) {
 	t.Parallel()
 	s := newState()
