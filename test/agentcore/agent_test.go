@@ -1299,11 +1299,12 @@ func TestRunOneTurnAppliesCompaction(t *testing.T) {
 		{textDeltaChunk("summary"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
 		{textDeltaChunk("done"), messageDeltaStopChunk("end_turn"), messageStopChunk()},
 	}}
-	ag := newTestAgent(core, "m").WithModel(llm.Model{ID: "m", MaxContextTokens: 100})
+	// MaxContextTokens=10, used ~12 tokens -> 90% threshold fires compaction.
+	ag := newTestAgent(core, "m").WithModel(llm.Model{ID: "m", MaxContextTokens: 10})
 	ch := make(chan agentcore.Event, 32)
 	msgs := []llm.Message{{Role: "system", Content: "sys"}}
 	for i := 0; i < 7; i++ {
-		msgs = append(msgs, llm.Message{Role: "user", Content: fmt.Sprintf("u%d", i)})
+		msgs = append(msgs, llm.Message{Role: "user", Content: fmt.Sprintf("u%d-padding", i)})
 	}
 
 	_, _ = agentcore.AgentRunOneTurnForTest(ag, context.Background(), msgs, ch, 0)

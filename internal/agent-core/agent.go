@@ -171,6 +171,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 			Enabled:         true,
 			ReserveTokens:   16384,
 			KeepRecentTurns: 5,
+			CacheTracker:    compact.NewCacheTracker(),
 		},
 		repeatedToolErrorLimit: 3,
 		ToolCacheSize:          20,

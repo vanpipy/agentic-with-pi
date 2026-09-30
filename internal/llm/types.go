@@ -86,9 +86,11 @@ func (f FinishReason) String() string {
 }
 
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	TotalTokens         int `json:"total_tokens"`
+	CacheReadTokens     int `json:"cache_read_tokens,omitzero"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitzero"`
 }
 
 type StreamChoice struct {

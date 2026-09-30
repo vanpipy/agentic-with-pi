@@ -99,9 +99,11 @@ func ConvertAnthropicEvent(payload []byte) (*llm.StreamChunk, bool, error) {
 		}
 		if ev.Usage != nil {
 			chunk.Usage = &llm.Usage{
-				PromptTokens:     ev.Usage.InputTokens,
-				CompletionTokens: ev.Usage.OutputTokens,
-				TotalTokens:      ev.Usage.InputTokens + ev.Usage.OutputTokens,
+				PromptTokens:        ev.Usage.InputTokens,
+				CompletionTokens:    ev.Usage.OutputTokens,
+				TotalTokens:         ev.Usage.InputTokens + ev.Usage.OutputTokens,
+				CacheReadTokens:     ev.Usage.CacheReadTokens,
+				CacheCreationTokens: ev.Usage.CacheCreationTokens,
 			}
 		}
 		return chunk, false, nil
@@ -160,7 +162,9 @@ type anthropicStreamEvent struct {
 	} `json:"delta,omitzero"`
 
 	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens         int `json:"input_tokens"`
+		OutputTokens        int `json:"output_tokens"`
+		CacheReadTokens     int `json:"cache_read_input_tokens"`
+		CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	} `json:"usage,omitzero"`
 }

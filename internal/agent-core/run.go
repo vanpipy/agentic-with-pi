@@ -279,6 +279,14 @@ func (a *Agent) writeTurnResponseEnded(step Step, startAt, firstChunkAt time.Tim
 		prompt = step.Usage.PromptTokens
 		completion = step.Usage.CompletionTokens
 		total = step.Usage.TotalTokens
+		if a.compaction.CacheTracker != nil {
+			a.compaction.CacheTracker.RecordUsage(llm.EventUsage{
+				InputTokens:         step.Usage.PromptTokens,
+				OutputTokens:        step.Usage.CompletionTokens,
+				CacheReadTokens:     step.Usage.CacheReadTokens,
+				CacheCreationTokens: step.Usage.CacheCreationTokens,
+			})
+		}
 	}
 	a.writeTurnResponseLocked(a.Model.ID, a.Model.Vendor, finishReason, durMS, ttft, prompt, completion, total)
 	if prompt > 0 {
