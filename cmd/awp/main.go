@@ -107,6 +107,7 @@ func loadAgent() *agentcore.Agent {
 	for _, t := range tools.All(cwd) {
 		ag.WithTool(t)
 	}
+	ag.WithSupportsCacheControl(provider.SupportsCacheControl)
 	ag.SetSystemPrompts(`You are a coding assistant that operates a local repository through file and shell tools.
 
 Tool usage rules:

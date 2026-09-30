@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/vanpiyp/awp/internal/agent-core/cache"
 	"github.com/vanpiyp/awp/internal/agent-core/stream"
 	"github.com/vanpiyp/awp/internal/llm"
 )
@@ -59,15 +60,20 @@ type ReActStrategy struct {
 	core                   llm.Core
 	model                  llm.Model
 	toolDefsGetter         func() []llm.ToolDef
+	supportsCacheControl   func(model string) bool
 	maxToolsPerTurn        int
 	repeatedToolErrorLimit int
 }
 
-func NewReActStrategy(core llm.Core, model llm.Model, toolDefsGetter func() []llm.ToolDef) *ReActStrategy {
+func NewReActStrategy(core llm.Core, model llm.Model, toolDefsGetter func() []llm.ToolDef, supportsCacheControl func(model string) bool) *ReActStrategy {
+	if supportsCacheControl == nil {
+		supportsCacheControl = func(string) bool { return false }
+	}
 	return &ReActStrategy{
 		core:                   core,
 		model:                  model,
 		toolDefsGetter:         toolDefsGetter,
+		supportsCacheControl:   supportsCacheControl,
 		maxToolsPerTurn:        6,
 		repeatedToolErrorLimit: 3,
 	}
@@ -79,6 +85,7 @@ func (r *ReActStrategy) Step(ctx context.Context, msgs []llm.Message, emit func(
 	if !emit(ctx, Event{Category: EventThoughtStart}) {
 		return Step{}, ctx.Err()
 	}
+	msgs = cache.InjectCacheControl(msgs, r.supportsCacheControl, r.model.ID)
 	req := &llm.ChatRequest{Model: r.model.ID, Messages: msgs}
 	if r.toolDefsGetter != nil {
 		req.Tools = r.toolDefsGetter()

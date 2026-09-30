@@ -342,7 +342,7 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 		}
 		if role == "system" {
 			if m.Content != "" {
-				out.System = append(out.System, llm.ContentText{Text: m.Content})
+				out.System = append(out.System, llm.ContentText{Text: m.Content, CacheControl: m.CacheControl})
 			}
 			continue
 		}
@@ -360,7 +360,7 @@ func MapToAnthropicRequest(llmReq llm.ChatRequest) (AnthropicRequest, error) {
 			blocks = append(blocks, llm.ContentThinking{Text: m.Reasoning, Signature: m.ReasoningSig})
 		}
 		if m.Content != "" {
-			blocks = append(blocks, llm.ContentText{Text: m.Content})
+			blocks = append(blocks, llm.ContentText{Text: m.Content, CacheControl: m.CacheControl})
 		}
 		for _, tc := range m.ToolCalls {
 			argBytes := []byte(tc.Function.Arguments)

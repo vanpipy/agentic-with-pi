@@ -49,7 +49,7 @@ func TestRequireIntentRejectsBadJSON(t *testing.T) {
 }
 
 func TestReActStrategyNameReturnsReact(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	if name := strat.Name(); name != "react" {
 		t.Errorf("Name() = %q, want react", name)
 	}
@@ -226,7 +226,7 @@ func TestAgentFindToolForTestReturnsCopy(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortRepeatedCallsSlidingWindow(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
 	msgs := []llm.Message{
 		{Role: "user", Content: "explore"},
@@ -248,7 +248,7 @@ func TestReActStrategyShouldAbortRepeatedCallsSlidingWindow(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortVariedCallsNoAbort(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc1 := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"a"}`}}
 	tc2 := llm.ToolCall{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"b"}`}}
 	tc3 := llm.ToolCall{ID: "c3", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"c"}`}}
@@ -269,14 +269,14 @@ func TestReActStrategyShouldAbortVariedCallsNoAbort(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortEmptyMsgsNoAbort(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	if err := strat.ShouldAbort(nil, ""); err != nil {
 		t.Errorf("ShouldAbort(nil) = %v, want nil", err)
 	}
 }
 
 func TestReActStrategyShouldAbortMixedRolesNoAbort(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
 	msgs := []llm.Message{
 		{Role: "user", Content: "explore"},
@@ -291,7 +291,7 @@ func TestReActStrategyShouldAbortMixedRolesNoAbort(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortRepeatedErrorsAtLimit(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}
 	errMsg := "Tool ls failed: boom"
 	msgs := []llm.Message{
@@ -313,7 +313,7 @@ func TestReActStrategyShouldAbortRepeatedErrorsAtLimit(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortNoLastErrShortCircuit(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}
 	errMsg := "Tool ls failed: boom"
 	msgs := []llm.Message{
@@ -336,7 +336,7 @@ func (errCore) StreamChat(ctx context.Context, _ *llm.ChatRequest) (<-chan llm.L
 }
 
 func TestReActStrategyStepNonCtxStreamErrEmitsErrorEvents(t *testing.T) {
-	strat := agentcore.NewReActStrategy(errCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(errCore{}, llm.Model{ID: "m"}, nil, nil)
 	var sawError, sawThoughtEnd bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		switch ev.Category {
@@ -369,7 +369,7 @@ func (ctxErrCore) StreamChat(_ context.Context, _ *llm.ChatRequest) (<-chan llm.
 }
 
 func TestReActStrategyStepCtxErrReturnsCtxErr(t *testing.T) {
-	strat := agentcore.NewReActStrategy(ctxErrCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(ctxErrCore{}, llm.Model{ID: "m"}, nil, nil)
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, func(context.Context, agentcore.Event) bool { return true })
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
@@ -380,7 +380,7 @@ func TestReActStrategyStepCtxErrReturnsCtxErr(t *testing.T) {
 }
 
 func TestReActStrategyStepEmitReturnsFalseAtThoughtStart(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var sawThoughtStart bool
@@ -405,7 +405,7 @@ func TestReActStrategyStepLengthFinishReasonNoContent(t *testing.T) {
 		messageDeltaStopChunk("max_tokens"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawError bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "truncated with no content") {
@@ -431,7 +431,7 @@ func TestReActStrategyStepToolUseNoToolCalls(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawError bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "tool_use finish reason with no tool calls") {
@@ -465,7 +465,7 @@ func TestReActStrategyStepToolUseAllEmptyToolCalls(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawError bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventError && strings.Contains(ev.ToolError, "empty tool calls") {
@@ -491,7 +491,7 @@ func TestReActStrategyStepLengthWithContentEmitsFinalAnswer(t *testing.T) {
 		messageDeltaStopChunk("max_tokens"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawFinal bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventFinalAnswer {
@@ -519,7 +519,7 @@ func TestReActStrategyStepUnknownFinishReasonFallsToUnreachable(t *testing.T) {
 		messageDeltaStopChunk("weird_reason"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, _ agentcore.Event) bool { return true }
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, emit)
 	if err == nil {
@@ -536,7 +536,7 @@ func TestReActStrategyStepEmitReturnsFalseAtThoughtEnd(t *testing.T) {
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventThoughtEnd {
 			return false

@@ -134,6 +134,7 @@ type Agent struct {
 	logSeq                 int
 	compaction             compact.CompactionSettings
 	repeatedToolErrorLimit int
+	supportsCacheControl   func(model string) bool
 	strategy               Strategy
 	currentParentID        string
 	currentStreamBuf       *stream.StreamBuffer
@@ -175,7 +176,7 @@ func NewAgent(llmCore llm.Core) *Agent {
 		ToolCacheSize:          20,
 	}
 	a.toolResultCache = util.NewToolResultCache(a.ToolCacheSize)
-	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy)
+	a.strategy = NewReActStrategy(a.core, a.Model, a.toolDefsForStrategy, a.supportsCacheControl)
 	return a
 }
 
@@ -191,6 +192,17 @@ func (a *Agent) WithModel(model llm.Model) *Agent {
 	a.Model = model
 	if rs, ok := a.strategy.(*ReActStrategy); ok && rs != nil {
 		rs.model = model
+	}
+	return a
+}
+
+func (a *Agent) WithSupportsCacheControl(probe func(model string) bool) *Agent {
+	if probe == nil {
+		probe = func(string) bool { return false }
+	}
+	a.supportsCacheControl = probe
+	if rs, ok := a.strategy.(*ReActStrategy); ok && rs != nil {
+		rs.supportsCacheControl = probe
 	}
 	return a
 }

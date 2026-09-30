@@ -3,12 +3,13 @@ package llm
 import "encoding/json"
 
 type Message struct {
-	Role         string     `json:"role"`
-	Content      string     `json:"content,omitzero"`
-	Reasoning    string     `json:"reasoning_content,omitzero"`
-	ReasoningSig string     `json:"reasoning_signature,omitzero"`
-	ToolCallID   string     `json:"tool_call_id,omitzero"`
-	ToolCalls    []ToolCall `json:"tool_calls,omitzero"`
+	Role         string        `json:"role"`
+	Content      string        `json:"content,omitzero"`
+	Reasoning    string        `json:"reasoning_content,omitzero"`
+	ReasoningSig string        `json:"reasoning_signature,omitzero"`
+	ToolCallID   string        `json:"tool_call_id,omitzero"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitzero"`
+	CacheControl *CacheControl `json:"cache_control,omitzero"`
 }
 
 type ToolChoice struct {

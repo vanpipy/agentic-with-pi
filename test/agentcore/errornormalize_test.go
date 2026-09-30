@@ -62,7 +62,7 @@ func TestNormalizeToolError_Empty(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbort_NormalizesPreflightErrors(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	makeErr := func(placeholder string) string {
 		return "Tool bash: missing required field(s) [file]. Pass them as a JSON object argument. Example: {\"file\": \"" + placeholder + "\"}. Field descriptions: file: The path"
 	}
@@ -83,7 +83,7 @@ func TestReActStrategyShouldAbort_NormalizesPreflightErrors(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbort_NormalizesDifferentMissingFields(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	makeErr := func(fields string, placeholder string) string {
 		return "Tool bash: missing required field(s) [" + fields + "]. Pass them as a JSON object argument. Example: {\"" + strings.Split(fields, ", ")[0] + "\": \"" + placeholder + "\"}. Field descriptions: file: The path"
 	}

@@ -614,7 +614,7 @@ func TestAllEqualSingleElement(t *testing.T) {
 		{Role: "user", Content: "x"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{tc}},
 	}
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	if err := strat.ShouldAbort(msgs, ""); err != nil {
 		t.Errorf("ShouldAbort = %v, want nil (1 assistant tool call)", err)
 	}
@@ -865,7 +865,7 @@ func TestAgentSetLogFileOpenedNoOpOnNilAgent(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortConsecutiveErrorsSkipRole(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"a"}`}}
 	tc2 := llm.ToolCall{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"b"}`}}
 	errMsg := "Tool ls failed: kapow"
@@ -1154,7 +1154,7 @@ func TestAgentLoopWithMsgsEmptyLoopEmitsSafetyNet(t *testing.T) {
 }
 
 func TestReActStrategyStepStreamErrIsCtxStillReturnsErr(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&ctxErrCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&ctxErrCore{}, llm.Model{ID: "m"}, nil, nil)
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, func(context.Context, agentcore.Event) bool { return true })
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
@@ -1170,7 +1170,7 @@ func TestReActStrategyStreamEventChunkNilEmitsNoChunkContent(t *testing.T) {
 		textDeltaChunk("hi"),
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
-	}}, llm.Model{ID: "m"}, nil)
+	}}, llm.Model{ID: "m"}, nil, nil)
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, func(context.Context, agentcore.Event) bool { return true })
 	if err != nil {
 		t.Fatalf("Step: %v", err)
@@ -1181,7 +1181,7 @@ func TestReActStrategyStreamEventChunkNilEmitsNoChunkContent(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortWithNormalizedErrorStreak(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "x", Arguments: `{}`}}
 	msgs := []llm.Message{
 		{Role: "user", Content: "x"},
@@ -1198,7 +1198,7 @@ func TestReActStrategyShouldAbortWithNormalizedErrorStreak(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortWithNonNormalizedErrorsDoesNotHitLimit(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc1 := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "x", Arguments: `{"v":1}`}}
 	tc2 := llm.ToolCall{ID: "c2", Function: llm.FunctionCall{Name: "x", Arguments: `{"v":2}`}}
 	tc3 := llm.ToolCall{ID: "c3", Function: llm.FunctionCall{Name: "x", Arguments: `{"v":3}`}}
@@ -1237,7 +1237,7 @@ func TestReActStrategyStepEmitReturnsFalseInLoop(t *testing.T) {
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawThoughtStart, sawThoughtChunk bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventThoughtStart {
@@ -1274,7 +1274,7 @@ func TestReActStrategyStepStreamErrEmitsErrorThenThoughtEnd(t *testing.T) {
 	ch := make(chan llm.LegacyStreamEvent, 3)
 	ch <- llm.LegacyStreamEvent{Err: errors.New("upstream-llm-err-12345")}
 	close(ch)
-	strat := agentcore.NewReActStrategy(&streamErrCore{ch: ch}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&streamErrCore{ch: ch}, llm.Model{ID: "m"}, nil, nil)
 
 	var sawError, sawThoughtEnd bool
 	var sawErrMsg string
@@ -1362,7 +1362,7 @@ func TestAgentExecuteToolsWritesDedupHitLogEntry(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortConsecutiveNormalizedErrors(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{}`}}
 	errMsg := "Tool ls failed: boom-of-doom"
 	msgs := []llm.Message{
@@ -1478,7 +1478,7 @@ func TestReActStrategyEmitFalseAfterErrorRetainsStepZero(t *testing.T) {
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, _ agentcore.Event) bool { return true }
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "x"}}, emit)
 	if err != nil {
@@ -1500,7 +1500,7 @@ func TestReActStrategyStepEmitsFinalAnswerWithUsage(t *testing.T) {
 		},
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	var sawUsageInEmit bool
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventFinalAnswer && ev.Usage != nil {
@@ -1737,7 +1737,7 @@ func TestReActStrategyStepEmitFalseAfterThoughtStartReturnsCtxErr(t *testing.T) 
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, ev agentcore.Event) bool {
 		if ev.Category == agentcore.EventThoughtStart {
 			return false
@@ -1761,7 +1761,7 @@ func TestReActStrategyStepCtxErrDuringLoopReturnsCtxErr(t *testing.T) {
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, ev agentcore.Event) bool { return true }
 	step, err := strat.Step(ctx, []llm.Message{{Role: "user", Content: "x"}}, emit)
 	if err == nil {
@@ -1777,7 +1777,7 @@ func TestReActStrategyStepToolUseReturnsStepContinue(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m"}, nil, nil)
 	emit := func(_ context.Context, ev agentcore.Event) bool { return true }
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "ls"}}, emit)
 	if err != nil {
@@ -1913,7 +1913,7 @@ func TestAgentRunStreamEmitsErrorWhenCoreReturnsErr(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortIdenticalArgsHitsLimit(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
 	msgs := []llm.Message{
 		{Role: "user", Content: "ls"},
@@ -2092,14 +2092,14 @@ func TestWriteHeaderLockedWithLongSystemPromptTruncates(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortWithEmptyMessagesReturnsNil(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	if err := strat.ShouldAbort([]llm.Message{}, ""); err != nil {
 		t.Errorf("ShouldAbort = %v, want nil for empty msgs", err)
 	}
 }
 
 func TestReActStrategyShouldAbortNoIdenticalSigsDoesNotAbort(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc1 := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"a"}`}}
 	tc2 := llm.ToolCall{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"b"}`}}
 	tc3 := llm.ToolCall{ID: "c3", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"c"}`}}
@@ -2115,7 +2115,7 @@ func TestReActStrategyShouldAbortNoIdenticalSigsDoesNotAbort(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbortAllEmptyArgsDoesNotHitIdenticalLimit(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil)
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m"}, nil, nil)
 	tc1 := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: ""}}
 	tc2 := llm.ToolCall{ID: "c2", Function: llm.FunctionCall{Name: "ls", Arguments: ""}}
 	tc3 := llm.ToolCall{ID: "c3", Function: llm.FunctionCall{Name: "ls", Arguments: ""}}

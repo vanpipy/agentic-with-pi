@@ -1016,7 +1016,7 @@ func TestReActStrategyStep_ContinuesOnToolCalls(t *testing.T) {
 		messageDeltaStopChunk("tool_use"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	noop := func(context.Context, agentcore.Event) bool { return true }
 
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "explore"}}, noop)
@@ -1043,7 +1043,7 @@ func TestReActStrategyStep_FinalAnswer(t *testing.T) {
 		messageDeltaStopChunk("end_turn"),
 		messageStopChunk(),
 	}}
-	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(core, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	noop := func(context.Context, agentcore.Event) bool { return true }
 
 	step, err := strat.Step(context.Background(), []llm.Message{{Role: "user", Content: "?"}}, noop)
@@ -1062,7 +1062,7 @@ func TestReActStrategyStep_FinalAnswer(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbort_RepeatedCalls(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	tc := llm.ToolCall{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}
 	msgs := []llm.Message{
 		{Role: "user", Content: "explore"},
@@ -1079,7 +1079,7 @@ func TestReActStrategyShouldAbort_RepeatedCalls(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbort_RepeatedErrors(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	errMsg := "Tool ls failed: kaboom"
 	msgs := []llm.Message{
 		{Role: "user", Content: "ls"},
@@ -1095,7 +1095,7 @@ func TestReActStrategyShouldAbort_RepeatedErrors(t *testing.T) {
 }
 
 func TestReActStrategyShouldAbort_NormalHistory(t *testing.T) {
-	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil })
+	strat := agentcore.NewReActStrategy(&fakeCore{}, llm.Model{ID: "m", SupportsTool: true}, func() []llm.ToolDef { return nil }, nil)
 	msgs := []llm.Message{
 		{Role: "user", Content: "explore"},
 		{Role: "assistant", ToolCalls: []llm.ToolCall{{ID: "c1", Function: llm.FunctionCall{Name: "ls", Arguments: `{"path":"."}`}}}},
