@@ -54,14 +54,16 @@ type RuntimeOpts struct {
 }
 
 // DefaultRuntimeOpts returns the production defaults documented in
-// ADR §7.5 and ADR §15. Tests should clone and override, not mutate.
+// ADR §7.5 and ADR §15. Durations are read from the wire package's
+// test-overridable globals so test code that swaps them propagates here.
+// Tests should clone and override, not mutate the wire globals.
 func DefaultRuntimeOpts() RuntimeOpts {
 	return RuntimeOpts{
 		MaxMembersPerSwarm:   swarmproto.SpawnAdmissionPerSwarm,
-		HeartbeatInterval:    10 * time.Second,
-		StaleAfter:           45 * time.Second,
-		IdleReapAfter:        30 * time.Minute,
-		PersistBatchInterval: 5 * time.Second,
+		HeartbeatInterval:    swarmproto.HeartbeatInterval,
+		StaleAfter:           swarmproto.StaleAfter,
+		IdleReapAfter:        swarmproto.IdleReapAfter,
+		PersistBatchInterval: swarmproto.PersistBatchAfter,
 		AwaitDefaultTimeout:  time.Duration(swarmproto.AwaitDefaultTimeoutSeconds) * time.Second,
 		AwaitMaxTimeout:      time.Duration(swarmproto.AwaitTimeoutMaxSeconds) * time.Second,
 	}
